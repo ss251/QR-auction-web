@@ -19,10 +19,12 @@ export async function sendFrameNotification({
   fid,
   title,
   body,
+  targetUrl,
 }: {
   fid: number;
   title: string;
   body: string;
+  targetUrl?: string;
 }): Promise<SendFrameNotificationResult> {
   const notificationDetails = await getUserNotificationDetails(fid);
   if (!notificationDetails) {
@@ -38,7 +40,7 @@ export async function sendFrameNotification({
       notificationId: crypto.randomUUID(),
       title,
       body,
-      targetUrl: appUrl,
+      targetUrl: targetUrl || appUrl,
       tokens: [notificationDetails.token],
     } satisfies SendNotificationRequest),
   });
@@ -62,4 +64,80 @@ export async function sendFrameNotification({
     // Error response
     return { state: "error", error: responseJson };
   }
+}
+
+/**
+ * Send daily notification about the winning website
+ */
+export async function sendWinnerNotification({
+  fid,
+  winnerName,
+  auctionId,
+}: {
+  fid: number;
+  winnerName: string;
+  auctionId: number;
+  targetUrl: string;
+}): Promise<SendFrameNotificationResult> {
+  return sendFrameNotification({
+    fid,
+    title: `${winnerName} just won Auction #${auctionId}!`,
+    body: "Click here to check out the winning link",
+    targetUrl: `${appUrl}/auction/${auctionId}`,
+  });
+}
+
+/**
+ * Send notification to a bidder when they've been outbid
+ */
+export async function sendOutbidNotification({
+  fid,
+  auctionId,
+}: {
+  fid: number;
+  auctionId: number;
+}): Promise<SendFrameNotificationResult> {
+  return sendFrameNotification({
+    fid,
+    title: "You've been outbid!",
+    body: "Bid quickly to regain the lead before the auction ends",
+    targetUrl: `${appUrl}/auction/${auctionId}`,
+  });
+}
+
+/**
+ * Send notification when auction is ending soon (5 minutes left)
+ */
+export async function sendAuctionEndingSoonNotification({
+  fid,
+  auctionId,
+}: {
+  fid: number;
+  auctionId: number;
+}): Promise<SendFrameNotificationResult> {
+  return sendFrameNotification({
+    fid,
+    title: "🚨 5 MINUTES REMAINING IN TODAY'S AUCTION",
+    body: "BID NOW!",
+    targetUrl: `${appUrl}/auction/${auctionId}`,
+  });
+}
+
+/**
+ * Send notification to winner when they've won the auction
+ */
+export async function sendAuctionWonNotification({
+  fid,
+  auctionId,
+}: {
+  fid: number;
+  auctionId: number;
+  targetUrl?: string;
+}): Promise<SendFrameNotificationResult> {
+  return sendFrameNotification({
+    fid,
+    title: "You won today's auction!",
+    body: "The QR now points to your site for the next 24 hours",
+    targetUrl: `${appUrl}/auction/${auctionId}`,
+  });
 }

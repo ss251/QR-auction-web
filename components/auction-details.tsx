@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
 import { useCountdown } from "@/hooks/useCountdown";
@@ -34,6 +34,8 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { TypingIndicator } from "./TypingIndicator";
 import { useWhitelistStatus } from "@/hooks/useWhitelistStatus";
 import { Address } from "viem";
+import { notifyAuctionEndingSoon } from "@/utils/notificationUtils";
+import { useBidHistoryForAuction } from "@/hooks/useBidHistoryForAuction";
 
 interface AuctionDetailsProps {
   id: number;
@@ -72,14 +74,18 @@ export function AuctionDetails({
     basename: null,
     pfpUrl: null
   });
+  
+  // Track when ending soon notifications have been sent
+  const endingSoonNotificationSent = useRef(false);
 
   const { fetchHistoricalAuctions: auctionsSettled } = useFetchSettledAuc(BigInt(id));
   const { refetch, auctionDetail } = useFetchAuctionDetails(BigInt(id));
   const { refetchSettings, settingDetail } = useFetchAuctionSettings(BigInt(id));
+  const { bids: bidHistory } = useBidHistoryForAuction(BigInt(id));
 
   const { settleTxn } = useWriteActions({ tokenId: BigInt(id) });
   const { isConnected, address } = useAccount();
-  const { time, isComplete } = useCountdown(
+  const { time, isComplete, isEndingSoon, timeLeftMs } = useCountdown(
     auctionDetail?.endTime ? Number(auctionDetail.endTime) : 0
   );
   const isBaseColors = useBaseColors();
@@ -313,6 +319,74 @@ export function AuctionDetails({
     
     return `ends @ ${timeStr} ${tzAbbr}`;
   };
+
+  // Update the existing ending soon notification handler
+  useEffect(() => {
+    if (isEndingSoon && !endingSoonNotificationSent.current) {
+      endingSoonNotificationSent.current = true;
+      
+      // Keep track of bidders that have been notified
+      const notifiedBidders = new Set<string>();
+      
+      // Function to send notifications to unnotified bidders
+      const sendNotificationsToNewBidders = async () => {
+        // Get unique bidders
+        const uniqueBidders = [...new Set(bidHistory.map(bid => bid.bidder))];
+        
+        // Filter out zero address and already notified bidders
+        const unnotifiedBidders = uniqueBidders.filter(
+          bidder => 
+            bidder !== '0x0000000000000000000000000000000000000000' && 
+            !notifiedBidders.has(bidder)
+        );
+        
+        if (unnotifiedBidders.length > 0) {
+          console.log(`Notifying ${unnotifiedBidders.length} bidders about auction ending soon`);
+          
+          // Process bidders in batches to respect rate limits
+          const BATCH_SIZE = 5;
+          
+          for (let i = 0; i < unnotifiedBidders.length; i += BATCH_SIZE) {
+            const batch = unnotifiedBidders.slice(i, i + BATCH_SIZE);
+            
+            // Send notifications in parallel for this batch
+            const results = await Promise.all(
+              batch.map(async (bidder) => {
+                try {
+                  await notifyAuctionEndingSoon(bidder, BigInt(id));
+                  // Mark as notified
+                  notifiedBidders.add(bidder);
+                  return { bidder, success: true };
+                } catch (error) {
+                  console.error(`Failed to send ending soon notification to ${bidder}:`, error);
+                  return { bidder, success: false };
+                }
+              })
+            );
+            
+            const successCount = results.filter(r => r.success).length;
+            console.log(`Batch ${Math.floor(i/BATCH_SIZE) + 1}: Successfully notified ${successCount}/${batch.length} bidders`);
+            
+            // Add delay between batches if more batches to come
+            if (i + BATCH_SIZE < unnotifiedBidders.length) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
+      };
+      
+      // Send initial notifications
+      sendNotificationsToNewBidders();
+      
+      // Set up interval to check for new bidders every 30 seconds during the last 5 minutes
+      const notificationInterval = setInterval(() => {
+        sendNotificationsToNewBidders();
+      }, 30000); // Check every 30 seconds
+      
+      // Clean up interval
+      return () => clearInterval(notificationInterval);
+    }
+  }, [isEndingSoon, bidHistory, id]);
 
   return (
     <div className="space-y-6">

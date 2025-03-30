@@ -23,6 +23,7 @@ import { MIN_QR_BID } from "@/config/tokens";
 import { formatQRAmount } from "@/utils/formatters";
 import { UniswapModal } from "./ui/uniswap-modal";
 import { useState } from "react";
+import { notifyOutbid } from "@/utils/notificationUtils";
 
 export function BidForm({
   auctionDetail,
@@ -150,6 +151,9 @@ export function BidForm({
     }
 
     try {
+      // Store the current highest bidder to notify them if they're outbid
+      const previousHighestBidder = auctionDetail?.highestBidder || null;
+      
       // Convert the millions input back to full token value
       const fullBidAmount = data.bid * 1_000_000;
       
@@ -177,7 +181,18 @@ export function BidForm({
 
       toast.promise(transactionReceiptPr, {
         loading: "Executing Transaction...",
-        success: (data: any) => {
+        success: async (data: any) => {
+          // Transaction was successful, so we can now notify the previous bidder
+          if (previousHighestBidder && previousHighestBidder !== address && previousHighestBidder !== "0x0") {
+            try {
+              console.log(`Sending outbid notification to ${previousHighestBidder}`);
+              await notifyOutbid(previousHighestBidder, auctionDetail.tokenId);
+            } catch (notifError) {
+              console.error("Error sending outbid notification:", notifError);
+              // Don't break the UI flow if notification fails
+            }
+          }
+          
           reset();
           onSuccess();
           return "Bid Successful!";

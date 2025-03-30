@@ -237,7 +237,7 @@ export function useAuctionEvents({
             if (!shownToastsRef.current[eventId] || now - shownToastsRef.current[eventId] > 5000) {
               // Get identity information and then show toast
               getBidderIdentity(bidder).then(displayName => {
-                toast(`New bid: ${Number(amount) / 1e18} ETH by ${displayName}`, { 
+                toast(`New bid: ${Number(amount) / 1e18} $QR by ${displayName}`, { 
                   id: eventId,
                   duration: 5000, // Longer display time on mobile
                   icon: "🔔"
@@ -260,7 +260,7 @@ export function useAuctionEvents({
     const unwatchSettled = publicClient.watchEvent({
       address: contractAddress,
       event: AuctionSettledEvent,
-      onLogs: (logs) => {
+      onLogs: async (logs) => {
         logs.forEach((log) => {
           const { args, transactionHash } = log;
           if (!args) return;
@@ -296,6 +296,85 @@ export function useAuctionEvents({
             setTimeout(() => {
               recentEvents.delete(eventKey);
             }, COMBINE_WINDOW);
+
+            // If winner is not the null address and has won the auction, notify them
+            // We do this inside the "showToasts" block since we only want to send notifications
+            // when we would normally show toasts (i.e., not for our own transactions)
+            if (winner && winner !== '0x0000000000000000000000000000000000000000') {
+              // Implement a more robust notification function with retry
+              const sendAuctionNotifications = async (winner: string, tokenId: bigint) => {
+                try {
+                  // Check if the winner is not the zero address
+                  if (!winner || winner === '0x0000000000000000000000000000000000000000') {
+                    console.log('Skipping notifications for null/zero address winner');
+                    return;
+                  }
+                  
+                  // Max retry attempts
+                  const MAX_RETRIES = 3;
+                  
+                  // Get the winner's name for notifications
+                  let winnerDisplay: string;
+                  try {
+                    const farcasterUser = await getFarcasterUser(winner);
+                    if (farcasterUser && farcasterUser.username) {
+                      winnerDisplay = farcasterUser.username;
+                    } else {
+                      const ensName = await getName({
+                        address: winner as Address,
+                        chain: base,
+                      });
+                      winnerDisplay = ensName || `${winner.slice(0, 6)}...${winner.slice(-4)}`;
+                    }
+                  } catch (err) {
+                    console.error('Error getting winner identity:', err);
+                    winnerDisplay = `${winner.slice(0, 6)}...${winner.slice(-4)}`;
+                  }
+                  
+                  // Dynamically import notification utils to avoid circular dependencies
+                  const notifUtils = await import('@/utils/notificationUtils');
+                  
+                  // First notify the winner with retry logic
+                  let winnerNotified = false;
+                  let attempts = 0;
+                  
+                  while (!winnerNotified && attempts < MAX_RETRIES) {
+                    attempts++;
+                    try {
+                      const result = await notifUtils.notifyAuctionWon(winner, tokenId);
+                      if (result) {
+                        winnerNotified = true;
+                        console.log(`Successfully notified winner ${winnerDisplay} for auction #${tokenId}`);
+                      } else if (attempts < MAX_RETRIES) {
+                        console.log(`Failed to notify winner, attempt ${attempts}/${MAX_RETRIES}. Retrying...`);
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                      }
+                    } catch (error) {
+                      console.error(`Error in winner notification attempt ${attempts}:`, error);
+                      if (attempts < MAX_RETRIES) {
+                        // Wait before retrying
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                      }
+                    }
+                  }
+                  
+                  // Then notify all users about the daily winner
+                  try {
+                    await notifUtils.notifyDailyWinner(winnerDisplay, tokenId);
+                    console.log(`Daily winner notification sent for ${winnerDisplay}`);
+                  } catch (error) {
+                    console.error('Error sending daily winner notification:', error);
+                  }
+                } catch (error) {
+                  console.error('Error in sendAuctionNotifications:', error);
+                }
+              };
+
+              // Use the new notification function
+              sendAuctionNotifications(winner, tokenId)
+                .catch(err => console.error('Error in auction notification process:', err));
+            }
           }
           
           if (onAuctionSettled && tokenId && winner && amount !== undefined) {

@@ -19,7 +19,6 @@ import { toast } from "sonner";
 import { useSafetyDialog } from "@/hooks/useSafetyDialog";
 import { SafetyDialog } from "@/components/SafetyDialog";
 import { SafeExternalLink } from "@/components/SafeExternalLink";
-import { formatURL } from "@/utils/helperFunctions";
 import { useFetchAuctionSettings } from "@/hooks/useFetchAuctionSettings";
 import { ThemeDialog } from "@/components/ThemeDialog";
 import { useAuctionEvents } from "@/hooks/useAuctionEvents";
@@ -29,6 +28,7 @@ import clsx from "clsx";
 import { WinnerAnnouncement } from "@/components/WinnerAnnouncement";
 import { UniswapWidget } from "@/components/ui/uniswap-widget";
 import Link from "next/link";
+import { formatURL } from "@/utils/helperFunctions";
 
 interface SettingsResponse {
   data: Array<{
@@ -186,7 +186,8 @@ export default function AuctionPage() {
         16: "https://i.imgur.com/jyo2f0H.jpeg",
         21: "https://i.imgur.com/8qNqYIV.png",
         23: "https://i.imgur.com/21yjB2x.png",
-        24: "https://i.imgur.com/5gCWL3S.png"
+        24: "https://i.imgur.com/5gCWL3S.png",
+        25: "https://i.imgur.com/Q5UspzS.png"
     }),
     []
   );
@@ -226,7 +227,6 @@ export default function AuctionPage() {
       </nav>
 
       <div className="max-w-3xl mx-auto">
-        {isLoading && <Skeleton className="h-[40px] w-full mb-4" />}
         <div className="flex flex-col justify-center items-center gap-9">
           <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
             <div
@@ -284,21 +284,22 @@ export default function AuctionPage() {
                       }}
                     />
                   </div>
-                  <div className="inline-flex gap-1 italic max-w-full">
-                    <span className={clsx(isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]", "font-normal shrink-0")}>
-                      The QR coin currently points to
+                  <div className="flex flex-col items-center italic">
+                    <span className={clsx(isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]", "font-normal")}>
+                      The QR coin currently points to:
                     </span>
-                    <span className="font-medium underline truncate">
+                    <div className="w-full overflow-hidden truncate">
                       <a
                         href={ogUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center hover:opacity-80 transition-opacity"
+                        className="font-medium underline hover:opacity-80 transition-opacity"
+                        title={ogUrl}
                         aria-label="redirect"
                       >
-                        {formatURL(ogUrl)}
+                        {formatURL(ogUrl, true)}
                       </a>
-                    </span>
+                    </div>
                   </div>
                 </div>
               )}

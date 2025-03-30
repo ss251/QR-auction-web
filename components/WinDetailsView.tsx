@@ -84,7 +84,8 @@ export function WinDetailsView(winnerdata: AuctionType) {
           "15": "https://i.imgur.com/jyo2f0H.jpeg",
           "20": "https://i.imgur.com/8qNqYIV.png",
           "22": "https://i.imgur.com/21yjB2x.png",
-          "23": "https://i.imgur.com/5gCWL3S.png"
+          "23": "https://i.imgur.com/5gCWL3S.png",
+          "24": "https://i.imgur.com/Q5UspzS.png"
         };
 
         // Check if we have a custom image override for this auction
@@ -186,7 +187,7 @@ export function WinDetailsView(winnerdata: AuctionType) {
                 className={`${isBaseColors ? "text-foreground" : "text-gray-700 hover:text-gray-900"} transition-colors inline-flex items-center`}
                 onBeforeNavigate={() => false}
               >
-                {formatURL(winnerdata.url)}
+                {formatURL(winnerdata.url, true)}
                 <ExternalLink className="ml-1 h-3 w-3" />
               </SafeExternalLink>
             </div>

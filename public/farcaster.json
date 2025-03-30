@@ -1,17 +1,18 @@
 {
   "accountAssociation": {
-    "header": "eyJmaWQiOjIzNDY1OCwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDgwQTgzMzI3ZWU0NUU4NTljMkY3N0IyMzI1NzA5NGJCRmZENjU4QUUifQ",
+    "header": "eyJmaWQiOjEwMjAsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHgxN2IzZmIzYTU4ZDc1RjFFMDRDNTFEQmVCMjdDNGEwOTQyRTk3MGE1In0",
     "payload": "eyJkb21haW4iOiJxcmNvaW4uZnVuIn0",
-    "signature": "MHhmMjM0MTllMTI5NzFjZDE0MjFmMmI3YzM3NTk2YjgyNjAwNDdhNWZmZGFiZGJmNTRhYjhmOGM5ZWM2N2I0OWI0NmMyMzk2MjQ5YWY0MzU0N2ZmYWY5NTkzMGQwMDgzOThiYmYyZjdkMDA2MTk5MDNhNGI3MmRjZjY4NWY3MjRlZjFj"
+    "signature": "MHg3Y2UyNjExODBlODU2YzNhZTFmMTFkZDNhMDAxY2MwNTY3ZDc5ZmQ3ZjAzN2QwYTc5MTE4ZmM5M2M2NjQ3OTAzNGY2NjUwNzkyOWI2M2MyYTg3NTk4ZmZiODMyMTIwN2Y5MjQ5NDU5MzdlYzYzYmY3NTNmOTNlYTY2YzBlNjExYzFj"
   },
   "frame": {
     "version": "1",
-    "name": "QR Coin Mini App",
+    "name": "$QR",
     "iconUrl": "https://qrcoin.fun/qrLogo.png",
     "homeUrl": "https://qrcoin.fun",
     "imageUrl": "https://qrcoin.fun/opgIMage.png",
-    "buttonTitle": "Check this out",
+    "buttonTitle": "Launch App",
     "splashImageUrl": "https://qrcoin.fun/qrLogo.png",
-    "splashBackgroundColor": "#FFFFFF"
+    "splashBackgroundColor": "#FFFFFF",
+    "webhookUrl": "https://qrcoin.fun/api/webhook"
   }
 }

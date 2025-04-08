@@ -171,13 +171,42 @@ export function BidForm({
       // Register the transaction hash to prevent duplicate toasts
       registerTransaction(hash);
 
+      // Store previous highest bidder address for notification after transaction confirms
+      const previousBidder = auctionDetail?.highestBidder;
+      const previousBid = auctionDetail?.highestBid;
+      const auctionTokenId = auctionDetail?.tokenId;
+
       const transactionReceiptPr = waitForTransactionReceipt(config, {
         hash: hash,
       });
 
       toast.promise(transactionReceiptPr, {
         loading: "Executing Transaction...",
-        success: (data: any) => {
+        success: async (data: any) => {
+          // Send notification to previous highest bidder AFTER transaction confirms
+          if (previousBidder && 
+              previousBidder !== address &&
+              previousBidder !== "0x0000000000000000000000000000000000000000" &&
+              previousBid && previousBid > 0n) {
+            try {
+              console.log(`Sending outbid notification to previous bidder: ${previousBidder}`);
+              // Call the API to send outbid notification
+              await fetch('/api/notifications/outbid', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  bidderAddress: previousBidder,
+                  auctionId: Number(auctionTokenId),
+                }),
+              });
+            } catch (error) {
+              console.error('Failed to send outbid notification:', error);
+              // Don't block the main flow if notification fails
+            }
+          }
+          
           reset();
           onSuccess();
           return "Bid Successful!";

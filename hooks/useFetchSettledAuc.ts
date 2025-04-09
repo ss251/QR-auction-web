@@ -2,7 +2,7 @@
 import { ethers, FallbackProvider, JsonRpcProvider } from "ethers";
 import QRAuction from "../abi/QRAuction.json";
 import { useClient } from "wagmi";
-import { config } from "../config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import type { Client, Chain, Transport } from "viem";
 
 type AuctionType = {
@@ -32,7 +32,7 @@ function clientToProvider(client: Client<Transport, Chain>) {
 export function useFetchSettledAuc(tokenId?: bigint) {
   const isLegacyAuction = tokenId && tokenId <= 22n;
   const client = useClient({
-    config,
+    config: wagmiConfig,
   });
 
   const fetchHistoricalAuctions = async () => {

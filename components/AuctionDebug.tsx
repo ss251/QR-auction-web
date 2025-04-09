@@ -2,7 +2,7 @@ import { useAccount, useReadContract, useBlockNumber, useChainId } from 'wagmi';
 import { useEffect, useState } from 'react';
 import { formatEther } from 'viem';
 import QRAuction from '../abi/QRAuction.json';
-import { config } from "../config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { Address } from 'viem';
 import { formatQRAmount } from "@/utils/formatters";
 
@@ -54,14 +54,14 @@ export function AuctionDebug() {
     abi: QRAuction.abi,
     address: process.env.NEXT_PUBLIC_QRAuction as Address,
     functionName: 'auction',
-    config,
+    config: wagmiConfig,
   });
   
   const { data: settingsData, isLoading: isLoadingSettings, refetch: refetchSettings } = useReadContract({
     abi: QRAuction.abi,
     address: process.env.NEXT_PUBLIC_QRAuction as Address,
     functionName: 'settings',
-    config,
+    config: wagmiConfig,
   });
   
   // Get paused state
@@ -69,7 +69,7 @@ export function AuctionDebug() {
     abi: QRAuction.abi,
     address: process.env.NEXT_PUBLIC_QRAuction as Address,
     functionName: 'paused',
-    config,
+    config: wagmiConfig,
   });
 
   // Function to format time duration in a human-readable format

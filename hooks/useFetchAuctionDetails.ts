@@ -3,7 +3,7 @@
 import { useReadContract } from "wagmi";
 import QRAuction from "../abi/QRAuction.json";
 import { Address } from "viem";
-import { config } from "../config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { useEffect, useState } from "react";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -43,7 +43,7 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
     abi: QRAuction.abi,
     functionName: "auction",
     args: [],
-    config,
+    config: wagmiConfig,
   });
 
   useEffect(() => {

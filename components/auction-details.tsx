@@ -17,7 +17,7 @@ import { useFetchAuctionSettings } from "@/hooks/useFetchAuctionSettings";
 import { useWriteActions } from "@/hooks/useWriteActions";
 import { waitForTransactionReceipt } from "@wagmi/core";
 import { toast } from "sonner";
-import { config } from "@/config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { BidForm } from "@/components/bid-amount-view";
 import { WinDetailsView } from "@/components/WinDetailsView";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -130,7 +130,7 @@ export function AuctionDetails({
       // Register the transaction hash to prevent duplicate toasts
       registerTransaction(hash);
 
-      const transactionReceiptPr = waitForTransactionReceipt(config, {
+      const transactionReceiptPr = waitForTransactionReceipt(wagmiConfig, {
         hash: hash,
       });
 
@@ -140,6 +140,14 @@ export function AuctionDetails({
           console.log(`[DEBUG] Transaction successful, receipt:`, data);
           // After successful transaction, send notifications
           try {
+            // Skip notifications in development environment
+            const isDev = process.env.NODE_ENV === 'development';
+            
+            if (isDev) {
+              console.log('[DEV MODE] Skipping notifications in development environment');
+              return "New Auction Created";
+            }
+            
             if (auctionDetail?.highestBidder) {
               console.log(`[DEBUG] Winner address: ${auctionDetail.highestBidder}`);
               // Check if this is a zero address (auction with no bids)

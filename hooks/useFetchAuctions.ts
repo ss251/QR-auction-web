@@ -5,7 +5,7 @@ import { useEffect, useReducer, useCallback } from "react";
 import { ethers, FallbackProvider, JsonRpcProvider } from "ethers";
 import { useWatchContractEvent, useClient } from "wagmi";
 import QRAuction from "../abi/QRAuction.json";
-import { config } from "../config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { auctionReducer } from "../utils/auctionreducer";
 import { Address } from "viem";
 
@@ -43,7 +43,7 @@ export function useFetchAuctions(tokenId?: bigint) {
   const [state, dispatch] = useReducer(auctionReducer, initialState);
   const isLegacyAuction = tokenId && tokenId <= 22n;
 
-  const client = useClient({ config });
+  const client = useClient({ config: wagmiConfig });
 
   // Create a fetchHistoricalAuctions function that we can re-use
   const fetchHistoricalAuctions = useCallback(async () => {
@@ -128,7 +128,7 @@ export function useFetchAuctions(tokenId?: bigint) {
         dispatch({ type: "ADD_EVENT", auction: newEvent });
       });
     },
-    config,
+    config: wagmiConfig,
   });
 
   return { 

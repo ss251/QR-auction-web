@@ -1,7 +1,6 @@
 "use client";
 import { ThemeDialog } from "@/components/ThemeDialog";
 import React, { useCallback } from "react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { Button } from "@/components/ui/button";
 import { useAccount } from "wagmi";
 import { useState, useEffect } from "react";
@@ -14,6 +13,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { useRouter } from "next/navigation";
 import { useFetchAuctions } from "@/hooks/useFetchAuctions";
 import { QRContextMenu } from "@/components/QRContextMenu";
+import { QRUserPill } from "@/components/QRUserPill";
 
 function UI() {
   const isBaseColors = useBaseColors();
@@ -316,12 +316,7 @@ function UI() {
             <span className="hidden md:inline">Theme</span>
             <Palette className="h-4 w-4 md:hidden" />
           </Button>
-          <ConnectButton
-            accountStatus={{
-              smallScreen: "avatar",
-              largeScreen: "full",
-            }}
-          />
+          <QRUserPill size={40} />
         </div>
       </nav>
 

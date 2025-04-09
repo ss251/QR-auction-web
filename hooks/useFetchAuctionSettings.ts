@@ -3,7 +3,7 @@
 import { useReadContract } from "wagmi";
 import QRAuction from "../abi/QRAuction.json";
 import { Address } from "viem";
-import { config } from "../config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { useEffect, useState } from "react";
 
 type QRData = {
@@ -40,7 +40,7 @@ export function useFetchAuctionSettings(tokenId?: bigint) {
     abi: QRAuction.abi,
     functionName: "settings",
     args: [],
-    config,
+    config: wagmiConfig,
   });
 
   useEffect(() => {

@@ -5,7 +5,6 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { AuctionNavigation } from "@/components/auction-navigation";
 import { QRPage } from "@/components/QRPage";
 import { AuctionDetails } from "@/components/auction-details";
@@ -31,6 +30,7 @@ import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { QRContextMenu } from "@/components/QRContextMenu";
+import { QRUserPill } from "@/components/QRUserPill";
 
 interface SettingsResponse {
   data: Array<{
@@ -229,12 +229,7 @@ export default function AuctionPage() {
             Theme
           </Button>
           <div className="relative">
-            <ConnectButton
-              accountStatus={{
-                smallScreen: "avatar",
-                largeScreen: "full",
-              }}
-            />
+            <QRUserPill size={40} />
             <div className="absolute right-0 top-full mt-2 pr-1">
               <ConnectionIndicator />
             </div>

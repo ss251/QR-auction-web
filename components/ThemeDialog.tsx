@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button";
 import { useTheme } from "next-themes";
 import { useAccount } from "wagmi";
 import { useReadContract } from "wagmi";
-import { Sun, Moon, Palette, Wallet, Settings } from "lucide-react";
+import { Sun, Moon, Palette, Settings, Wallet } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useBaseColors } from "@/hooks/useBaseColors";
+import { usePrivy } from "@privy-io/react-auth";
+import { cn } from "@/lib/utils";
 
 interface ThemeDialogProps {
   open: boolean;
@@ -19,9 +20,10 @@ interface ThemeDialogProps {
 }
 
 export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
-  const { setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const isBaseColors = useBaseColors();
   const { address, isConnected } = useAccount();
+  const { login, authenticated, logout } = usePrivy();
   const initialMount = useRef(true);
   const isTestnet = process.env.NEXT_PUBLIC_ENABLE_TESTNETS === "true";
   const basecolorsThemeSettingsContractAddress =
@@ -111,6 +113,20 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
     }
   };
 
+  // Check if the wallet is truly connected - using both wagmi and privy states
+  const walletIsConnected = isConnected && authenticated;
+
+  // Create theme-aware button classes for consistent styling
+  const getButtonClass = (isActive: boolean) => {
+    return cn(
+      "w-full",
+      isBaseColors 
+        ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none hover:border-none" 
+        : "",
+      isActive && !isBaseColors && "bg-secondary"
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[300px] bg-background">
@@ -120,7 +136,7 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
         <div className="grid gap-4 py-4">
           <Button
             variant="outline"
-            className={`${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none hover:border-none" : ""}`}
+            className={getButtonClass(theme === "light")}
             onClick={() => {
               clearCustomColors();
               setTheme("light");
@@ -132,7 +148,7 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
           </Button>
           <Button
             variant="outline"
-            className={`${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
+            className={getButtonClass(theme === "dark")}
             onClick={() => {
               clearCustomColors();
               setTheme("dark");
@@ -142,59 +158,57 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
             <Moon className="mr-2 h-4 w-4" />
             Dark Mode
           </Button>
-          <ConnectButton.Custom>
-            {({ openConnectModal }) => (
+          <Button
+            variant="outline"
+            className={getButtonClass(isBaseColors)}
+            onClick={() => {
+              if (walletIsConnected) {
+                if (!colors) {
+                  window.location.href = "/ui";
+                  return;
+                }
+                if (
+                  colors.every(
+                    (c, i) => c === ["#000000", "#FFFFFF", "#000000"][i]
+                  )
+                ) {
+                  alert(
+                    "Please configure your theme by clicking the settings icon in the bottom right corner of the \"Choose Theme\" popup"
+                  );
+                  return;
+                }
+                handleBaseColorsMode();
+              } else {
+                login();
+              }
+            }}
+          >
+            <Palette className="mr-2 h-4 w-4" />
+            {walletIsConnected ? "Base Colors" : "Connect Wallet"}
+          </Button>
+
+          {walletIsConnected && (
+            <div className="flex w-full gap-2 justify-center">
               <Button
                 variant="outline"
-                className={`${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
+                className={cn(
+                  isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : "",
+                  "w-1/2"
+                )}
                 onClick={() => {
-                  if (isConnected) {
-                    if (!colors) {
-                      window.location.href = "/ui";
-                      return;
-                    }
-                    if (
-                      colors.every(
-                        (c, i) => c === ["#000000", "#FFFFFF", "#000000"][i]
-                      )
-                    ) {
-                      alert(
-                        "Please configure your theme by clicking the settings icon in the bottom right corner of the \"Choose Theme\" popup"
-                      );
-                      return;
-                    }
-                    handleBaseColorsMode();
-                  } else {
-                    openConnectModal();
-                  }
+                  logout();
+                  onOpenChange(false);
                 }}
               >
-                <Palette className="mr-2 h-4 w-4" />
-                {isConnected ? "Base Colors" : "Connect Wallet"}
+                <Wallet className="mr-2 h-4 w-4" />
               </Button>
-            )}
-          </ConnectButton.Custom>
-
-          {isConnected && (
-            <div className="flex w-full gap-2 justify-center">
-              <ConnectButton.Custom>
-                {({ openAccountModal }) => (
-                  <Button
-                    variant="outline"
-                    className={`${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""} w-1/2`}
-                    onClick={() => {
-                      openAccountModal();
-                      onOpenChange(false);
-                    }}
-                  >
-                    <Wallet className="mr-2 h-4 w-4" />
-                  </Button>
-                )}
-              </ConnectButton.Custom>
 
               <Button
                 variant="outline"
-                className={`${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""} w-1/2`}
+                className={cn(
+                  isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : "",
+                  "w-1/2"
+                )}
                 onClick={() => (window.location.href = "/ui")}
               >
                 <Settings className="mr-2 h-4 w-4" />

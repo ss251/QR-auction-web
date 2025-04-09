@@ -9,7 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { waitForTransactionReceipt } from "@wagmi/core";
 import { toast } from "sonner";
 import { useWriteActions } from "@/hooks/useWriteActions";
-import { config } from "@/config/config";
+import { wagmiConfig } from "@/config/wagmiConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAccount, useBalance } from "wagmi";
@@ -176,7 +176,7 @@ export function BidForm({
       const previousBid = auctionDetail?.highestBid;
       const auctionTokenId = auctionDetail?.tokenId;
 
-      const transactionReceiptPr = waitForTransactionReceipt(config, {
+      const transactionReceiptPr = waitForTransactionReceipt(wagmiConfig, {
         hash: hash,
       });
 
@@ -188,22 +188,29 @@ export function BidForm({
               previousBidder !== address &&
               previousBidder !== "0x0000000000000000000000000000000000000000" &&
               previousBid && previousBid > 0n) {
-            try {
-              console.log(`Sending outbid notification to previous bidder: ${previousBidder}`);
-              // Call the API to send outbid notification
-              await fetch('/api/notifications/outbid', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  bidderAddress: previousBidder,
-                  auctionId: Number(auctionTokenId),
-                }),
-              });
-            } catch (error) {
-              console.error('Failed to send outbid notification:', error);
-              // Don't block the main flow if notification fails
+            
+            // Skip notifications in development environment
+            const isDev = process.env.NODE_ENV === 'development';
+            if (!isDev) {
+              try {
+                console.log(`Sending outbid notification to previous bidder: ${previousBidder}`);
+                // Call the API to send outbid notification
+                await fetch('/api/notifications/outbid', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    bidderAddress: previousBidder,
+                    auctionId: Number(auctionTokenId),
+                  }),
+                });
+              } catch (error) {
+                console.error('Failed to send outbid notification:', error);
+                // Don't block the main flow if notification fails
+              }
+            } else {
+              console.log('[DEV MODE] Skipping outbid notification in development environment');
             }
           }
           

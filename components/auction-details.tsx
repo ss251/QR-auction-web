@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 
 import { useCountdown } from "@/hooks/useCountdown";
 import { BidHistoryDialog } from "./bid-history-dialog";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { HowItWorksDialog } from "./HowItWorksDialog";
 
 import { useFetchSettledAuc } from "@/hooks/useFetchSettledAuc";
@@ -336,13 +336,22 @@ export function AuctionDetails({
       auctionDetail.highestBid > 0n;
     
     if (isAuctionActive) {
-      const currentBid = Number(formatEther(auctionDetail.highestBid));
-      const usdValue = qrPrice ? currentBid * qrPrice : 0;
-      const formattedQR = formatQRAmount(currentBid);
-      const bidText = `${formattedQR} $QR ${usdValue > 0 ? `(${formatUsdValue(usdValue)})` : ''}`;
-      document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
+      if (isV3Auction) {
+        // For V3 auctions, use USDC format (6 decimals)
+        const currentBid = Number(formatUnits(auctionDetail.highestBid, 6));
+        // For whole numbers, don't show decimal places
+        const bidText = Number.isInteger(currentBid) ? `${currentBid} USDC` : `${currentBid.toFixed(2)} USDC`;
+        document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
+      } else {
+        // For legacy and V2 auctions, use QR format (18 decimals)
+        const currentBid = Number(formatEther(auctionDetail.highestBid));
+        const usdValue = qrPrice ? currentBid * qrPrice : 0;
+        const formattedQR = formatQRAmount(currentBid);
+        const bidText = `${formattedQR} $QR ${usdValue > 0 ? `(${formatUsdValue(usdValue)})` : ''}`;
+        document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
+      }
     }
-  }, [auctionDetail, qrPrice, bidderNameInfo.displayName, isLoading]);
+  }, [auctionDetail, qrPrice, bidderNameInfo.displayName, isLoading, isV3Auction]);
 
   useEffect(() => {
     const ftSetled = async () => {
@@ -544,14 +553,19 @@ export function AuctionDetails({
                       <div className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"}`}>Current bid</div>
                       <div className="flex flex-row items-center gap-1">
                         <div className="text-xl md:text-2xl font-bold">
-                          {formatQRAmount(Number(formatEther(
-                            auctionDetail?.highestBid
-                              ? auctionDetail.highestBid
-                              : 0n
-                          )))} {isLegacyAuction ? 'ETH' : isV2Auction ? '$QR' : '$USDC'}
+                          {isV3Auction ? (
+                            // For V3 auctions, USDC has 6 decimals, not 18
+                            `${formatUnits(auctionDetail?.highestBid || 0n, 6)} USDC`
+                          ) : isLegacyAuction ? (
+                            // For legacy auctions (V1), show ETH
+                            `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} ETH`
+                          ) : (
+                            // For V2 auctions, show QR
+                            `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} $QR`
+                          )}
                         </div>
                         <div className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"}`}>
-                          {usdBalance !== 0 && `(${formatUsdValue(usdBalance)})`}
+                          {usdBalance !== 0 && !isV3Auction && `(${formatUsdValue(usdBalance)})`}
                         </div>
                       </div>
                       <div className="h-4 mt-1 overflow-hidden" style={{ minHeight: "18px" }}>
@@ -566,7 +580,7 @@ export function AuctionDetails({
                         <div className={`${isBaseColors ? "text-foreground" : ""} text-right text-xl md:text-2xl font-bold whitespace-nowrap`}>
                           {time}
                         </div>
-                        <div className={`${isBaseColors ? "text-foreground/80" : "text-gray-500 dark:text-gray-400"} text-right text-xs` }>
+                        <div className={`${isBaseColors ? "text-foreground/80" : "text-gray-500 dark:text-gray-400"} text-right text-xs`}>
                           {formatEndTime()}
                         </div>
                       </div>
@@ -603,12 +617,7 @@ export function AuctionDetails({
                             Settle and create auction
                           </Button>
                         ) : (
-                          <div className="border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-900/30 rounded-md p-3 text-amber-800 dark:text-amber-200">
-                            <p className="text-sm">
-                              This completed auction is from a previous version (V{isLegacyAuction ? '1' : '2'}) and is read-only.
-                              Only the current V3 auctions (ID 36+) can be settled.
-                            </p>
-                          </div>
+                          <></>
                         )}
                       </>
                     )}
@@ -656,7 +665,13 @@ export function AuctionDetails({
                         <div>
                           <div className="text-gray-600 dark:text-[#696969]">Winning bid</div>
                           <div className="text-2xl font-bold">
-                            {formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} {isLegacyAuction ? 'ETH' : isV2Auction ? '$QR' : '$USDC'}
+                            {isV3Auction ? (
+                              `${formatUnits(auctionDetail?.highestBid || 0n, 6)} USDC`
+                            ) : isLegacyAuction ? (
+                              `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} ETH`
+                            ) : (
+                              `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} $QR`
+                            )}
                           </div>
                         </div>
                         <div>

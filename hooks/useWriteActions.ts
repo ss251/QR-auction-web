@@ -69,13 +69,13 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
       // Wait for approval to complete
       await new Promise(resolve => setTimeout(resolve, 5000));
       
-      // Then call createBid on the V3 contract
+      // Use the 3-parameter version of createBid instead of the backward compatibility one
       console.log("Placing bid with URL:", urlString);
       const tx = await bidAuction({
         address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
         abi: QRAuctionV3.abi,
         functionName: "createBid",
-        args: [tokenId, urlString],
+        args: [tokenId, urlString, ""], // Add empty string as name parameter
       });
 
       return tx;

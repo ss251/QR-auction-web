@@ -1,6 +1,8 @@
 "use client";
 import { ethers, FallbackProvider, JsonRpcProvider } from "ethers";
 import QRAuction from "../abi/QRAuction.json";
+import QRAuctionV2 from "../abi/QRAuctionV2.json";
+import QRAuctionV3 from "../abi/QRAuctionV3.json";
 import { useClient } from "wagmi";
 import { wagmiConfig } from "@/config/wagmiConfig";
 import type { Client, Chain, Transport } from "viem";
@@ -51,13 +53,29 @@ export function useFetchSettledAuc(tokenId?: bigint) {
     }
   };
 
+  // Get the correct ABI based on tokenId
+  const getContractAbi = () => {
+    if (isLegacyAuction) {
+      return QRAuction.abi;
+    } else if (isV2Auction) {
+      return QRAuctionV2.abi;
+    } else if (isV3Auction) {
+      return QRAuctionV3.abi;
+    } else {
+      // Default to V3 ABI for any new auctions
+      return QRAuctionV3.abi;
+    }
+  };
+
   const fetchHistoricalAuctions = async () => {
     try {
       const provider = clientToProvider(client);
       const contractAddress = getContractAddress();
+      const contractAbi = getContractAbi();
+      
       const contract = new ethers.Contract(
         contractAddress,
-        QRAuction.abi,
+        contractAbi,
         provider
       );
 

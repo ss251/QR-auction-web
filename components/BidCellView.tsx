@@ -1,5 +1,5 @@
 "use client";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { Address } from "viem";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -16,7 +16,7 @@ import { SafeExternalLink } from "./SafeExternalLink";
 import { WarpcastLogo } from "./WarpcastLogo";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { useBaseColors } from "@/hooks/useBaseColors";
-import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
+import { formatQRAmount } from "@/utils/formatters";
 
 type AuctionType = {
   tokenId: bigint;
@@ -53,7 +53,11 @@ export function BidCellView({
   const isLegacyAuction = bid.tokenId <= 22n;
   const isV2Auction = bid.tokenId >= 23n && bid.tokenId <= 35n;
   const isV3Auction = bid.tokenId >= 36n;
-  const amount = Number(formatEther(bid.amount));
+  
+  // Calculate amount based on auction type
+  const amount = isV3Auction 
+    ? Number(formatUnits(bid.amount, 6)) // USDC has 6 decimals
+    : Number(formatEther(bid.amount)); // ETH and QR have 18 decimals
 
   function formatAmount(amount: number, isLegacy: boolean, isV2: boolean, isV3: boolean) {
     if (isLegacy) {
@@ -61,7 +65,8 @@ export function BidCellView({
     } else if (isV2) {
       return `${formatQRAmount(amount)} $QR`;
     } else if (isV3) {
-      return `${formatUsdValue(amount)} $USDC`;
+      // For whole numbers, don't show decimal places
+      return Number.isInteger(amount) ? `${amount} USDC` : `${amount.toFixed(2)} USDC`;
     }
   }
 

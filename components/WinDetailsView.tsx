@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
-import { formatEther } from "viem";
+import { formatEther, formatUnits } from "viem";
 import { Address } from "viem";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -36,13 +36,15 @@ export function WinDetailsView(winnerdata: AuctionType) {
   const { priceUsd: qrPrice } = useTokenPrice();
   const { ethPrice } = useEthPrice();
 
-  // Calculate token amount
-  const tokenAmount = Number(formatEther(winnerdata.amount));
-  
   // Check auction version based on tokenId
   const isLegacyAuction = winnerdata.tokenId <= 22n;
   const isV2Auction = winnerdata.tokenId >= 23n && winnerdata.tokenId <= 35n;
   const isV3Auction = winnerdata.tokenId >= 36n;
+  
+  // Calculate token amount based on auction type
+  const tokenAmount = isV3Auction
+    ? Number(formatUnits(winnerdata.amount, 6)) // USDC has 6 decimals
+    : Number(formatEther(winnerdata.amount)); // ETH and QR have 18 decimals
   
   // Calculate value based on auction type
   const currentEthPrice = ethPrice?.ethereum?.usd || 0;
@@ -138,7 +140,8 @@ export function WinDetailsView(winnerdata: AuctionType) {
     } else if (isV2Auction) {
       return `${formatQRAmount(tokenAmount)} $QR`;
     } else if (isV3Auction) {
-      return `${formatUsdValue(tokenAmount)} $USDC`;
+      // For whole numbers, don't show decimal places
+      return Number.isInteger(tokenAmount) ? `${tokenAmount} USDC` : `${tokenAmount.toFixed(2)} USDC`;
     }
     return '';
   };
@@ -150,7 +153,7 @@ export function WinDetailsView(winnerdata: AuctionType) {
     } else if (isV2Auction && qrPrice) {
       return `(${formatUsdValue(qrBalance)})`;
     } else if (isV3Auction) {
-      // USDC is already USD pegged
+      // USDC is already USD pegged, no need for additional display
       return '';
     }
     return '';

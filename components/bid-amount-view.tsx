@@ -3,7 +3,7 @@
 "use client";
 
 import { z } from "zod";
-import { formatEther, parseUnits } from "viem";
+import { formatEther, parseUnits, formatUnits } from "viem";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { waitForTransactionReceipt } from "@wagmi/core";
@@ -68,7 +68,9 @@ export function BidForm({
   const lastHighestBid = auctionDetail?.highestBid
     ? auctionDetail.highestBid
     : 0n;
-  const minBidIncrement = BigInt("10"); // 10%
+  const minBidIncrement = settingDetail?.minBidIncrement 
+    ? BigInt(settingDetail.minBidIncrement) 
+    : BigInt("10"); // 10% fallback if not available
   const hundred = BigInt("100");
 
   // Compute the increment and the minBid
@@ -77,7 +79,9 @@ export function BidForm({
   // Calculate full token value based on auction type
   const fullMinimumBid = lastHighestBid === 0n 
     ? (isV3Auction ? 5 : MIN_QR_BID) // For V3, we use 5 USDC flat minimum
-    : Number(formatEther(lastHighestBid + increment));
+    : isV3Auction 
+      ? Number(formatUnits(lastHighestBid + increment, 6)) // USDC has 6 decimals
+      : Number(formatEther(lastHighestBid + increment)); // ETH/QR have 18 decimals
     
   // Display value in millions for QR, or in actual value for USDC
   const rawDisplayMinimumBid = isV3Auction 
@@ -171,8 +175,8 @@ export function BidForm({
     try {
       // Calculate bid amount based on auction type
       const fullBidAmount = isV3Auction 
-        ? data.bid 
-        : data.bid * 1_000_000;
+        ? data.bid  // For USDC, use the actual value without multiplying
+        : data.bid * 1_000_000; // For QR, multiply by 1M
       
       // Check if user has enough tokens
       let hasEnoughTokens = false;
@@ -180,7 +184,7 @@ export function BidForm({
       
       if (isV3Auction) {
         hasEnoughTokens = !!(usdcBalance && Number(usdcBalance.formatted) >= fullBidAmount);
-        tokenSymbol = '$USDC';
+        tokenSymbol = 'USDC';
       } else {
         hasEnoughTokens = !!(qrBalance && Number(qrBalance.formatted) >= fullBidAmount);
         tokenSymbol = '$QR';
@@ -193,8 +197,13 @@ export function BidForm({
         return;
       }
       
+      // For V3/USDC, use 6 decimal places instead of 18
+      const bidValue = isV3Auction
+        ? parseUnits(`${fullBidAmount}`, 6)  // USDC has 6 decimals
+        : parseUnits(`${fullBidAmount}`, 18); // QR/ETH have 18 decimals
+      
       const hash = await bidAmount({
-        value: parseUnits(`${fullBidAmount}`, 18),
+        value: bidValue,
         urlString: data.url,
       });
       
@@ -280,7 +289,7 @@ export function BidForm({
             onInput={handleInputChange}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
-            {isV3Auction ? '$USDC' : 'M $QR'}
+            {isV3Auction ? 'USDC' : 'M $QR'}
           </div>
           {errors.bid && (
             <p className="text-red-500 text-sm mt-1">{errors.bid.message}</p>
@@ -331,7 +340,7 @@ export function BidForm({
             "bg-gray-900 hover:bg-gray-800"
           } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
         >
-          {isV3Auction ? 'Buy $USDC' : 'Buy $QR'}
+          {isV3Auction ? 'Buy USDC' : 'Buy $QR'}
         </Button>
         <UniswapModal
           open={showUniswapModal}

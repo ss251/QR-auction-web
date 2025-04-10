@@ -315,7 +315,7 @@ export function AuctionDetails({
       
       return () => clearTimeout(fetchTimer);
     }
-  }, [id, contractReadError, settingsError]);
+  }, [id]); // Only depend on id to prevent circular dependencies
 
   // Update document title with current bid
   useEffect(() => {
@@ -432,9 +432,13 @@ export function AuctionDetails({
     },
     onAuctionCreated: (tokenId, startTime, endTime) => {
       console.log(`Real-time update: New auction #${tokenId} created`);
-      // The main page already handles updating to the latest auction
-      // We don't need to call onNext() here as it causes double navigation
-      // The parent component (page.tsx) already updates currentAuctionId
+      
+      // If we're on the latest auction, refresh data for the newly created auction
+      if (isLatest) {
+        console.log(`Refreshing data for new auction #${tokenId}`);
+        refetch();
+        refetchSettings();
+      }
     },
     showToasts: false // Disable toasts in this component as they're already shown in the main page
   });

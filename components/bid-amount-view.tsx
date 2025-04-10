@@ -19,8 +19,8 @@ import { formatURL } from "@/utils/helperFunctions";
 import { registerTransaction } from "@/hooks/useAuctionEvents";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import { useTypingStatus } from "@/hooks/useTypingStatus";
-import { MIN_QR_BID } from "@/config/tokens";
-import { formatQRAmount } from "@/utils/formatters";
+import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
+import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
 import { UniswapModal } from "./ui/uniswap-modal";
 import { useState } from "react";
 
@@ -40,11 +40,24 @@ export function BidForm({
   const { isConnected, address } = useAccount();
   const { handleTypingStart } = useTypingStatus();
   
-  // Get user's QR token balance
+  // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
+  const isLegacyAuction = auctionDetail?.tokenId <= 22n;
+  const isV2Auction = auctionDetail?.tokenId >= 23n && auctionDetail?.tokenId <= 35n;
+  const isV3Auction = auctionDetail?.tokenId >= 36n;
+  
+  // Set token addresses based on auction type
   const qrTokenAddress = "0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"; // QR token address
+  const usdcTokenAddress = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"; // USDC token address on Base
+  
+  // Get user's token balance based on auction type
   const { data: qrBalance } = useBalance({
     address,
     token: qrTokenAddress as `0x${string}`,
+  });
+  
+  const { data: usdcBalance } = useBalance({
+    address,
+    token: usdcTokenAddress as `0x${string}`,
   });
   
   const { bidAmount } = useWriteActions({
@@ -61,16 +74,22 @@ export function BidForm({
   // Compute the increment and the minBid
   const increment = (lastHighestBid * minBidIncrement) / hundred;
   
-  // Calculate full QR value
+  // Calculate full token value based on auction type
   const fullMinimumBid = lastHighestBid === 0n 
-    ? MIN_QR_BID 
+    ? (isV3Auction ? 5 : MIN_QR_BID) // For V3, we use 5 USDC flat minimum
     : Number(formatEther(lastHighestBid + increment));
     
-  // Display value in millions (divide by 1M)
-  const rawDisplayMinimumBid = fullMinimumBid / 1_000_000;
+  // Display value in millions for QR, or in actual value for USDC
+  const rawDisplayMinimumBid = isV3Auction 
+    ? fullMinimumBid  // For USDC, show the actual value (no division)
+    : fullMinimumBid / 1_000_000; // For QR, divide by 1M
   
   // Determine the required decimal places dynamically
   const minDecimalPlaces = (() => {
+    // For USDC, we use 2 decimal places
+    if (isV3Auction) return 2;
+    
+    // For QR tokens, calculate based on the value
     // Get the fractional part
     const fractionalPart = rawDisplayMinimumBid % 1;
     if (fractionalPart === 0) return 1; // At least 1 decimal place for readability
@@ -150,15 +169,26 @@ export function BidForm({
     }
 
     try {
-      // Convert the millions input back to full token value
-      const fullBidAmount = data.bid * 1_000_000;
+      // Calculate bid amount based on auction type
+      const fullBidAmount = isV3Auction 
+        ? data.bid 
+        : data.bid * 1_000_000;
       
-      // Check if user has enough QR tokens
-      const hasEnoughQR = qrBalance && Number(qrBalance.formatted) >= fullBidAmount;
+      // Check if user has enough tokens
+      let hasEnoughTokens = false;
+      let tokenSymbol = '';
+      
+      if (isV3Auction) {
+        hasEnoughTokens = !!(usdcBalance && Number(usdcBalance.formatted) >= fullBidAmount);
+        tokenSymbol = '$USDC';
+      } else {
+        hasEnoughTokens = !!(qrBalance && Number(qrBalance.formatted) >= fullBidAmount);
+        tokenSymbol = '$QR';
+      }
 
-      if (!hasEnoughQR) {
-        // Open Uniswap swap modal instead of showing an error
-        toast.info("You don't have enough $QR tokens for this bid");
+      if (!hasEnoughTokens) {
+        // Show appropriate message based on token type
+        toast.info(`You don't have enough ${tokenSymbol} tokens for this bid`);
         setShowUniswapModal(true);
         return;
       }
@@ -227,6 +257,9 @@ export function BidForm({
     }
   };
 
+  // Determine the token symbol suffix based on auction type
+  const tokenSuffix = isV3Auction ? 'USDC' : 'M $QR';
+
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
       <div className="flex flex-col gap-2">
@@ -247,7 +280,7 @@ export function BidForm({
             onInput={handleInputChange}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
-            M $QR
+            {isV3Auction ? '$USDC' : 'M $QR'}
           </div>
           {errors.bid && (
             <p className="text-red-500 text-sm mt-1">{errors.bid.message}</p>
@@ -298,13 +331,16 @@ export function BidForm({
             "bg-gray-900 hover:bg-gray-800"
           } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
         >
-          Buy $QR
+          {isV3Auction ? 'Buy $USDC' : 'Buy $QR'}
         </Button>
         <UniswapModal
           open={showUniswapModal}
           onOpenChange={setShowUniswapModal}
           inputCurrency="NATIVE"
-          outputCurrency="0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"
+          outputCurrency={isV3Auction ? 
+            "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" : // USDC
+            "0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"   // QR
+          }
         />
 
         {displayUrl !== "" && (

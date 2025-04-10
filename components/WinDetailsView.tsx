@@ -36,14 +36,20 @@ export function WinDetailsView(winnerdata: AuctionType) {
   const { priceUsd: qrPrice } = useTokenPrice();
   const { ethPrice } = useEthPrice();
 
-  // Calculate QR token balance and USD value instead of ETH
-  const qrTokenAmount = Number(formatEther(winnerdata.amount));
-  const usdBalance = qrPrice ? qrTokenAmount * qrPrice : 0;
+  // Calculate token amount
+  const tokenAmount = Number(formatEther(winnerdata.amount));
   
-  // Check if tokenId is between 1-22 to determine if we show ETH or QR
+  // Check auction version based on tokenId
   const isLegacyAuction = winnerdata.tokenId <= 22n;
+  const isV2Auction = winnerdata.tokenId >= 23n && winnerdata.tokenId <= 35n;
+  const isV3Auction = winnerdata.tokenId >= 36n;
+  
+  // Calculate value based on auction type
   const currentEthPrice = ethPrice?.ethereum?.usd || 0;
-  const ethBalance = isLegacyAuction ? qrTokenAmount * currentEthPrice : 0;
+  const ethBalance = isLegacyAuction ? tokenAmount * currentEthPrice : 0;
+  const qrBalance = isV2Auction ? (qrPrice ? tokenAmount * qrPrice : 0) : 0;
+  // For V3, the amount is already in USDC which is a stablecoin pegged to USD
+  const usdcBalance = isV3Auction ? tokenAmount : 0;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -125,6 +131,31 @@ export function WinDetailsView(winnerdata: AuctionType) {
     fetchOgImage();
   }, [winnerdata.url, winnerdata.tokenId]);
 
+  // Helper function to format bid amount based on auction type
+  const formatBidAmount = () => {
+    if (isLegacyAuction) {
+      return `${formatQRAmount(tokenAmount)} ETH`;
+    } else if (isV2Auction) {
+      return `${formatQRAmount(tokenAmount)} $QR`;
+    } else if (isV3Auction) {
+      return `${formatUsdValue(tokenAmount)} $USDC`;
+    }
+    return '';
+  };
+
+  // Helper function to format value in USD
+  const formatUsdValueDisplay = (): string => {
+    if (isLegacyAuction && ethBalance > 0) {
+      return `($${ethBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+    } else if (isV2Auction && qrPrice) {
+      return `(${formatUsdValue(qrBalance)})`;
+    } else if (isV3Auction) {
+      // USDC is already USD pegged
+      return '';
+    }
+    return '';
+  };
+
   return (
     <>
       <div className="flex flex-row justify-between items-start gap-1">
@@ -140,11 +171,7 @@ export function WinDetailsView(winnerdata: AuctionType) {
           </div>
           <div className="inline-flex flex-row justify-center items-center gap-1">
             <div className="text-xl font-bold">
-              {formatQRAmount(Number(formatEther(winnerdata?.amount || 0n)))} {isLegacyAuction ? 'ETH' : '$QR'} {
-                isLegacyAuction 
-                  ? ethBalance > 0 ? `($${ethBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})` : ''
-                  : qrPrice ? `(${formatUsdValue(usdBalance)})` : ''
-              }
+              {formatBidAmount()} {formatUsdValueDisplay()}
             </div>
           </div>
         </div>

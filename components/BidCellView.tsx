@@ -16,7 +16,7 @@ import { SafeExternalLink } from "./SafeExternalLink";
 import { WarpcastLogo } from "./WarpcastLogo";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { useBaseColors } from "@/hooks/useBaseColors";
-import { formatQRAmount } from "@/utils/formatters";
+import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
 
 type AuctionType = {
   tokenId: bigint;
@@ -49,15 +49,20 @@ export function BidCellView({
     pfpUrl: null
   });
 
-  // Check if it's a legacy auction (1-22)
+  // Check auction version based on tokenId
   const isLegacyAuction = bid.tokenId <= 22n;
+  const isV2Auction = bid.tokenId >= 23n && bid.tokenId <= 35n;
+  const isV3Auction = bid.tokenId >= 36n;
   const amount = Number(formatEther(bid.amount));
 
-  function formatAmount(amount: number, isLegacy: boolean) {
+  function formatAmount(amount: number, isLegacy: boolean, isV2: boolean, isV3: boolean) {
     if (isLegacy) {
       return `Ξ ${amount.toFixed(3)}`;
+    } else if (isV2) {
+      return `${formatQRAmount(amount)} $QR`;
+    } else if (isV3) {
+      return `${formatUsdValue(amount)} $USDC`;
     }
-    return `${formatQRAmount(amount)} $QR`;
   }
 
   function formatURL(url: string) {
@@ -167,7 +172,7 @@ export function BidCellView({
         </div>
       </div>
       <p className="font-mono text-sm font-medium whitespace-nowrap ml-4">
-        {formatAmount(amount, isLegacyAuction)}
+        {formatAmount(amount, isLegacyAuction, isV2Auction, isV3Auction)}
       </p>
     </div>
   );

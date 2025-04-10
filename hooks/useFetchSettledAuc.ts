@@ -31,15 +31,32 @@ function clientToProvider(client: Client<Transport, Chain>) {
 
 export function useFetchSettledAuc(tokenId?: bigint) {
   const isLegacyAuction = tokenId && tokenId <= 22n;
+  const isV2Auction = tokenId && tokenId >= 23n && tokenId <= 35n;
+  const isV3Auction = tokenId && tokenId >= 36n;
   const client = useClient({
     config: wagmiConfig,
   });
 
+  // Get the correct contract address based on tokenId
+  const getContractAddress = () => {
+    if (isLegacyAuction) {
+      return process.env.NEXT_PUBLIC_QRAuction as string;
+    } else if (isV2Auction) {
+      return process.env.NEXT_PUBLIC_QRAuctionV2 as string;
+    } else if (isV3Auction) {
+      return process.env.NEXT_PUBLIC_QRAuctionV3 as string;
+    } else {
+      // Default to V3 contract for any new auctions
+      return process.env.NEXT_PUBLIC_QRAuctionV3 as string;
+    }
+  };
+
   const fetchHistoricalAuctions = async () => {
     try {
       const provider = clientToProvider(client);
+      const contractAddress = getContractAddress();
       const contract = new ethers.Contract(
-        isLegacyAuction ? process.env.NEXT_PUBLIC_QRAuction as string : process.env.NEXT_PUBLIC_QRAuctionV2 as string,
+        contractAddress,
         QRAuction.abi,
         provider
       );

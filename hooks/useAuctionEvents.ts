@@ -213,7 +213,13 @@ export function useAuctionEvents({
   useEffect(() => {
     if (!publicClient) return;
 
-    const contractAddress = tokenId && tokenId >= 1 && tokenId <= 22 ? process.env.NEXT_PUBLIC_QRAuction as Address : process.env.NEXT_PUBLIC_QRAuctionV2 as Address;
+    const contractAddress = tokenId 
+      ? tokenId >= 1 && tokenId <= 22 
+        ? process.env.NEXT_PUBLIC_QRAuction as Address 
+        : tokenId >= 23 && tokenId <= 35
+          ? process.env.NEXT_PUBLIC_QRAuctionV2 as Address
+          : process.env.NEXT_PUBLIC_QRAuctionV3 as Address
+      : process.env.NEXT_PUBLIC_QRAuctionV3 as Address;
 
     // Watch for auction bid events
     const unwatchBid = publicClient.watchEvent({
@@ -238,13 +244,20 @@ export function useAuctionEvents({
             if (!shownToastsRef.current[eventId] || now - shownToastsRef.current[eventId] > 5000) {
               // Get identity information and then show toast
               getBidderIdentity(bidder).then(displayName => {
-                // Check if it's a legacy auction (1-22)
+                // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
                 const isLegacyAuction = tokenId <= 22n;
+                const isV2Auction = tokenId >= 23n && tokenId <= 35n;
+                const isV3Auction = tokenId >= 36n;
                 const amount_num = Number(amount) / 1e18;
                 
-                const bidText = isLegacyAuction 
-                  ? `${amount_num.toFixed(3)} ETH` 
-                  : `${formatQRAmount(amount_num)} $QR`;
+                let bidText = '';
+                if (isLegacyAuction) {
+                  bidText = `${amount_num.toFixed(3)} ETH`;
+                } else if (isV2Auction) {
+                  bidText = `${formatQRAmount(amount_num)} $QR`;
+                } else if (isV3Auction) {
+                  bidText = `${amount_num.toFixed(2)} $USDC`;
+                }
                 
                 toast(`New bid: ${bidText} by ${displayName}`, { 
                   id: eventId,

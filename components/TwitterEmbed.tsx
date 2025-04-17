@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useBaseColors } from "@/hooks/useBaseColors";
+import { useTheme } from "next-themes";
 
 interface TwitterEmbedProps {
   tweetUrl: string;
@@ -50,6 +51,7 @@ const TwitterScriptLoader = {
 export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isBaseColors = useBaseColors();
+  const { resolvedTheme } = useTheme();
   const [loading, setLoading] = useState(true);
   const tweetId = extractTweetId(tweetUrl);
   const mountedRef = useRef(true);
@@ -79,16 +81,22 @@ export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
         
         // Clear the container again right before embedding
         container.innerHTML = '';
+
+        // Determine theme based on system theme and base colors mode
+        // Use dark theme only when specifically in dark mode
+        const isDarkMode = resolvedTheme === 'dark' && !isBaseColors;
         
-        // Create the tweet
+        // Create the tweet with full width
         if (window.twttr && window.twttr.widgets) {
           await window.twttr.widgets.createTweet(
             tweetId, 
             container,
             {
-              theme: 'light', // Always use light mode for consistency
+              theme: isDarkMode ? 'dark' : 'light',
               conversation: 'none', // Hide the conversation
               width: '100%',
+              align: 'center',
+              dnt: true
             }
           );
           
@@ -124,18 +132,25 @@ export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
       clearTimeout(timeoutId);
       container.innerHTML = '';
     };
-  }, [tweetId, isBaseColors]);
+  }, [tweetId, isBaseColors, resolvedTheme]);
 
   return (
-    <div className="flex flex-col rounded-md justify-center items-center w-full md:w-[376px] overflow-hidden bg-white">
+    <div className={`flex flex-col rounded-xl justify-center items-center w-full overflow-hidden ${resolvedTheme === 'dark' && !isBaseColors ? 'bg-gray-900' : 'bg-white'}`}>
       {loading && (
         <div className="flex items-center justify-center h-[200px] w-full">
-          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
+          <div className={`animate-spin rounded-full h-6 w-6 border-b-2 ${resolvedTheme === 'dark' && !isBaseColors ? 'border-gray-100' : 'border-gray-900'}`}></div>
         </div>
       )}
       <div 
         ref={containerRef} 
-        className="w-full min-h-[100px] [&_.twitter-tweet]:!mt-0" // Use !important on any twitter-tweet element inside
+        className="w-full min-h-[100px]" 
+        style={{ 
+          width: 'calc(100% - 0px)', 
+          maxWidth: '100%', 
+          padding: 0, 
+          margin: 0,
+          boxSizing: 'border-box'
+        }}
       />
     </div>
   );
@@ -154,6 +169,7 @@ declare global {
             align?: string;
             width?: string | number;
             conversation?: 'none' | 'all';
+            dnt?: boolean;
           }
         ) => Promise<HTMLElement>;
       };

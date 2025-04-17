@@ -173,3 +173,20 @@
 .animate-marquee2 {
   transition: transform 0.5s ease-out;
 }
+
+/* Twitter and Farcaster embed styles */
+.twitter-tweet {
+  margin: 0 !important;
+  width: 100% !important;
+}
+
+.twitter-tweet iframe {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Ensure Farcaster embeds have consistent width */
+.farcaster-embed-container {
+  width: 100% !important;
+  max-width: 100% !important;
+}

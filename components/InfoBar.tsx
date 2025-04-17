@@ -107,12 +107,12 @@ const PriceTicker = memo(() => {
     <div className="relative flex overflow-x-hidden w-full marquee-container pr-[120px]">
       {/* Using a direct div for crypto ticker to keep animation stable */}
       <div 
-        className="animate-marquee-reverse whitespace-nowrap h-full flex items-center"
+        className="animate-marquee whitespace-nowrap h-full flex items-center"
         style={{ 
           transform: 'translateZ(0)',
           willChange: 'transform',
           backfaceVisibility: 'hidden',
-          animationDuration: '30s'
+          animationDuration: '45s'
         }}
       >
         {renderedTokens.map((token, index) => (
@@ -132,12 +132,12 @@ const PriceTicker = memo(() => {
       </div>
       
       <div 
-        className="absolute top-0 animate-marquee2-reverse whitespace-nowrap h-full flex items-center"
+        className="absolute top-0 animate-marquee2 whitespace-nowrap h-full flex items-center"
         style={{ 
           transform: 'translateZ(0)',
           willChange: 'transform',
           backfaceVisibility: 'hidden',
-          animationDuration: '30s'
+          animationDuration: '45s'
         }}
       >
         {renderedTokens.map((token, index) => (
@@ -409,7 +409,7 @@ export const InfoBar: React.FC = () => {
         <div className="relative flex overflow-x-hidden w-full marquee-container pr-[120px]">
           <div 
             ref={marqueeRef} 
-            className="animate-marquee-reverse whitespace-nowrap h-full flex items-center"
+            className="animate-marquee whitespace-nowrap h-full flex items-center"
             style={{ 
               transform: 'translateZ(0)',
               willChange: 'transform',
@@ -440,7 +440,7 @@ export const InfoBar: React.FC = () => {
           
           <div 
             ref={marqueeCloneRef} 
-            className="absolute top-0 animate-marquee2-reverse whitespace-nowrap h-full flex items-center"
+            className="absolute top-0 animate-marquee2 whitespace-nowrap h-full flex items-center"
             style={{ 
               transform: 'translateZ(0)',
               willChange: 'transform',
@@ -474,4 +474,4 @@ export const InfoBar: React.FC = () => {
       </div>
     </div>
   );
-}; 
+};

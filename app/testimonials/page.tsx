@@ -202,8 +202,8 @@ export default function TestimonialsPage() {
           <div className="flex flex-col space-y-3 text-center">
             <h1 className="text-2xl md:text-4xl font-bold text-center">
               <span className="flex items-center justify-center gap-2">
-                <span role="img" aria-label="speech bubble">💭</span> 
-                Testimonials
+                
+                Wall of Love
               </span>
             </h1>
             <p className="text-gray-500 text-center">

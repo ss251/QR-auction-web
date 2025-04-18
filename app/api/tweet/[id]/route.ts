@@ -1,11 +1,13 @@
 import { fetchTweet } from 'react-tweet/api';
 import { NextRequest, NextResponse } from 'next/server';
 
+// In Next.js 15, params is now a Promise
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const id = params.id;
+  // Need to await params since it's a Promise in Next.js 15
+  const { id } = await params;
 
   try {
     const tweet = await fetchTweet(id);

@@ -478,28 +478,39 @@ export async function GET() {
     
     console.log(`Formatting ${activities.length} activities with price $${tokenPrice || 'unknown'}`);
     
-    // Format messages with USD values if price is available
-    const formattedActivities = activities.map(activity => {
-      let message = activity.message;
-      
-      if (tokenPrice !== null) {
-        const usdValue = new Intl.NumberFormat('en-US', {
-          style: 'currency',
-          currency: 'USD',
-          maximumFractionDigits: 2,
-          minimumFractionDigits: 0
-        }).format(activity.amountRaw * tokenPrice);
+    // Filter and format messages with USD values if price is available
+    const formattedActivities = activities
+      .filter(activity => {
+        // Skip activities with USD value less than $0.01
+        if (tokenPrice !== null) {
+          const usdValue = activity.amountRaw * tokenPrice;
+          return usdValue >= 0.01;
+        }
+        // Keep all activities if we don't have a price
+        return true;
+      })
+      .map(activity => {
+        let message = activity.message;
         
-        message = `${activity.trader} bought $QR (${usdValue})`;
-      } else {
-        message = `${activity.trader} bought $QR (${activity.amountRaw.toFixed(2)} $QR)`;
-      }
-      
-      return {
-        ...activity,
-        message
-      };
-    });
+        if (tokenPrice !== null) {
+          const usdValue = activity.amountRaw * tokenPrice;
+          const formattedValue = new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            maximumFractionDigits: 2,
+            minimumFractionDigits: 0
+          }).format(usdValue);
+          
+          message = `${activity.trader} bought $QR (${formattedValue})`;
+        } else {
+          message = `${activity.trader} bought $QR (${activity.amountRaw.toFixed(2)} $QR)`;
+        }
+        
+        return {
+          ...activity,
+          message
+        };
+      });
     
     return NextResponse.json({
       activities: formattedActivities,

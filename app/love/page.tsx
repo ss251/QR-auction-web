@@ -30,7 +30,6 @@ interface Testimonial {
   content?: string;
   is_approved: boolean;
   is_featured: boolean;
-  carousel?: boolean;
   created_at: string;
   updated_at: string;
   priority: number;
@@ -38,7 +37,6 @@ interface Testimonial {
 
 export default function WallOfLovePage() {
   const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
-  const [carouselItems, setCarouselItems] = useState<Testimonial[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
@@ -51,29 +49,6 @@ export default function WallOfLovePage() {
   const { isConnected } = useAccount();
   const isBaseColors = useBaseColors();
   const router = useRouter();
-
-  // Fetch carousel items first
-  const fetchCarouselItems = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('testimonials')
-        .select('*')
-        .eq('is_approved', true)
-        .eq('carousel', true)
-        .order('priority', { ascending: false });
-        
-      if (error) {
-        throw error;
-      }
-      
-      if (data && data.length > 0) {
-        console.log(`Loaded ${data.length} carousel items`);
-        setCarouselItems(data);
-      }
-    } catch (error) {
-      console.error('Error fetching carousel items:', error);
-    }
-  }, []);
 
   const fetchTestimonials = useCallback(async (pageNumber: number) => {
     try {
@@ -88,12 +63,11 @@ export default function WallOfLovePage() {
       const from = pageNumber * PAGE_SIZE;
       const to = from + PAGE_SIZE - 1;
       
-      // Exclude carousel items from regular testimonials
       const { data, error, count } = await supabase
         .from('testimonials')
         .select('*', { count: 'exact' })
         .eq('is_approved', true)
-        .eq('carousel', false) // Exclude carousel items
+        .order('carousel', { ascending: false })
         .order('priority', { ascending: false })
         .order('created_at', { ascending: false })
         .range(from, to);
@@ -164,18 +138,14 @@ export default function WallOfLovePage() {
     }
   }, [handleObserver, loading]);
 
-  // Reset everything on component mount and fetch carousel items
+  // Reset everything on component mount
   useEffect(() => {
     console.log("Component mounted, resetting state");
     setPage(0);
     setTestimonials([]);
-    setCarouselItems([]);
     setHasMore(true);
-    
-    // Fetch carousel items first
-    fetchCarouselItems();
     // fetchTestimonials(0) will be called by the page effect
-  }, [fetchCarouselItems]);
+  }, []);
 
   // Load more testimonials when page changes
   useEffect(() => {
@@ -526,40 +496,15 @@ export default function WallOfLovePage() {
                 </div>
               </div>
             ))
-          ) : (carouselItems.length === 0 && testimonials.length === 0) ? (
+          ) : testimonials.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-gray-500">No testimonials found</p>
             </div>
           ) : (
-            // Render testimonials with carousel items first
+            // Render testimonials
             <>
-              {/* Display carousel items first */}
-              {carouselItems.map((testimonial) => (
-                <div key={`carousel-${testimonial.id}`} className="w-full flex justify-center">
-                  <div className="max-w-xl w-full px-0 md:px-[50px]">
-                    {testimonial.type === 'warpcast' ? (
-                      <div 
-                        className="cursor-pointer" 
-                        onClick={() => handleFarcasterEmbedClick(testimonial.url)}
-                      >
-                        <FarcasterEmbed url={testimonial.url} />
-                      </div>
-                    ) : (
-                      <div className="overflow-hidden">
-                        <TweetEmbed 
-                          tweetUrl={testimonial.url} 
-                          showLoader={true} 
-                          onClick={() => window.open(testimonial.url, '_blank')}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {/* Then display regular testimonials */}
               {testimonials.map((testimonial) => (
-                <div key={`regular-${testimonial.id}`} className="w-full flex justify-center">
+                <div key={testimonial.id} className="w-full flex justify-center">
                   <div className="max-w-xl w-full px-0 md:px-[50px]">
                     {testimonial.type === 'warpcast' ? (
                       <div 
@@ -581,7 +526,7 @@ export default function WallOfLovePage() {
                 </div>
               ))}
               
-              {/* Loading indicator for infinite scroll */}
+              {/* Minimal loading indicator for infinite scroll */}
               <div 
                 ref={loaderRef}
                 className="w-full flex justify-center py-4"

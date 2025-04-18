@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { TwitterEmbed } from '@/components/TwitterEmbed';
+import { TweetEmbed } from '@/components/TweetEmbed';
 import "react-farcaster-embed/dist/styles.css";
 import { FarcasterEmbed } from "react-farcaster-embed/dist/client";
 import Link from 'next/link';
@@ -98,9 +98,11 @@ const SafeEmbed = ({ testimonial }: { testimonial: Testimonial }) => {
       );
     } else {
       return (
-        <TwitterEmbed 
+        <TweetEmbed 
           tweetUrl={testimonial.url} 
           onError={() => setHasError(true)}
+          showLoader={false}
+          onClick={() => handleEmbedClick(testimonial.url)}
         />
       );
     }

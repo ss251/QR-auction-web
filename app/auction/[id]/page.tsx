@@ -33,6 +33,7 @@ import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { QRContextMenu } from "@/components/QRContextMenu";
 import { useAccount } from 'wagmi';
 import BidStats from "@/components/BidStats";
+import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
 
 interface SettingsResponse {
   data: Array<{
@@ -487,6 +488,11 @@ export default function AuctionPage() {
             <BidStats />
           </div>
         </div>
+      </div>
+
+      {/* Love Carousel - add this before the footer */}
+      <div className="">
+        <EndorsementsCarousel />
       </div>
 
       <footer className="mt-10 text-center flex flex-col items-center">

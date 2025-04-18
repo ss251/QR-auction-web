@@ -135,15 +135,10 @@ export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
   }, [tweetId, isBaseColors, resolvedTheme]);
 
   return (
-    <div className={`flex flex-col rounded-xl justify-center items-center w-full overflow-hidden ${resolvedTheme === 'dark' && !isBaseColors ? 'bg-gray-900' : 'bg-white'}`}>
-      {loading && (
-        <div className="flex items-center justify-center h-[200px] w-full">
-          <div className={`animate-spin rounded-full h-6 w-6 border-b-2 ${resolvedTheme === 'dark' && !isBaseColors ? 'border-gray-100' : 'border-gray-900'}`}></div>
-        </div>
-      )}
+    <div className={`flex flex-col rounded-xl justify-center items-center w-full overflow-hidden ${loading ? 'min-h-[200px]' : ''}`}>
       <div 
         ref={containerRef} 
-        className="w-full min-h-[100px]" 
+        className={`w-full transition-opacity duration-500 ${loading ? 'opacity-0' : 'opacity-100'}`} 
         style={{ 
           width: 'calc(100% - 0px)', 
           maxWidth: '100%', 

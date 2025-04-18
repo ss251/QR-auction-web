@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { supabase } from '@/lib/supabase';
-import { Trash2, Loader2, Star, StarOff, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Trash2, Loader2, Star, StarOff, ArrowUpCircle, ArrowDownCircle, AlignJustify } from 'lucide-react';
 import { toast } from 'sonner';
 import { TwitterEmbed } from '@/components/TwitterEmbed';
 import { FarcasterEmbed } from "react-farcaster-embed/dist/client";
@@ -20,6 +20,7 @@ interface Testimonial {
   content?: string;
   is_approved: boolean;
   is_featured: boolean;
+  carousel?: boolean;
   created_at: string;
   updated_at: string;
   priority: number;
@@ -177,6 +178,10 @@ export function TestimonialsAdmin() {
     await updateTestimonial(id, { is_featured: !currentValue }, 'feature');
   };
   
+  const toggleCarousel = async (id: number, currentValue: boolean) => {
+    await updateTestimonial(id, { carousel: !currentValue }, 'carousel');
+  };
+  
   const changePriority = async (id: number, currentPriority: number, increment: number) => {
     await updateTestimonial(id, { priority: currentPriority + increment }, increment > 0 ? 'upPriority' : 'downPriority');
   };
@@ -301,6 +306,20 @@ export function TestimonialsAdmin() {
                       <Star className="h-4 w-4" />
                     ) : (
                       <StarOff className="h-4 w-4" />
+                    )}
+                  </Button>
+                  
+                  <Button 
+                    variant={testimonial.carousel ? "secondary" : "outline"} 
+                    size="sm" 
+                    onClick={() => toggleCarousel(testimonial.id, testimonial.carousel || false)}
+                    disabled={isLoading(testimonial.id, 'carousel')}
+                    title={testimonial.carousel ? "Remove from carousel" : "Add to carousel"}
+                  >
+                    {isLoading(testimonial.id, 'carousel') ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <AlignJustify className="h-4 w-4" />
                     )}
                   </Button>
                   

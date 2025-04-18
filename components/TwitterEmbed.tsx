@@ -3,9 +3,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useBaseColors } from "@/hooks/useBaseColors";
 import { useTheme } from "next-themes";
+import { Loader2 } from "lucide-react";
 
 interface TwitterEmbedProps {
   tweetUrl: string;
+  onError?: () => void;
+  showLoader?: boolean;
 }
 
 const extractTweetId = (url: string): string => {
@@ -48,7 +51,7 @@ const TwitterScriptLoader = {
   }
 };
 
-export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
+export function TwitterEmbed({ tweetUrl, onError, showLoader = false }: TwitterEmbedProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const isBaseColors = useBaseColors();
   const { resolvedTheme } = useTheme();
@@ -109,6 +112,9 @@ export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
         }
       } catch (error) {
         console.error('Error embedding tweet:', error);
+        if (onError && mountedRef.current) {
+          onError();
+        }
       } finally {
         if (mountedRef.current) {
           setLoading(false);
@@ -132,10 +138,15 @@ export function TwitterEmbed({ tweetUrl }: TwitterEmbedProps) {
       clearTimeout(timeoutId);
       container.innerHTML = '';
     };
-  }, [tweetId, isBaseColors, resolvedTheme]);
+  }, [tweetId, isBaseColors, resolvedTheme, onError]);
 
   return (
-    <div className={`flex flex-col rounded-xl justify-center items-center w-full overflow-hidden ${loading ? 'min-h-[200px]' : ''}`}>
+    <div className={`flex flex-col rounded-xl justify-center items-center w-full overflow-hidden relative ${loading ? 'min-h-[200px]' : ''}`}>
+      {loading && showLoader && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+        </div>
+      )}
       <div 
         ref={containerRef} 
         className={`w-full transition-opacity duration-500 ${loading ? 'opacity-0' : 'opacity-100'}`} 

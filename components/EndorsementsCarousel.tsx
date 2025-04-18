@@ -1,45 +1,139 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TwitterEmbed } from '@/components/TwitterEmbed';
 import "react-farcaster-embed/dist/styles.css";
 import { FarcasterEmbed } from "react-farcaster-embed/dist/client";
 import Link from 'next/link';
+import { supabase } from '@/lib/supabase';
+
 interface Testimonial {
   id: number;
   url: string;
   type: 'warpcast' | 'twitter';
+  carousel?: boolean;
+  is_approved?: boolean;
+  is_featured?: boolean;
+  priority?: number;
 }
 
-// Hardcoded testimonials as requested
-const TESTIMONIALS: Testimonial[] = [
-  {
-    id: 1,
-    url: 'https://warpcast.com/mleejr/0xcccf69651de22dea1f565a8f3248fd5fb9dd2a56',
-    type: 'warpcast'
-  },
-  {
-    id: 2,
-    url: 'https://warpcast.com/tldr/0x600e5117f2d9eb4c65fb1012b8b7897123f9d7d5',
-    type: 'warpcast'
-  },
-  {
-    id: 3,
-    url: 'https://x.com/BasedBraden/status/1912190908914901036',
-    type: 'twitter'
+// Component to safely render embeds with error handling
+const SafeEmbed = ({ testimonial }: { testimonial: Testimonial }) => {
+  const [hasError, setHasError] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handle click on any embed to open the original URL
+  const handleEmbedClick = (url: string) => {
+    window.open(url, '_blank');
+  };
+
+  useEffect(() => {
+    // Reset states when testimonial changes
+    setHasError(false);
+    setIsLoaded(false);
+    
+    // For Farcaster embeds, set a timeout to consider it an error if it takes too long to load
+    if (testimonial.type === 'warpcast') {
+      // Clear any existing timer
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+      
+      // Set a timeout for 10 seconds to consider it failed if not loaded by then
+      timerRef.current = setTimeout(() => {
+        if (!isLoaded) {
+          setHasError(true);
+        }
+      }, 10000);
+    }
+    
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, [testimonial, isLoaded]);
+
+  // After render, mark as loaded for Farcaster embeds
+  useEffect(() => {
+    if (testimonial.type === 'warpcast') {
+      // Small delay to let the embed actually render
+      const timer = setTimeout(() => {
+        setIsLoaded(true);
+      }, 2000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [testimonial.type]);
+
+  if (hasError) {
+    return (
+      <div 
+        className="flex flex-col items-center justify-center p-6 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 cursor-pointer h-full"
+        onClick={() => handleEmbedClick(testimonial.url)}
+      >
+        <AlertCircle className="h-8 w-8 text-gray-400 mb-2" />
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Unable to load content
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1 underline">
+          Click to view original
+        </p>
+      </div>
+    );
   }
-];
+
+  try {
+    if (testimonial.type === 'warpcast') {
+      return (
+        <div 
+          className="cursor-pointer" 
+          onClick={() => handleEmbedClick(testimonial.url)}
+        >
+          <FarcasterEmbed url={testimonial.url} />
+        </div>
+      );
+    } else {
+      return (
+        <TwitterEmbed 
+          tweetUrl={testimonial.url} 
+          onError={() => setHasError(true)}
+        />
+      );
+    }
+  } catch (error) {
+    console.error("Error rendering embed:", error);
+    setHasError(true);
+    return (
+      <div 
+        className="flex flex-col items-center justify-center p-6 border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 cursor-pointer h-full"
+        onClick={() => handleEmbedClick(testimonial.url)}
+      >
+        <AlertCircle className="h-8 w-8 text-gray-400 mb-2" />
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Unable to load content
+        </p>
+        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1 underline">
+          Click to view original
+        </p>
+      </div>
+    );
+  }
+};
 
 export function EndorsementsCarousel() {
+  const [testimonials, setTestimonials] = useState<Testimonial[]>([]);
+  const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const autoplayIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const initialRenderRef = useRef(true);
   
   useEffect(() => {
-    // Start auto-rotation
-    startAutoRotation();
+    fetchCarouselTestimonials();
     
     return () => {
       // Cleanup interval on component unmount
@@ -48,72 +142,161 @@ export function EndorsementsCarousel() {
       }
     };
   }, []);
+
+  // Add a separate effect to handle auto-rotation after initial render
+  useEffect(() => {
+    if (testimonials.length > 0 && !loading) {
+      // Slight delay for initial render to complete
+      const timer = setTimeout(() => {
+        initialRenderRef.current = false;
+        startAutoRotation();
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [testimonials, loading]);
+
+  const fetchCarouselTestimonials = async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from('testimonials')
+        .select('*')
+        .eq('is_approved', true)
+        .eq('carousel', true)
+        .order('priority', { ascending: false });
+        
+      if (error) {
+        throw error;
+      }
+      
+      // Filter out testimonials with invalid URLs
+      const validTestimonials = data?.filter(testimonial => {
+        if (!testimonial.url) return false;
+        
+        if (testimonial.type === 'warpcast') {
+          return testimonial.url.includes('warpcast.com');
+        } else if (testimonial.type === 'twitter') {
+          return testimonial.url.includes('twitter.com') || testimonial.url.includes('x.com');
+        }
+        
+        return false;
+      }) || [];
+      
+      if (validTestimonials.length > 0) {
+        setTestimonials(validTestimonials);
+        // Start auto-rotation once we have testimonials
+        startAutoRotation();
+      } else {
+        // Fallback to featured testimonials if no carousel ones are found
+        const { data: featuredData, error: featuredError } = await supabase
+          .from('testimonials')
+          .select('*')
+          .eq('is_approved', true)
+          .eq('is_featured', true)
+          .order('priority', { ascending: false })
+          .limit(5);
+          
+        if (featuredError) {
+          throw featuredError;
+        }
+        
+        // Filter out testimonials with invalid URLs
+        const validFeaturedTestimonials = featuredData?.filter(testimonial => {
+          if (!testimonial.url) return false;
+          
+          if (testimonial.type === 'warpcast') {
+            return testimonial.url.includes('warpcast.com');
+          } else if (testimonial.type === 'twitter') {
+            return testimonial.url.includes('twitter.com') || testimonial.url.includes('x.com');
+          }
+          
+          return false;
+        }) || [];
+        
+        setTestimonials(validFeaturedTestimonials);
+        if (validFeaturedTestimonials.length > 0) {
+          startAutoRotation();
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching testimonials:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
   
   const startAutoRotation = () => {
     if (autoplayIntervalRef.current) {
       clearInterval(autoplayIntervalRef.current);
     }
     
-    // Auto-rotate every 10 seconds
+    // Auto-rotate every 5 seconds
     autoplayIntervalRef.current = setInterval(() => {
-      handleChangeSlide('next');
-    }, 10000);
+      if (!isTransitioning) {
+        handleChangeSlide('next');
+      }
+    }, 5000);
   };
   
   const handleChangeSlide = (direction: 'prev' | 'next') => {
+    // Don't do anything if we have no testimonials
+    if (testimonials.length === 0) return;
+    
     // Prevent rapid clicks during transition
     if (isTransitioning) return;
     
     // Start transition
     setIsTransitioning(true);
     
+    // Reset autoplay timer only on manual navigation
+    if (!initialRenderRef.current) {
+      if (autoplayIntervalRef.current) {
+        clearInterval(autoplayIntervalRef.current);
+      }
+    }
+    
     setTimeout(() => {
       // Update index after fade out
       if (direction === 'next') {
         setCurrentIndex((prevIndex) => 
-          prevIndex === TESTIMONIALS.length - 1 ? 0 : prevIndex + 1
+          prevIndex === testimonials.length - 1 ? 0 : prevIndex + 1
         );
       } else {
         setCurrentIndex((prevIndex) => 
-          prevIndex === 0 ? TESTIMONIALS.length - 1 : prevIndex - 1
+          prevIndex === 0 ? testimonials.length - 1 : prevIndex - 1
         );
       }
       
       // Reset transition flag after animation completes
       setTimeout(() => {
         setIsTransitioning(false);
+        
+        // Restart auto-rotation after manual navigation is complete
+        if (!initialRenderRef.current) {
+          startAutoRotation();
+        }
       }, 400); // Slightly longer than CSS transition to ensure completion
     }, 200);
-    
-    // Reset autoplay timer
-    startAutoRotation();
   };
   
-  // Handle click on a Farcaster embed to open the original URL
-  const handleEmbedClick = (url: string) => {
-    window.open(url, '_blank');
-  };
+  if (loading || testimonials.length === 0) {
+    return null;
+  }
   
   return (
-    <div className="py-10">
-      <div className="container mx-auto px-4">
+    <div className="py-8 lg:py-10 md:py-10">
+      <div className="container mx-auto md:px-4 lg:px-4">
         <div className="relative">
           <div className="overflow-hidden">
             <div className="flex justify-center">
-              <div className="h-[300px] w-full max-w-xl relative">
-                <div className="p-4 w-full h-full overflow-y-auto flex items-center justify-center">
+              <div className="h-[440px] lg:h-[420px] md:h-[420px] w-full max-w-xl relative">
+                <div className="lg:p-4 py-4 w-full h-full overflow-y-auto flex items-center justify-center">
                   <div 
                     className={`transition-opacity duration-400 ease-in-out ${isTransitioning ? 'opacity-0' : 'opacity-100'} w-full`} 
                   >
-                    {TESTIMONIALS[currentIndex]?.type === 'warpcast' ? (
-                      <div 
-                        className="cursor-pointer" 
-                        onClick={() => handleEmbedClick(TESTIMONIALS[currentIndex].url)}
-                      >
-                        <FarcasterEmbed url={TESTIMONIALS[currentIndex].url} />
-                      </div>
-                    ) : (
-                      <TwitterEmbed tweetUrl={TESTIMONIALS[currentIndex].url} />
+                    {testimonials[currentIndex] && (
+                      <SafeEmbed testimonial={testimonials[currentIndex]} />
                     )}
                   </div>
                 </div>
@@ -123,13 +306,13 @@ export function EndorsementsCarousel() {
           
           <div className="relative max-w-xl mx-auto">
             {/* Navigation arrows centered */}
-            <div className="flex justify-center mt-4 gap-2">
+            <div className="flex justify-center mt-6 gap-2">
               <Button 
                 variant="outline" 
                 size="icon" 
                 onClick={() => handleChangeSlide('prev')}
                 className="rounded-full"
-                disabled={isTransitioning}
+                disabled={isTransitioning || testimonials.length <= 1}
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -138,7 +321,7 @@ export function EndorsementsCarousel() {
                 size="icon" 
                 onClick={() => handleChangeSlide('next')}
                 className="rounded-full"
-                disabled={isTransitioning}
+                disabled={isTransitioning || testimonials.length <= 1}
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>

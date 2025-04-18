@@ -491,11 +491,11 @@ export default function AuctionPage() {
       </div>
 
       {/* Love Carousel - add this before the footer */}
-      <div className="">
+      <div className=" md:mt-0">
         <EndorsementsCarousel />
       </div>
 
-      <footer className="mt-10 text-center flex flex-col items-center">
+      <footer className="lg:mt-10 md:mt-10 mt-10 text-center flex flex-col items-center">
         <div className="flex items-center justify-center gap-6 mb-3">
           <a
             href="https://x.com/QRcoindotfun"

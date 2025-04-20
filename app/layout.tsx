@@ -78,7 +78,9 @@ export default function RootLayout({
           <Toaster position="top-center" richColors={true} />
           <Provider>
             <InfoBar />
-            {children}
+            <div className="mt-8">
+              {children}
+            </div>
           </Provider>
         </ThemeProvider>
       </body>

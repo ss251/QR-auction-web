@@ -100,7 +100,12 @@ export function WinDetailsView(winnerdata: AuctionType) {
           "30": "https://i.postimg.cc/tRkFGkKL/Group-424.png",
           "32": "https://i.postimg.cc/tRkFGkKL/Group-424.png",
           "33": "https://i.postimg.cc/mhWtNxTw/34winner.png",
-          "34": "https://i.postimg.cc/wBfV58jL/35winner.png"
+          "34": "https://i.postimg.cc/wBfV58jL/35winner.png",
+          "37": "https://i.postimg.cc/RZfJ9hsX/winner37.jpg",
+          "39": "https://i.postimg.cc/rpxzhzbX/winner39.png",
+          "42": "https://i.postimg.cc/bwGJ6JKy/42winner.jpg",
+          "43": "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
+          "45": "https://i.postimg.cc/DzRKLWrW/45winner.jpg"
         };
 
         // Check if we have a custom image override for this auction
@@ -217,15 +222,17 @@ export function WinDetailsView(winnerdata: AuctionType) {
       {winnerdata.url !== "" && winnerdata.url !== "0x" && (
         <div className={`${isBaseColors ? "bg-background" : "bg-green-50 border border-green-100"} flex flex-col mt-6 p-3 rounded-md h-full md:h-[236px]`}>
           <div className="inline-flex flex-row justify-between items-center w-full">
-            <div className="text-sm">
+            <div className="text-sm w-full overflow-hidden">
               <span className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"}`}>Winner: </span>
               <SafeExternalLink
                 href={winnerdata.url}
-                className={`${isBaseColors ? "text-foreground" : "text-gray-700 hover:text-gray-900"} transition-colors inline-flex items-center`}
+                className={`${isBaseColors ? "text-foreground" : "text-gray-700 hover:text-gray-900"} transition-colors inline-flex items-center max-w-[calc(100%-65px)]`}
                 onBeforeNavigate={() => false}
               >
-                {formatURL(winnerdata.url, true)}
-                <ExternalLink className="ml-1 h-3 w-3" />
+                <span className="truncate inline-block align-middle">
+                  {formatURL(winnerdata.url, true, true, 280)}
+                </span>
+                <ExternalLink className="ml-1 h-3 w-3 flex-shrink-0" />
               </SafeExternalLink>
             </div>
           </div>

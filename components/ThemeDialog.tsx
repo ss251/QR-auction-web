@@ -143,8 +143,10 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
               localStorage.setItem("selected-theme", "light");
             }}
           >
-            <Sun className="mr-2 h-4 w-4" />
-            Light Mode
+            <div className="w-4 flex justify-center">
+              <Sun className="h-4 w-4" />
+            </div>
+            <span className="ml-2">Light Mode</span>
           </Button>
           <Button
             variant="outline"
@@ -155,8 +157,10 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
               localStorage.setItem("selected-theme", "dark");
             }}
           >
-            <Moon className="mr-2 h-4 w-4" />
-            Dark Mode
+            <div className="w-4 flex justify-center">
+              <Moon className="h-4 w-4" />
+            </div>
+            <span className="ml-2">Dark Mode</span>
           </Button>
           <Button
             variant="outline"
@@ -200,9 +204,16 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
                   onOpenChange(false);
                 }}
               >
-                <Wallet className="mr-2 h-4 w-4" />
+                <div className="w-4 flex justify-center">
+                  <img 
+                    src="/basecolors3.jpeg" 
+                    alt="Base Colors"
+                    className="h-4 w-4 md:ml-3 ml-4"
+                  />
+                </div>
+                <span className="md:ml-3 ml-4">Base Colors</span>
               </Button>
-
+              
               <Button
                 variant="outline"
                 className={cn(
@@ -211,7 +222,42 @@ export function ThemeDialog({ open, onOpenChange }: ThemeDialogProps) {
                 )}
                 onClick={() => (window.location.href = "/ui")}
               >
-                <Settings className="mr-2 h-4 w-4" />
+                <div className="w-4 flex justify-center">
+                  <Settings className="h-4 w-4" />
+                </div>
+              </Button>
+            </div>
+          )}
+          
+          {isConnected && (
+            <div className="flex w-full gap-2 justify-center">
+              <Button
+                variant="outline"
+                className={cn(
+                  isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : "",
+                  "w-1/2"
+                )}
+                onClick={() => {
+                  // If using wagmi's useConnectModal, you might call openAccountModal() here
+                  onOpenChange(false);
+                }}
+              >
+                <div className="w-4 flex justify-center">
+                  <Wallet className="h-4 w-4" />
+                </div>
+              </Button>
+              
+              <Button
+                variant="outline"
+                className={cn(
+                  isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : "",
+                  "w-1/2"
+                )}
+                onClick={() => (window.location.href = "/ui")}
+              >
+                <div className="w-4 flex justify-center">
+                  <Settings className="h-4 w-4" />
+                </div>
               </Button>
             </div>
           )}

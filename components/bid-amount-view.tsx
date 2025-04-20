@@ -22,7 +22,8 @@ import { useTypingStatus } from "@/hooks/useTypingStatus";
 import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
 import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
 import { UniswapModal } from "./ui/uniswap-modal";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useFetchBids } from "@/hooks/useFetchBids";
 
 export function BidForm({
   auctionDetail,
@@ -39,6 +40,7 @@ export function BidForm({
   const isBaseColors = useBaseColors();
   const { isConnected, address } = useAccount();
   const { handleTypingStart } = useTypingStatus();
+  const { fetchHistoricalAuctions } = useFetchBids();
   
   // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
@@ -144,11 +146,54 @@ export function BidForm({
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isValid },
   } = useForm<FormSchemaType>({
     resolver: zodResolver(formSchema),
     mode: "onChange", // Validate as the user types
   });
+
+  // Auto-populate the URL field with the user's previous bid URL
+  useEffect(() => {
+    if (auctionDetail?.tokenId && address) {
+      const fetchPreviousBid = async () => {
+        try {
+          const bids = await fetchHistoricalAuctions();
+          if (bids) {
+            // Filter bids by current auction and user address
+            const userBidsForThisAuction = bids.filter(
+              bid => 
+                bid.tokenId === auctionDetail.tokenId && 
+                bid.bidder.toLowerCase() === address.toLowerCase()
+            );
+            
+            // Sort by timestamp/amount to get the most recent bid
+            // Assuming higher amount means more recent bid
+            userBidsForThisAuction.sort((a, b) => 
+              Number(b.amount) - Number(a.amount)
+            );
+            
+            // Get the user's most recent bid URL
+            if (userBidsForThisAuction.length > 0 && userBidsForThisAuction[0].url) {
+              // Pre-populate the URL field with the user's last bid URL
+              setValue("url", userBidsForThisAuction[0].url);
+            }
+          }
+        } catch (error) {
+          console.error("Error fetching previous bids:", error);
+        }
+      };
+      
+      fetchPreviousBid();
+    }
+  }, [auctionDetail?.tokenId, address, fetchHistoricalAuctions, setValue]);
+
+  // Clear URL field when wallet is disconnected
+  useEffect(() => {
+    if (!isConnected) {
+      setValue("url", "");
+    }
+  }, [isConnected, setValue]);
 
   // Handle typing event separately from form validation
   const handleKeyDown = () => {
@@ -280,11 +325,6 @@ export function BidForm({
             placeholder={`${formattedMinBid} or more`}
             className="pr-16 border p-2 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             {...register("bid")}
-            onFocus={(e: any) => {
-              if (!e.target.value) {
-                e.target.value = formattedMinBid;
-              }
-            }}
             onKeyDown={handleKeyDown}
             onInput={handleInputChange}
           />
@@ -302,12 +342,8 @@ export function BidForm({
               type="text"
               placeholder="https://"
               className="pr-16 border p-2 w-full"
+              spellCheck="false"
               {...register("url")}
-              onFocus={(e: any) => {
-                if (!e.target.value) {
-                  e.target.value = "https://";
-                }
-              }}
               onKeyDown={handleKeyDown}
               onInput={handleInputChange}
             />
@@ -353,16 +389,18 @@ export function BidForm({
         />
 
         {displayUrl !== "" && (
-          <div className={`mt-0.5 p-3 bg-orange-50/30 border border-orange-100/50 rounded-md ${isBaseColors ? "bg-background" : "bg-gray-900 dark:bg-gray-800"}`}>
-            <div className="text-sm">
+          <div className={`mt-0.5 p-3 bg-orange-50/30 border border-orange-100/50 rounded-md ${isBaseColors ? "bg-background" : "bg-gray-900 dark:bg-[#131313]"}`}>
+            <div className="text-sm w-full overflow-hidden">
               <span className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-gray-300"}`}>Current bid website: </span>
               <SafeExternalLink
                 href={targetUrl || ""}
-                className={`font-medium hover:text-gray-900 transition-colors inline-flex items-center ${isBaseColors ? "text-foreground" : "text-gray-700 dark:text-gray-400"}`}
+                className={`font-medium hover:text-gray-900 transition-colors inline-flex items-center max-w-[calc(100%-135px)] ${isBaseColors ? "text-foreground" : "text-gray-700 dark:text-gray-400"}`}
                 onBeforeNavigate={openDialog}
               >
-                {formatURL(displayUrl)}
-                <ExternalLink className="ml-1 h-3 w-3" />
+                <span className="truncate inline-block align-middle">
+                  {formatURL(displayUrl, false, false, 260)}
+                </span>
+                <ExternalLink className="ml-1 h-3 w-3 flex-shrink-0" />
               </SafeExternalLink>
             </div>
           </div>

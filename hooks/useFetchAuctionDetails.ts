@@ -57,9 +57,11 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
       ? QRAuctionV2.abi 
       : QRAuctionV3.abi;
 
-  console.log(`Using contract for auction #${tokenId}: ${contractAddress}, version: ${
-    isLegacyAuction ? 'V1' : isV2Auction ? 'V2' : 'V3'
-  }`);
+  if (process.env.NODE_ENV === "development") {
+    console.log(`Using contract for auction #${tokenId}: ${contractAddress}, version: ${
+      isLegacyAuction ? 'V1' : isV2Auction ? 'V2' : 'V3'
+    }`);
+  }
   
   const { data: auctionDetails, refetch, error: contractReadError } = useReadContract({
     address: contractAddress,

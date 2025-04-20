@@ -31,6 +31,9 @@ import { formatURL } from "@/utils/helperFunctions";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { QRContextMenu } from "@/components/QRContextMenu";
 import { QRUserPill } from "@/components/QRUserPill";
+import { useAccount } from 'wagmi';
+import BidStats from "@/components/BidStats";
+import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
 
 interface SettingsResponse {
   data: Array<{
@@ -44,6 +47,7 @@ export default function AuctionPage() {
   const params = useParams();
   const router = useRouter();
   const currentAuctionId = Number(params.id);
+  const { isConnected } = useAccount();
 
   const [mounted, setMounted] = useState(false);
   const [ogImage, setOgImage] = useState<string | null>(null);
@@ -196,7 +200,12 @@ export default function AuctionPage() {
         31: "https://i.postimg.cc/tRkFGkKL/Group-424.png",
         33: "https://i.postimg.cc/tRkFGkKL/Group-424.png",
         34: "https://i.postimg.cc/mhWtNxTw/34winner.png",
-        35: "https://i.postimg.cc/wBfV58jL/35winner.png"
+        35: "https://i.postimg.cc/wBfV58jL/35winner.png",
+        38: "https://i.postimg.cc/RZfJ9hsX/winner37.jpg",
+        40: "https://i.postimg.cc/rpxzhzbX/winner39.png",
+        43: "https://i.postimg.cc/bwGJ6JKy/42winner.jpg",
+        44: "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
+        46: "https://i.postimg.cc/DzRKLWrW/45winner.jpg"
     }),
     []
   );
@@ -207,7 +216,7 @@ export default function AuctionPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-8">
-      <nav className="max-w-6xl mx-auto flex justify-between items-center mb-8 mt-8 md:mt-4 lg:mt-4">
+      <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mb-8 mt-8 md:mt-4 lg:mt-4 lg:mb-8">
         <QRContextMenu className="inline-block" isHeaderLogo>
           <h1
             onClick={handleLogoClick}
@@ -216,18 +225,60 @@ export default function AuctionPage() {
             $QR
           </h1>
         </QRContextMenu>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 md:gap-3">
+          <Link href="/about">
+            <Button
+              variant="outline"
+              className={isConnected ? "h-10 px-3 text-sm font-medium" : "h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
+            >
+              <span className="md:hidden text-lg">{isConnected ? "What is this?" : "?"}</span>
+              <span className="hidden md:inline">What is this?</span>
+            </Button>
+          </Link>
+          
+          <Link href="/winners">
+            <Button
+              variant="outline"
+              size="icon"
+              className={
+                isBaseColors
+                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
+                  : "h-10 w-10"
+              }
+            >
+              <div className="h-5 w-5 flex items-center justify-center">
+                🏆
+              </div>
+            </Button>
+          </Link>
+
           <Button
             variant="outline"
+            size="icon"
             className={
               isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
-                : ""
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
+                : "h-10 w-10"
             }
             onClick={() => setThemeDialogOpen(true)}
           >
-            Theme
+            <div className="h-5 w-5 flex items-center justify-center">
+              {isBaseColors ? (
+                <img 
+                  src="/basecolors2.jpeg" 
+                  alt="Theme toggle - base colors"
+                  className="h-5 w-5 object-cover "
+                />
+              ) : (
+                <img 
+                  src="/basecolors.jpeg" 
+                  alt="Theme toggle - light/dark" 
+                  className="h-5 w-5 object-cover  border"
+                />
+              )}
+            </div>
           </Button>
+
           <div className="relative">
             <QRUserPill size={40} />
             <div className="absolute right-0 top-full mt-2 pr-1">
@@ -237,15 +288,16 @@ export default function AuctionPage() {
         </div>
       </nav>
 
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-3xl mx-auto mt-12 md:mt-14 lg:mt-16">
         <div className="flex flex-col justify-center items-center gap-9">
           <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
             <div
-              className={`${
-                isBaseColors ? "bg-primary" : "bg-white"
-              } flex flex-col justify-center p-8 h-[280px] md:h-[368px] rounded-lg`}
+              className={clsx(
+                "flex flex-col justify-center px-8 pb-6 pt-6 md:p-8 lg:p-8 h-[270px] md:h-[345px] rounded-lg",
+                isBaseColors ? "bg-primary" : "bg-white border"
+              )}
             >
-              <div className="inline-flex flex-col items-center mt-6">
+              <div className="inline-flex flex-col items-center mt-2">
                 <QRPage />
                 <div className="mt-1">
                   <SafeExternalLink
@@ -279,37 +331,112 @@ export default function AuctionPage() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
-            <div className="flex flex-col">
+            <div className="flex flex-col w-full">
+              {/* Mobile Winner Display - displayed as block on mobile, hidden on desktop */}
               {isLatestAuction && ogImage && !isAuction22 && (
-                <div className="flex flex-col justify-center items-center gap-1">
-                  <label className="font-semibold text-xl md:text-2xl inline-flex gap-2">
-                    🏆<span className="underline">Today&apos;s Winner</span>🏆
-                  </label>
-                  <div className="flex flex-col rounded-md justify-center items-center h-full md:h-[200px] w-full md:w-[376px] mt-1 overflow-hidden bg-white aspect-[2/1]">
-                    <img
-                      src={auctionImageOverrides[currentAuctionId] || ogImage}
-                      alt="Open Graph"
-                      className="object-cover w-full h-full cursor-pointer"
-                      onClick={() => {
-                        if (ogUrl) window.open(ogUrl, '_blank', 'noopener,noreferrer');
-                      }}
-                    />
+                <div className="block md:hidden">
+                  <div className="flex flex-col justify-center items-center w-[calc(100vw-32px)] max-w-[376px] mx-auto gap-1">
+                    <label className="font-semibold text-xl md:text-2xl flex items-center justify-center w-full">
+                      <span className="md:hidden whitespace-nowrap">🏆🏆🏆🏆</span>
+                      <span className="mx-2">Today&apos;s Winner</span>
+                      <span className="md:hidden whitespace-nowrap">🏆🏆🏆🏆</span>
+                    </label>
+                    <div className={clsx(
+                      "border rounded-lg shadow-none flex flex-col w-full overflow-hidden",
+                      isBaseColors ? "bg-primary/5" : "bg-white dark:bg-black"
+                    )}
+                    style={{ boxShadow: 'none' }}>
+                      {/* Image with no padding */}
+                      <div className="w-full bg-white aspect-[2/1] overflow-hidden">
+                        <img
+                          src={auctionImageOverrides[currentAuctionId] || ogImage || ''}
+                          alt="Open Graph"
+                          className="object-cover w-full h-full cursor-pointer"
+                          onClick={() => {
+                            if (ogUrl) window.open(ogUrl, '_blank', 'noopener,noreferrer');
+                          }}
+                        />
+                      </div>
+                      {/* Text content with padding */}
+                      <div className="flex flex-col items-center p-4">
+                        <span className={clsx(isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]", "font-normal")}>
+                          The QR now points to:
+                        </span>
+                        <div className="w-full flex justify-center">
+                          <a
+                            href={ogUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center hover:opacity-80 transition-opacity max-w-full"
+                            title={ogUrl}
+                            aria-label="redirect"
+                          >
+                            <span className="truncate font-medium">
+                              {formatURL(ogUrl, true, true, 280)}
+                            </span>
+                            <ExternalLink className="ml-1 h-6 w-3.5 flex-shrink-0" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex flex-col items-center italic">
-                    <span className={clsx(isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]", "font-normal")}>
-                      The QR coin currently points to:
-                    </span>
-                    <div className="w-full overflow-hidden truncate">
-                      <a
-                        href={ogUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-medium underline hover:opacity-80 transition-opacity"
-                        title={ogUrl}
-                        aria-label="redirect"
-                      >
-                        {formatURL(ogUrl, true)}
-                      </a>
+                </div>
+              )}
+              
+              {/* Desktop Winner Display - hidden on mobile, displayed on desktop */}
+              {isLatestAuction && ogImage && !isAuction22 && (
+                <div className="hidden md:flex flex-col justify-center items-center gap-1 w-full max-w-[376px] mx-auto">
+                  <label className="font-semibold text-xl md:text-2xl flex items-center justify-center w-full">
+                    <span className="hidden md:inline">🏆</span>
+                    <span className="mx-2">Today&apos;s Winner</span>
+                    <span className="hidden md:inline">🏆</span>
+                  </label>
+                  <div className={clsx(
+                    "border rounded-lg shadow-none flex flex-col w-full overflow-hidden",
+                    isBaseColors ? "bg-primary/5" : "bg-white dark:bg-black"
+                  )}
+                  style={{ boxShadow: 'none' }}>
+                    {/* Image with no padding */}
+                    <div className="w-full bg-white aspect-[2/1] overflow-hidden">
+                      <img
+                        src={auctionImageOverrides[currentAuctionId] || ogImage || ''}
+                        alt="Open Graph"
+                        className="object-cover w-full h-full cursor-pointer"
+                        onClick={() => {
+                          if (ogUrl) window.open(ogUrl, '_blank', 'noopener,noreferrer');
+                        }}
+                      />
+                    </div>
+                    {/* Text content with padding */}
+                    <div className="flex flex-col items-center p-4">
+                      <span className={clsx(isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]", "font-normal")}>
+                        The QR now points to:
+                      </span>
+                      <div className="w-full flex justify-center">
+                        <a
+                          href={ogUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center hover:opacity-80 transition-opacity max-w-full"
+                          title={ogUrl}
+                          aria-label="redirect"
+                        >
+                          <span className="truncate font-medium">
+                            {formatURL(ogUrl, true, false, 350)}
+                          </span>
+                          <ExternalLink className="ml-1 h-6 w-3.5 flex-shrink-0" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* BidStats for desktop - under Today's Winner */}
+                  <div className="mt-4 w-full max-w-[376px]">
+                    <h2 className="font-semibold text-xl md:text-2xl text-center mb-1">
+                      <span className="">Bid Counter</span>
+                    </h2>
+                    <div className="h-[190px]">
+                      <BidStats />
                     </div>
                   </div>
                 </div>
@@ -320,7 +447,7 @@ export default function AuctionPage() {
               {isLatestAuction && !isAuction22 && (
                 <>
                   <h2 className="font-semibold text-xl md:text-2xl text-center">
-                    <span className="underline">Buy $QR</span>
+                    <span className="">Buy $QR</span>
                   </h2>
                   <div style={{ height: "510px" }}>
                     <UniswapWidget />
@@ -336,19 +463,34 @@ export default function AuctionPage() {
           
           {/* Mobile Uniswap Widget */}
           {isLatestAuction && !isAuction22 && (
-            <div className="md:hidden w-full mt-4 mb-8">
-              <h2 className="font-semibold text-xl text-center mb-4">
-                <span className="underline">Buy $QR</span>
+            <div className="md:hidden w-full">
+              <h2 className="font-semibold text-xl text-center mb-1">
+                <span className="">Buy $QR</span>
               </h2>
-              <div style={{ height: "510px" }}>
+              <div style={{ height: "570px" }}>
                 <UniswapWidget />
               </div>
             </div>
           )}
+          
+          {/* BidStats for mobile - centered */}
+          <div className="md:hidden mx-auto w-full">
+            <h2 className="font-semibold text-xl text-center mb-1">
+              <span className="">Bid Counter</span>
+            </h2>
+            <BidStats />
+          </div>
         </div>
       </div>
 
-      <footer className="mt-10 text-center flex flex-col items-center">
+      {/* Love Carousel - add this before the footer */}
+      {isLatestAuction && (
+        <div className="md:mt-0">
+          <EndorsementsCarousel />
+        </div>
+      )}
+
+      <footer className="lg:mt-10 md:mt-10 mt-10 text-center flex flex-col items-center">
         <div className="flex items-center justify-center gap-6 mb-3">
           <a
             href="https://x.com/QRcoindotfun"

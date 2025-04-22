@@ -10,6 +10,7 @@ import { useState, useEffect } from "react";
 // Import Privy-specific components
 import { PrivyProvider } from "@privy-io/react-auth";
 import { WagmiProvider } from "@privy-io/wagmi";
+import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
 
 // Import configurations
 import { privyConfig } from "../config/privyConfig";
@@ -47,13 +48,25 @@ export function Provider(props: { children: ReactNode }) {
     <FarcasterFrameProvider>
       <PrivyProvider
         appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ""}
-        config={themeAwareConfig}
+        config={{
+            ...themeAwareConfig,
+            // Add recommended embedded wallet config for AA
+            embeddedWallets: {
+                createOnLogin: 'users-without-wallets', 
+                // Ensure showWalletUIs is false if you don't want Privy modals
+                // This might need configuration in the Privy Dashboard instead
+                // showWalletUIs: false, 
+            }
+        }}
       >
-        <QueryClientProvider client={queryClient}>
-          <WagmiProvider config={wagmiConfig}>
-            <SupabaseProvider>{props.children}</SupabaseProvider>
-          </WagmiProvider>
-        </QueryClientProvider>
+        <SmartWalletsProvider
+        >
+          <QueryClientProvider client={queryClient}>
+            <WagmiProvider config={wagmiConfig}>
+              <SupabaseProvider>{props.children}</SupabaseProvider>
+            </WagmiProvider>
+          </QueryClientProvider>
+        </SmartWalletsProvider>
       </PrivyProvider>
     </FarcasterFrameProvider>
   );

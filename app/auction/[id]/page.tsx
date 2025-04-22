@@ -30,10 +30,10 @@ import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
 import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { QRContextMenu } from "@/components/QRContextMenu";
-import { QRUserPill } from "@/components/QRUserPill";
 import { useAccount } from 'wagmi';
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
+import { CustomWallet } from "@/components/CustomWallet";
 
 interface SettingsResponse {
   data: Array<{
@@ -59,6 +59,7 @@ export default function AuctionPage() {
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
   const [isLatestAuction, setIsLatestAuction] = useState(false);
   const [latestAuctionId, setLatestAuctionId] = useState(0);
+  const [navigatedFromCreation, setNavigatedFromCreation] = useState(false);
 
   const isBaseColors = useBaseColors();
   const { isOpen, pendingUrl, openDialog, closeDialog, handleContinue } = useSafetyDialog();
@@ -89,10 +90,11 @@ export default function AuctionPage() {
       setLatestAuctionId(lastId);
       setIsLatestAuction(currentAuctionId === lastId);
       setIsLoading(false);
+      setNavigatedFromCreation(false);
     } else if (auctions) {
       setIsLoading(false);
     }
-  }, [auctions, currentAuctionId]);
+  }, [auctions, currentAuctionId, navigatedFromCreation]);
 
   const fetchOgImage = useCallback(async () => {
     try {
@@ -160,13 +162,16 @@ export default function AuctionPage() {
       }
     },
     onAuctionCreated: (tokenId) => {
-      refetchAuctions().then(() => {
-        const newLatestId = Number(tokenId);
-        if (isLatestAuction || currentAuctionId === newLatestId - 1) {
-          router.push(`/auction/${newLatestId}`);
-        }
-        fetchOgImage();
-      });
+      const newLatestId = Number(tokenId);
+      console.log(`AuctionCreated event for ${newLatestId}, current: ${currentAuctionId}, isLatest: ${isLatestAuction}`);
+      if (isLatestAuction || currentAuctionId === newLatestId - 1) {
+        console.log(`Navigating to new auction: ${newLatestId}`);
+        setIsLoading(true);
+        setNavigatedFromCreation(true);
+        router.push(`/auction/${newLatestId}`);
+      } else {
+        refetchAuctions();
+      }
     },
   });
 
@@ -279,12 +284,7 @@ export default function AuctionPage() {
             </div>
           </Button>
 
-          <div className="relative">
-            <QRUserPill size={40} />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
+          <CustomWallet />
         </div>
       </nav>
 
@@ -318,7 +318,7 @@ export default function AuctionPage() {
               </div>
             </div>
 
-            {!isLoading && currentAuctionId > 0 ? (
+            {!isLoading && !navigatedFromCreation && currentAuctionId > 0 ? (
               <AuctionDetails
                 id={currentAuctionId}
                 onPrevious={handlePrevious}

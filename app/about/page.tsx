@@ -12,10 +12,9 @@ import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import clsx from "clsx";
 import { toast } from "sonner";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { ThemeDialog } from "@/components/ThemeDialog";
 import { useAccount } from 'wagmi';
-import { QRUserPill } from "@/components/QRUserPill";
+import { CustomWallet } from "@/components/CustomWallet";
 
 export default function AboutPage() {
   const router = useRouter();
@@ -101,12 +100,7 @@ export default function AboutPage() {
             </div>
           </Button>
           
-          <div className="relative">
-            <QRUserPill />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
+          <CustomWallet />
         </div>
       </nav>
 

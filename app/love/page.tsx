@@ -4,7 +4,6 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import { useRouter } from "next/navigation";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { QRContextMenu } from "@/components/QRContextMenu";
 import { ThemeDialog } from "@/components/ThemeDialog";
 import { TweetEmbed } from "@/components/TweetEmbed";
@@ -20,7 +19,7 @@ import { FarcasterEmbed } from "react-farcaster-embed/dist/client";
 import "react-farcaster-embed/dist/styles.css";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
-import { QRUserPill } from "@/components/QRUserPill";
+import { CustomWallet } from "@/components/CustomWallet";
 
 interface Testimonial {
   id: number;
@@ -329,12 +328,7 @@ export default function WallOfLovePage() {
             </div>
           </Button>
           
-          <div className="relative">
-            <QRUserPill />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
+          <CustomWallet />
         </div>
       </nav>
 

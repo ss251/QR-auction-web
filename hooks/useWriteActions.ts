@@ -47,56 +47,111 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
   const bidAmount = async ({
     value,
     urlString,
+    smartWalletClient
   }: {
     value: bigint;
     urlString: string;
+    smartWalletClient?: any;
   }) => {
     try {
       console.log(`Bidding on V3 auction #${tokenId.toString()}`);
       console.log(`Using USDC token, address: ${USDC_TOKEN_ADDRESS}`);
       
-      // First approve USDC tokens to be spent by the auction contract
-      console.log("Approving USDC tokens:", value.toString());
-      const approveTx = await approveToken({
-        address: USDC_TOKEN_ADDRESS as Address,
-        abi: erc20ABI,
-        functionName: "approve",
-        args: [process.env.NEXT_PUBLIC_QRAuctionV3 as Address, value],
-      });
-      
-      console.log("Approval tx:", approveTx);
+      // Check if we have a smart wallet client
+      if (smartWalletClient) {
+        console.log("Using smart wallet for transaction");
+        
+        // First approve USDC tokens to be spent by the auction contract using the smart wallet
+        console.log("Approving USDC tokens with smart wallet:", value.toString());
+        
+        // Use smart wallet for approval
+        const approveTxData = {
+          address: USDC_TOKEN_ADDRESS as Address,
+          abi: erc20ABI,
+          functionName: "approve",
+          args: [process.env.NEXT_PUBLIC_QRAuctionV3 as Address, value],
+        };
+        
+        const approveTx = await smartWalletClient.writeContract(approveTxData);
+        console.log("Smart wallet approval tx:", approveTx);
+        
+        // Wait for approval to complete
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Use the 3-parameter version of createBid instead of the backward compatibility one
+        console.log("Placing bid with smart wallet and URL:", urlString);
+        
+        const bidTxData = {
+          address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
+          abi: QRAuctionV3.abi,
+          functionName: "createBid",
+          args: [tokenId, urlString, ""], // Add empty string as name parameter
+        };
+        
+        const tx = await smartWalletClient.writeContract(bidTxData);
+        return tx;
+      } else {
+        // Use regular EOA wallet
+        console.log("Using EOA wallet for transaction");
+        
+        // First approve USDC tokens to be spent by the auction contract
+        console.log("Approving USDC tokens with EOA:", value.toString());
+        const approveTx = await approveToken({
+          address: USDC_TOKEN_ADDRESS as Address,
+          abi: erc20ABI,
+          functionName: "approve",
+          args: [process.env.NEXT_PUBLIC_QRAuctionV3 as Address, value],
+        });
+        
+        console.log("Approval tx:", approveTx);
 
-      // Wait for approval to complete
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
-      // Use the 3-parameter version of createBid instead of the backward compatibility one
-      console.log("Placing bid with URL:", urlString);
-      const tx = await bidAuction({
-        address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
-        abi: QRAuctionV3.abi,
-        functionName: "createBid",
-        args: [tokenId, urlString, ""], // Add empty string as name parameter
-      });
+        // Wait for approval to complete
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Use the 3-parameter version of createBid instead of the backward compatibility one
+        console.log("Placing bid with EOA and URL:", urlString);
+        const tx = await bidAuction({
+          address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
+          abi: QRAuctionV3.abi,
+          functionName: "createBid",
+          args: [tokenId, urlString, ""], // Add empty string as name parameter
+        });
 
-      return tx;
+        return tx;
+      }
     } catch (error: any) {
       console.error("Bid error:", error);
       throw error;
     }
   };
 
-  const settleTxn = async () => {
+  const settleTxn = async ({ smartWalletClient }: { smartWalletClient?: any } = {}) => {
     try {
       console.log(`Settling V3 auction #${tokenId.toString()}`);
       
-      const tx = await settleAndCreate({
-        address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
-        abi: QRAuctionV3.abi,
-        functionName: "settleCurrentAndCreateNewAuction",
-        args: [],
-      });
+      if (smartWalletClient) {
+        console.log("Using smart wallet for settlement");
+        
+        const settleTxData = {
+          address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
+          abi: QRAuctionV3.abi,
+          functionName: "settleCurrentAndCreateNewAuction",
+          args: [],
+        };
+        
+        const tx = await smartWalletClient.writeContract(settleTxData);
+        return tx;
+      } else {
+        // Use regular EOA wallet
+        const tx = await settleAndCreate({
+          address: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
+          abi: QRAuctionV3.abi,
+          functionName: "settleCurrentAndCreateNewAuction",
+          args: [],
+        });
 
-      return tx;
+        return tx;
+      }
     } catch (error: any) {
       console.error("Settlement error:", error);
       throw error;

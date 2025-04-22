@@ -13,7 +13,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { useRouter } from "next/navigation";
 import { useFetchAuctions } from "@/hooks/useFetchAuctions";
 import { QRContextMenu } from "@/components/QRContextMenu";
-import { QRUserPill } from "@/components/QRUserPill";
+import { CustomWallet } from "@/components/CustomWallet";
 
 function UI() {
   const isBaseColors = useBaseColors();
@@ -316,7 +316,7 @@ function UI() {
             <span className="hidden md:inline">Theme</span>
             <Palette className="h-4 w-4 md:hidden" />
           </Button>
-          <QRUserPill size={40} />
+          <CustomWallet />
         </div>
       </nav>
 

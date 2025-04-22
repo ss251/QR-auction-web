@@ -22,8 +22,10 @@ import { useTypingStatus } from "@/hooks/useTypingStatus";
 import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
 import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
 import { UniswapModal } from "./ui/uniswap-modal";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useFetchBids } from "@/hooks/useFetchBids";
+import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
+import { Address } from "viem";
 
 export function BidForm({
   auctionDetail,
@@ -38,9 +40,23 @@ export function BidForm({
 }) {
   const [showUniswapModal, setShowUniswapModal] = useState(false);
   const isBaseColors = useBaseColors();
-  const { isConnected, address } = useAccount();
+  const { isConnected, address: eoaAddress } = useAccount();
   const { handleTypingStart } = useTypingStatus();
   const { fetchHistoricalAuctions } = useFetchBids();
+  
+  // Get smart wallet information
+  const { client: smartWalletClient } = useSmartWallets();
+
+  // Extract smart wallet address directly from the client
+  const smartWalletAddress = useMemo(() => {
+    if (smartWalletClient?.account) {
+      return smartWalletClient.account.address as Address;
+    }
+    return undefined;
+  }, [smartWalletClient]);
+  
+  // Use smart wallet address if available, fall back to EOA
+  const activeAddress = smartWalletAddress ?? eoaAddress;
   
   // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
@@ -51,14 +67,14 @@ export function BidForm({
   const qrTokenAddress = "0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"; // QR token address
   const usdcTokenAddress = "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913"; // USDC token address on Base
   
-  // Get user's token balance based on auction type
+  // Get user's token balance based on auction type - use activeAddress instead of eoaAddress
   const { data: qrBalance } = useBalance({
-    address,
+    address: activeAddress,
     token: qrTokenAddress as `0x${string}`,
   });
   
   const { data: usdcBalance } = useBalance({
-    address,
+    address: activeAddress,
     token: usdcTokenAddress as `0x${string}`,
   });
   
@@ -155,7 +171,7 @@ export function BidForm({
 
   // Auto-populate the URL field with the user's previous bid URL
   useEffect(() => {
-    if (auctionDetail?.tokenId && address) {
+    if (auctionDetail?.tokenId && activeAddress) {
       const fetchPreviousBid = async () => {
         try {
           const bids = await fetchHistoricalAuctions();
@@ -164,7 +180,7 @@ export function BidForm({
             const userBidsForThisAuction = bids.filter(
               bid => 
                 bid.tokenId === auctionDetail.tokenId && 
-                bid.bidder.toLowerCase() === address.toLowerCase()
+                bid.bidder.toLowerCase() === activeAddress.toLowerCase()
             );
             
             // Sort by timestamp/amount to get the most recent bid
@@ -186,7 +202,7 @@ export function BidForm({
       
       fetchPreviousBid();
     }
-  }, [auctionDetail?.tokenId, address, fetchHistoricalAuctions, setValue]);
+  }, [auctionDetail?.tokenId, activeAddress, fetchHistoricalAuctions, setValue]);
 
   // Clear URL field when wallet is disconnected
   useEffect(() => {
@@ -214,6 +230,12 @@ export function BidForm({
 
     if (!isConnected) {
       toast.error("Connect a wallet");
+      return;
+    }
+
+    // Check if smart wallet is available when needed
+    if (!activeAddress) {
+      toast.error("No wallet address available");
       return;
     }
 
@@ -247,10 +269,24 @@ export function BidForm({
         ? parseUnits(`${fullBidAmount}`, 6)  // USDC has 6 decimals
         : parseUnits(`${fullBidAmount}`, 18); // QR/ETH have 18 decimals
       
-      const hash = await bidAmount({
-        value: bidValue,
-        urlString: data.url,
-      });
+      // Use smart wallet client if available, otherwise fall back to regular client
+      let hash;
+      if (smartWalletClient) {
+        console.log("Placing bid using smart wallet:", smartWalletClient.account?.address);
+        
+        // Pass the smart wallet client to bidAmount
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: data.url,
+          smartWalletClient: smartWalletClient
+        });
+      } else {
+        console.log("Placing bid using EOA wallet");
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: data.url
+        });
+      }
       
       // Register the transaction hash to prevent duplicate toasts
       registerTransaction(hash);
@@ -269,7 +305,7 @@ export function BidForm({
         success: async (data: any) => {
           // Send notification to previous highest bidder AFTER transaction confirms
           if (previousBidder && 
-              previousBidder !== address &&
+              previousBidder !== activeAddress &&
               previousBidder !== "0x0000000000000000000000000000000000000000" &&
               previousBid && previousBid > 0n) {
             

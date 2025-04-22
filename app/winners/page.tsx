@@ -2,10 +2,8 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { QRUserPill } from "@/components/QRUserPill";
 import { useFetchSettledAuc } from "@/hooks/useFetchSettledAuc";
 import { formatEther } from "viem";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 import { Button } from "@/components/ui/button";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import { useRouter } from "next/navigation";
@@ -26,6 +24,7 @@ import clsx from "clsx";
 import { toast } from "sonner";
 import { WarpcastLogo } from "@/components/WarpcastLogo";
 import { useAccount } from 'wagmi';
+import { CustomWallet } from "@/components/CustomWallet";
 
 // Type definition for winner data
 type WinnerData = {
@@ -416,12 +415,7 @@ export default function WinnersPage() {
             </div>
           </Button>
           
-          <div className="relative">
-            <QRUserPill />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
+          <CustomWallet />
         </div>
       </nav>
 

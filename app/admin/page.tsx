@@ -22,9 +22,9 @@ const Badge = ({ variant, className, children }: { variant?: string, className?:
   );
 };
 import { ExternalLink, Dices } from "lucide-react";
-import { QRUserPill } from "@/components/QRUserPill";
 import { useAuctionMetrics } from "@/hooks/useAuctionMetrics";
 import { TestimonialsAdmin } from "./testimonials";
+import { CustomWallet } from "@/components/CustomWallet";
 
 // Hook for Farcaster metrics
 function useFarcasterMetrics() {
@@ -718,7 +718,7 @@ export default function AdminDashboard() {
                   `$QR: $${formatNumber(qrPrice || 0, 6)}`
                 )}
               </Badge>
-              <QRUserPill size={40} />
+              <CustomWallet />
             </div>
           </div>
           <div className="bg-amber-100 text-amber-800 p-6 rounded-lg">
@@ -753,7 +753,7 @@ export default function AdminDashboard() {
                   `$QR: $${formatNumber(qrPrice || 0, 6)}`
                 )}
               </Badge>
-              <QRUserPill size={40} />
+              <CustomWallet />
             </div>
           </div>
           <div className="bg-red-100 text-red-800 p-6 rounded-lg">
@@ -790,7 +790,7 @@ export default function AdminDashboard() {
                 `$QR: $${formatNumber(qrPrice || 0, 6)}`
               )}
             </Badge>
-            <QRUserPill size={40} />
+            <CustomWallet />
           </div>
         </div>
 

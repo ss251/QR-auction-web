@@ -40,7 +40,6 @@ export const privyConfig = {
       ? ['detected_ethereum_wallets'] // Show wallets that are available in Farcaster frames
       : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'],
     // Don't show recent wallets in frames
-    showRecentWallets: false,
   },
   // Dark mode override - will be applied client-side
   appearanceDark: {

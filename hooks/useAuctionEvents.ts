@@ -8,8 +8,8 @@ import { base } from 'viem/chains';
 import { formatQRAmount } from "@/utils/formatters";
 
 // Define the events we want to monitor
-const AuctionBidEvent = parseAbiItem('event AuctionBid(uint256 tokenId, address bidder, uint256 amount, bool extended, uint256 endTime, string urlString)');
-const AuctionSettledEvent = parseAbiItem('event AuctionSettled(uint256 tokenId, address winner, uint256 amount, string urlString)');
+const AuctionBidEvent = parseAbiItem('event AuctionBid(uint256 tokenId, address bidder, uint256 amount, bool extended, uint256 endTime, string urlString, string name)');
+const AuctionSettledEvent = parseAbiItem('event AuctionSettled(uint256 tokenId, address winner, uint256 amount, string urlString, string name)');
 const AuctionCreatedEvent = parseAbiItem('event AuctionCreated(uint256 tokenId, uint256 startTime, uint256 endTime)');
 
 // ==========================================
@@ -248,7 +248,7 @@ export function useAuctionEvents({
                 const isLegacyAuction = tokenId <= 22n;
                 const isV2Auction = tokenId >= 23n && tokenId <= 35n;
                 const isV3Auction = tokenId >= 36n;
-                const amount_num = Number(amount) / 1e18;
+                const amount_num = isV3Auction ? Number(amount) / 1e6 : Number(amount) / 1e18;
                 
                 let bidText = '';
                 if (isLegacyAuction) {
@@ -256,7 +256,7 @@ export function useAuctionEvents({
                 } else if (isV2Auction) {
                   bidText = `${formatQRAmount(amount_num)} $QR`;
                 } else if (isV3Auction) {
-                  bidText = `${amount_num.toFixed(2)} $USDC`;
+                  bidText = `${amount_num.toFixed(2)} USDC`;
                 }
                 
                 toast(`New bid: ${bidText} by ${displayName}`, { 

@@ -268,54 +268,35 @@ export function AuctionDetails({
     setShowBidHistory(true);
   };
 
+
+  // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
+    
   // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
   useEffect(() => {
     if (id) {
-      // Clear any previous errors
-      setFetchError(null);
-      
-      // Add a small delay to prevent race conditions
-      const fetchTimer = setTimeout(async () => {
+      const refetchDetails = async () => {
+        console.log(`[Effect] Refetching details for auction #${id}`);
         setIsLoading(true);
-        console.log(`Fetching details for auction #${id}`);
-        
+        setFetchError(null); // Clear previous errors
         try {
-          const refetchResult = await refetch();
-          console.log(`Refetch result for auction #${id}:`, refetchResult);
-          
-          await refetchSettings();
-          
-          // If we have contract read errors, log them in detail
-          if (contractReadError) {
-            console.error(`Contract read error for auction #${id}:`, contractReadError);
-            setFetchError(`Error loading auction data: ${contractReadError.message}`);
-          } else if (settingsError) {
-            console.error(`Settings error for auction #${id}:`, settingsError);
-            setFetchError(`Error loading auction settings: ${settingsError.message}`);
-          }
+        await refetch();
+        await refetchSettings();
+          console.log(`[Effect] Refetch complete for auction #${id}`);
         } catch (error: any) {
-          console.error(`Error fetching auction #${id} details:`, error);
+          console.error(`[Effect] Error fetching auction #${id} details:`, error);
           setFetchError(`Failed to load auction data: ${error.message || 'Unknown error'}`);
         } finally {
-          // If we've been loading for more than 5 seconds, set loading to false
-          // even if we don't have data, to avoid UI being stuck in loading state
+          // Add a small delay before setting loading to false to allow state propagation
           setTimeout(() => {
-            if (isLoading) {
-              console.log(`Forcing loading state off for auction #${id} after timeout`);
-              setIsLoading(false);
-            }
-          }, 5000);
-          
-          if (auctionDetail !== undefined) {
-            console.log(`Setting loading to false for auction #${id}, we have data:`, auctionDetail);
-            setIsLoading(false);
-          }
+            console.log(`[Effect] Setting isLoading to false for auction #${id}`);
+          setIsLoading(false);
+          }, 150); 
         }
-      }, 100); // Small delay to prevent race conditions
-      
-      return () => clearTimeout(fetchTimer);
+      };
+      refetchDetails();
     }
-  }, [id]); // Only depend on id to prevent circular dependencies
+    // Depend only on id, refetch, and refetchSettings to avoid stale closures or circular dependencies
+  }, [id, refetch, refetchSettings]);
 
   // Update document title with current bid
   useEffect(() => {

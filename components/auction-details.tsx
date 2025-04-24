@@ -66,6 +66,8 @@ export function AuctionDetails({
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [settledAuctions, setSettledAcustions] = useState<AuctionType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [dataReady, setDataReady] = useState(false);
+  const [completionStatusReady, setCompletionStatusReady] = useState(false);
   const [bidderNameInfo, setBidderNameInfo] = useState<NameInfo>({
     displayName: "",
     farcasterUsername: null,
@@ -111,6 +113,78 @@ export function AuctionDetails({
 
   // Add state to track fetch errors
   const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Combine loading states to determine when to show skeleton
+  // Include completionStatus to ensure settle button state is considered
+  const showSkeleton = isLoading || !dataReady || !completionStatusReady;
+
+  // Reset all data ready states whenever ID changes
+  useEffect(() => {
+    setDataReady(false);
+    setCompletionStatusReady(false);
+    setIsLoading(true);
+  }, [id]);
+
+  // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
+  useEffect(() => {
+    if (id) {
+      const refetchDetails = async () => {
+        console.log(`[Effect] Refetching details for auction #${id}`);
+        setIsLoading(true);
+        setDataReady(false);
+        setCompletionStatusReady(false);
+        setFetchError(null); // Clear previous errors
+        
+        try {
+          // Fetch all data in parallel for better performance
+          const [auctionResult, settingsResult, settledAuctions] = await Promise.all([
+            refetch(),
+            refetchSettings(),
+            auctionsSettled()
+          ]);
+          
+          console.log(`[Effect] Refetch complete for auction #${id}`);
+          
+          // Update settled auctions if we got them
+          if (settledAuctions !== undefined) {
+            setSettledAcustions(settledAuctions);
+          }
+          
+          // Set a flag that data is ready for this specific ID
+          setDataReady(true);
+          
+          // Short timeout to synchronize UI updates and prevent flicker
+          setTimeout(() => {
+            // Set completion status ready even if countdown isn't updated yet
+            setCompletionStatusReady(true);
+            
+            // Now set loading to false after all statuses are ready
+            setTimeout(() => {
+              console.log(`[Effect] Setting isLoading to false for auction #${id}`);
+              setIsLoading(false);
+            }, 50);
+          }, 50);
+        } catch (error: any) {
+          console.error(`[Effect] Error fetching auction #${id} details:`, error);
+          setFetchError(`Failed to load auction data: ${error.message || 'Unknown error'}`);
+          setIsLoading(false);
+          setDataReady(true);
+          setCompletionStatusReady(true);
+        }
+      };
+      
+      refetchDetails();
+    }
+  }, [id, refetch, refetchSettings, auctionsSettled]);
+
+  // When countdown updates to "complete", make sure we show the settle button immediately
+  useEffect(() => {
+    // This ensures the completion status is set properly when isComplete changes
+    if (isComplete && auctionDetail) {
+      console.log(`[Effect] Auction #${id} is now complete, updating UI`);
+      setCompletionStatusReady(true);
+    }
+  }, [isComplete, auctionDetail, id]);
 
   const handleSettle = useCallback(async () => {
     console.log(`[DEBUG] handleSettle called, isComplete: ${isComplete}, isWhitelisted: ${isWhitelisted}, isV3Auction: ${isV3Auction}`);
@@ -268,43 +342,13 @@ export function AuctionDetails({
     setShowBidHistory(true);
   };
 
-
-  // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
-    
-  // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
-  useEffect(() => {
-    if (id) {
-      const refetchDetails = async () => {
-        console.log(`[Effect] Refetching details for auction #${id}`);
-        setIsLoading(true);
-        setFetchError(null); // Clear previous errors
-        try {
-        await refetch();
-        await refetchSettings();
-          console.log(`[Effect] Refetch complete for auction #${id}`);
-        } catch (error: any) {
-          console.error(`[Effect] Error fetching auction #${id} details:`, error);
-          setFetchError(`Failed to load auction data: ${error.message || 'Unknown error'}`);
-        } finally {
-          // Add a small delay before setting loading to false to allow state propagation
-          setTimeout(() => {
-            console.log(`[Effect] Setting isLoading to false for auction #${id}`);
-          setIsLoading(false);
-          }, 150); 
-        }
-      };
-      refetchDetails();
-    }
-    // Depend only on id, refetch, and refetchSettings to avoid stale closures or circular dependencies
-  }, [id, refetch, refetchSettings]);
-
   // Update document title with current bid
   useEffect(() => {
     // Start with default title
     document.title = "QR";
     
     // Only proceed if we have auction data and it's not loading
-    if (!auctionDetail || isLoading) {
+    if (!auctionDetail || showSkeleton) {
       return;
     }
     
@@ -332,18 +376,7 @@ export function AuctionDetails({
         document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
       }
     }
-  }, [auctionDetail, qrPrice, bidderNameInfo.displayName, isLoading, isV3Auction]);
-
-  useEffect(() => {
-    const ftSetled = async () => {
-      const data = await auctionsSettled();
-      if (data !== undefined) {
-        setSettledAcustions(data);
-      }
-    };
-
-    ftSetled();
-  }, [isComplete]);
+  }, [auctionDetail, qrPrice, bidderNameInfo.displayName, showSkeleton, isV3Auction]);
 
   useEffect(() => {
     const fetchBidderName = async () => {
@@ -464,6 +497,9 @@ export function AuctionDetails({
     }
   }, [address, isWhitelisted, whitelistLoading]);
 
+  // Ensure we have valid data for the current auction ID before showing content
+  const hasValidAuctionData = auctionDetail && Number(auctionDetail.tokenId) === id;
+
   return (
     <div className="space-y-6">
       <div className="space-y-2.5">
@@ -502,7 +538,7 @@ export function AuctionDetails({
             className={`${isBaseColors ? "text-foreground" : ""} cursor-pointer`}
           />
         </div>
-        {isLoading && (
+        {showSkeleton && (
           <div className="flex flex-col space-y-3">
             <Skeleton className="h-[125px] w-full rounded-xl" />
             <div className="space-y-2">
@@ -512,7 +548,7 @@ export function AuctionDetails({
           </div>
         )}
 
-        {fetchError && !isLoading && (
+        {fetchError && !showSkeleton && (
           <div className="bg-red-50 border border-red-200 p-4 rounded-md text-red-700">
             <p className="font-medium">Error loading auction</p>
             <p className="text-sm">{fetchError}</p>
@@ -526,9 +562,7 @@ export function AuctionDetails({
           </div>
         )}
 
-        {auctionDetail &&
-          Number(auctionDetail.tokenId) === id &&
-          !isLoading && (
+        {hasValidAuctionData && !showSkeleton && (
             <>
               {/* Only show settled view if auction is actually settled or it's auction #22 */}
               {!auctionDetail.settled && !isAuction22 ? (
@@ -715,9 +749,7 @@ export function AuctionDetails({
             </>
           )}
 
-        {auctionDetail &&
-          Number(auctionDetail.tokenId) !== id &&
-          !isLoading && (
+        {currentSettledAuction && !hasValidAuctionData && !showSkeleton && (
             <>
               <WinDetailsView
                 tokenId={currentSettledAuction?.tokenId || 0n}

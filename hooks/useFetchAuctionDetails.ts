@@ -6,7 +6,7 @@ import QRAuctionV2 from "../abi/QRAuctionV2.json";
 import QRAuctionV3 from "../abi/QRAuctionV3.json";
 import { Address } from "viem";
 import { wagmiConfig } from "@/config/wagmiConfig";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
 
@@ -36,11 +36,15 @@ type AuctionResponse = [
   qrMetadata: QRData
 ];
 
+// Global auction cache to improve navigation performance
+const auctionCache = new Map<string, Auction>();
+
 export function useFetchAuctionDetails(tokenId?: bigint) {
   const [auctionDetail, setAuctiondetails] = useState<Auction>();
   const isLegacyAuction = tokenId && tokenId <= 22n;
   const isV2Auction = tokenId && tokenId >= 23n && tokenId <= 35n;
   const isV3Auction = tokenId && tokenId >= 36n;
+  const lastFetchedTokenId = useRef<bigint | undefined>(undefined);
   
   // Determine the correct contract address and ABI based on tokenId
   const contractAddress = isLegacyAuction 
@@ -57,6 +61,9 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
       ? QRAuctionV2.abi 
       : QRAuctionV3.abi;
 
+  // Use optimized enabled flag to prevent unnecessary reads
+  const shouldFetch = !!tokenId && tokenId !== lastFetchedTokenId.current;
+
   if (process.env.NODE_ENV === "development") {
     console.log(`Using contract for auction #${tokenId}: ${contractAddress}, version: ${
       isLegacyAuction ? 'V1' : isV2Auction ? 'V2' : 'V3'
@@ -69,6 +76,10 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
     functionName: "auction",
     args: [],
     config: wagmiConfig,
+    query: {
+      enabled: shouldFetch,
+      gcTime: 60000, // Keep data in cache for 1 minute
+    }
   });
 
   // Log any contract read errors
@@ -78,70 +89,101 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
     }
   }, [contractReadError]);
 
+  // Check cache first for quick navigation
+  useEffect(() => {
+    if (!tokenId) return;
+    
+    // Create unique key for cache
+    const cacheKey = `${tokenId}-${contractAddress}`;
+    
+    // Check if we have cached data for this auction
+    if (auctionCache.has(cacheKey)) {
+      console.log(`Using cached data for auction #${tokenId}`);
+      setAuctiondetails(auctionCache.get(cacheKey));
+    }
+  }, [tokenId, contractAddress]);
+
   useEffect(() => {
     const fetchDetails = async () => {
+      if (!tokenId) return;
+      
+      // Create unique key for cache
+      const cacheKey = `${tokenId}-${contractAddress}`;
+      
+      // Skip if we're already on this token ID
+      if (tokenId === lastFetchedTokenId.current && auctionDetail) {
+        return;
+      }
+      
       console.log(`Fetching auction details for token #${tokenId} from contract ${contractAddress}`);
       
       try {
+        // If we need fresh data, refetch
         const result = await refetch();
-        console.log("Refetch result:", result);
+        
+        if (!result.data) {
+          console.log(`No auction details returned for #${tokenId}`);
+          return;
+        }
+        
+        // Assert that auctionDetails is of the expected type
+        const details = result.data as AuctionResponse;
+        const bidderAddress = details[2];
+        
+        console.log(`Auction data for #${tokenId}:`, {
+          tokenId: details[0].toString(),
+          highestBid: details[1].toString(),
+          highestBidder: bidderAddress,
+          startTime: details[3].toString(),
+          endTime: details[4].toString(),
+          settled: details[5]
+        });
 
-        if (auctionDetails) {
-          // Assert that auctionDetails is of the expected type
-          const details = auctionDetails as AuctionResponse;
-          const bidderAddress = details[2];
-          
-          console.log(`Auction data:`, {
-            tokenId: details[0].toString(),
-            highestBid: details[1].toString(),
-            highestBidder: bidderAddress,
-            startTime: details[3].toString(),
-            endTime: details[4].toString(),
-            settled: details[5]
+        // Start with basic auction data
+        const auctionData: Auction = {
+          tokenId: details[0],
+          highestBid: details[1],
+          highestBidder: bidderAddress,
+          startTime: details[3],
+          endTime: details[4],
+          settled: details[5],
+          qrMetadata: details[6],
+        };
+        
+        // Set the auction data immediately without name
+        setAuctiondetails(auctionData);
+        
+        // Cache the data
+        auctionCache.set(cacheKey, auctionData);
+        
+        // Track that we've fetched this token ID
+        lastFetchedTokenId.current = tokenId;
+        
+        // Fetch name asynchronously for display purposes
+        try {
+          const name = await getName({
+            address: bidderAddress as Address,
+            chain: base,
           });
 
-          try {
-            // Get basename for display purposes only
-            const name = await getName({
-              address: bidderAddress as Address,
-              chain: base,
-            });
-
-            setAuctiondetails({
-              tokenId: details[0],
-              highestBid: details[1],
-              highestBidder: bidderAddress,
-              highestBidderName: name || undefined,
-              startTime: details[3],
-              endTime: details[4],
-              settled: details[5],
-              qrMetadata: details[6],
-            });
-          } catch (nameError) {
-            console.error("Error fetching name:", nameError);
-            // Still set the auction details even if name resolution fails
-            setAuctiondetails({
-              tokenId: details[0],
-              highestBid: details[1],
-              highestBidder: bidderAddress,
-              startTime: details[3],
-              endTime: details[4],
-              settled: details[5],
-              qrMetadata: details[6],
-            });
-          }
-        } else {
-          console.log("No auction details returned");
+          // Update with name
+          const updatedData = {
+            ...auctionData,
+            highestBidderName: name || undefined
+          };
+          
+          setAuctiondetails(updatedData);
+          auctionCache.set(cacheKey, updatedData);
+        } catch (nameError) {
+          console.error("Error fetching name:", nameError);
         }
       } catch (error) {
         console.error("Error fetching auction details:", error);
       }
     };
 
-    if (tokenId) {
-      fetchDetails();
-    }
-  }, [refetch, auctionDetails, tokenId, contractAddress]);
+    fetchDetails();
+  }, [refetch, auctionDetails, tokenId, contractAddress, auctionDetail]);
 
   return { refetch, auctionDetail, contractReadError };
 }

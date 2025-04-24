@@ -283,8 +283,13 @@ export default function AuctionPage() {
               )}
             </div>
           </Button>
-
-          <CustomWallet />
+          
+          <div className="relative">
+            <CustomWallet />
+            <div className="absolute right-0 top-full mt-2 pr-1">
+              <ConnectionIndicator />
+            </div>
+          </div>
         </div>
       </nav>
 

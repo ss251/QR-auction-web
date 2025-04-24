@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { ThemeDialog } from "@/components/ThemeDialog";
 import { useAccount } from 'wagmi';
 import { CustomWallet } from "@/components/CustomWallet";
+import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 
 export default function AboutPage() {
   const router = useRouter();
@@ -100,7 +101,12 @@ export default function AboutPage() {
             </div>
           </Button>
           
-          <CustomWallet />
+          <div className="relative">
+            <CustomWallet />
+            <div className="absolute right-0 top-full mt-2 pr-1">
+              <ConnectionIndicator />
+            </div>
+          </div>
         </div>
       </nav>
 

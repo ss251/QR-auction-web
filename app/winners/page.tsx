@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { WarpcastLogo } from "@/components/WarpcastLogo";
 import { useAccount } from 'wagmi';
 import { CustomWallet } from "@/components/CustomWallet";
+import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 
 // Type definition for winner data
 type WinnerData = {
@@ -415,14 +416,19 @@ export default function WinnersPage() {
             </div>
           </Button>
           
-          <CustomWallet />
+          <div className="relative">
+            <CustomWallet />
+            <div className="absolute right-0 top-full mt-2 pr-1">
+              <ConnectionIndicator />
+            </div>
+          </div>
         </div>
       </nav>
 
       <div className="max-w-3xl mx-auto">
         <div className="flex flex-col mb-6 md:mb-8">
           <div className="flex items-center mb-1 md:mb-2">
-            <h1 className="text-2xl md:text-3xl font-bold">🏆 All-Time Winners</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-center">🏆 All-Time Winners</h1>
           </div>
           <p className="text-sm md:text-lg text-gray-600 dark:text-gray-400">
             Complete history of all auction winners

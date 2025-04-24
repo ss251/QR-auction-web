@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { broadcastConnection } from "@/lib/channelManager";
 
 // --- Constants ---
 const BASE_MAINNET_ID = 8453;
@@ -51,11 +52,6 @@ interface LinkedAccount {
   walletClient?: string;
   chainId?: string;
   address?: string;
-}
-
-interface SmartWallet {
-  address: string;
-  chainId: number;
 }
 
 // --- Helper Function ---
@@ -76,6 +72,7 @@ export function CustomWallet() {
   const [sendAmount, setSendAmount] = useState("");
   const [selectedToken, setSelectedToken] = useState<Token>("ETH");
   const [isSending, setIsSending] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false); // Track connection state
 
   const { ready, authenticated, user, exportWallet } = usePrivy();
   const { address: eoaAddress, chain } = useAccount();
@@ -84,11 +81,13 @@ export function CustomWallet() {
   const { logout } = useLogout();
   const { login } = useLogin({
     onComplete: () => {
-       console.log("Login complete");
+      console.log("Login complete");
+      setIsConnecting(false); // Reset connecting state on completion
     },
     onError: (error: Error) => {
       console.error("Login error:", error);
       toast.error("Login failed. Please try again.");
+      setIsConnecting(false); // Reset connecting state on error
     }
   });
 
@@ -140,6 +139,18 @@ export function CustomWallet() {
     },
   });
 
+  // Track authentication state changes to broadcast connections
+  useEffect(() => {
+    if (authenticated && eoaAddress) {
+      // Generate a unique browser instance ID to help identify this connection
+      const browserInstanceId = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+      
+      // Broadcast the wallet connection event
+      console.log('Broadcasting wallet connection for address:', eoaAddress);
+      broadcastConnection(eoaAddress, browserInstanceId);
+    }
+  }, [authenticated, eoaAddress]);
+
   const [usdcBalance, qrBalance, usdcDecimals, qrDecimals] = useMemo(() => {
     if (!tokenBalances || tokenBalances.length < 4) return [0, 0, 6, 18];
     const usdcDecimals = tokenBalances[2]?.result ?? 6;
@@ -168,6 +179,14 @@ export function CustomWallet() {
   const ethBalanceFormatted = useMemo(() => {
       return parseFloat(formatEther(ethBalance?.value ?? 0n));
   }, [ethBalance])
+
+  // Detect if we're on mobile
+  const isMobile = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    }
+    return false;
+  }, []);
 
   useEffect(() => {
     if (eoaAddress && !displayName && !isFetchingName) {
@@ -200,11 +219,32 @@ export function CustomWallet() {
     }
   }, [eoaAddress, displayName, isFetchingName]);
 
+  // Initialize client state but prevent auto-opening on mobile
+  useEffect(() => {
+    setIsClient(true);
+    
+    // Ensure the dialog is closed on initial mount, especially on mobile
+    if (isMobile) {
+      setIsOpen(false);
+    }
+  }, [isMobile]);
+
   const handleDisconnect = async () => {
-    await logout();
-    setIsOpen(false);
-    setDisplayName(null);
-    setPfpUrl(null);
+    try {
+      console.log("Logging out from Privy and clearing session...");
+      
+      // Clear local state first
+      setDisplayName(null);
+      setPfpUrl(null);
+      setIsOpen(false);
+      
+      // Actually log out from Privy - this is the critical part
+      await logout();
+      
+    } catch (error) {
+      console.error("Error during logout:", error);
+      toast.error("Failed to disconnect wallet. Try again.");
+    }
   };
 
   const handleSwitchNetwork = () => {
@@ -358,9 +398,51 @@ export function CustomWallet() {
     refetchTokenBalances();
   }
 
+  // Function to handle wallet connect button click
+  const handleConnectWallet = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // First close our dialog to avoid showing multiple modals
+    setIsOpen(false);
+    
+    // Set connecting state and trigger Privy login
+    setIsConnecting(true);
+    
+    // Small timeout to ensure our dialog is fully closed before Privy opens
+    setTimeout(() => {
+      login();
+      
+      // Set a timeout to clean up if login modal gets stuck
+      setTimeout(() => {
+        if (isConnecting) {
+          setIsConnecting(false);
+        }
+      }, 5000); // 5 second safety timeout
+    }, 100);
+    
+    return false;
+  };
+
+  // Cleanup any modal-related issues when component unmounts
   useEffect(() => {
-    setIsClient(true);
+    return () => {
+      // Reset states on unmount
+      setIsConnecting(false);
+      setIsOpen(false);
+    };
   }, []);
+
+  // Close handler for the dialog
+  const handleOpenChange = (open: boolean) => {
+    // Only allow the dialog to open if we're not in the connecting state
+    if (isConnecting && !open) {
+      setIsConnecting(false); // Allow closing the modal when connecting
+    } else if (isConnecting && open) {
+      return; // Prevent opening the modal when connecting
+    }
+    setIsOpen(open);
+  };
 
   if (!isClient || !ready) {
     return (
@@ -371,7 +453,7 @@ export function CustomWallet() {
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
+    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         {authenticated ? (
           <Button
@@ -403,7 +485,7 @@ export function CustomWallet() {
               "w-auto",
               isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
             )}
-            onClick={login}
+            onClick={handleConnectWallet}
           >
             <Wallet className="h-5 w-5 md:hidden" />
             <span className="hidden md:inline">Connect Wallet</span>

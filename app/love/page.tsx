@@ -20,6 +20,7 @@ import "react-farcaster-embed/dist/styles.css";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { CustomWallet } from "@/components/CustomWallet";
+import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 
 interface Testimonial {
   id: number;
@@ -328,7 +329,12 @@ export default function WallOfLovePage() {
             </div>
           </Button>
           
-          <CustomWallet />
+          <div className="relative">
+            <CustomWallet />
+            <div className="absolute right-0 top-full mt-2 pr-1">
+              <ConnectionIndicator />
+            </div>
+          </div>
         </div>
       </nav>
 

@@ -483,7 +483,7 @@ export function CustomWallet() {
         onClick={handleProfileClick}
         aria-label="View profile"
       >
-        <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full md:rounded-md"> 
+        <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full"> 
           <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? "Profile"} />
           <AvatarFallback className="text-xs bg-muted">
             {displayName ? displayName.substring(0, 2).toUpperCase() : <Wallet className="h-4 w-4"/>}
@@ -517,7 +517,7 @@ export function CustomWallet() {
             )}
             aria-label="Open wallet dialog"
           >
-            <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full md:rounded-md"> 
+            <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full"> 
               <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? headerAddress} />
               <AvatarFallback className="text-xs bg-muted">
                 {displayName ? displayName.substring(0, 2).toUpperCase() : <Wallet className="h-4 w-4"/>}

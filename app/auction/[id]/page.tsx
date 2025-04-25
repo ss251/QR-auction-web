@@ -52,7 +52,6 @@ export default function AuctionPage() {
   const [copied, setCopied] = useState(false);
   const [isLatestAuction, setIsLatestAuction] = useState(false);
   const [latestAuctionId, setLatestAuctionId] = useState(0);
-  const [navigatedFromCreation, setNavigatedFromCreation] = useState(false);
 
   const isBaseColors = useBaseColors();
   const { isOpen, pendingUrl, openDialog, closeDialog, handleContinue } = useSafetyDialog();
@@ -69,11 +68,10 @@ export default function AuctionPage() {
       setLatestAuctionId(lastId);
       setIsLatestAuction(currentAuctionId === lastId);
       setIsLoading(false);
-      setNavigatedFromCreation(false);
     } else if (auctions) {
       setIsLoading(false);
     }
-  }, [auctions, currentAuctionId, navigatedFromCreation]);
+  }, [auctions, currentAuctionId]);
 
   const fetchOgImage = useCallback(async () => {
     try {
@@ -141,16 +139,13 @@ export default function AuctionPage() {
       }
     },
     onAuctionCreated: (tokenId) => {
-      const newLatestId = Number(tokenId);
-      console.log(`AuctionCreated event for ${newLatestId}, current: ${currentAuctionId}, isLatest: ${isLatestAuction}`);
-      if (isLatestAuction || currentAuctionId === newLatestId - 1) {
-        console.log(`Navigating to new auction: ${newLatestId}`);
-        setIsLoading(true);
-        setNavigatedFromCreation(true);
-        router.push(`/auction/${newLatestId}`);
-      } else {
-        refetchAuctions();
-      }
+      refetchAuctions().then(() => {
+        const newLatestId = Number(tokenId);
+        if (isLatestAuction || currentAuctionId === newLatestId - 1) {
+          router.push(`/auction/${newLatestId}`);
+        }
+        fetchOgImage();
+      });
     },
   });
 
@@ -230,7 +225,7 @@ export default function AuctionPage() {
               </div>
             </div>
 
-            {!isLoading && !navigatedFromCreation && currentAuctionId > 0 ? (
+            {!isLoading && currentAuctionId > 0 ? (
               <AuctionDetails
                 id={currentAuctionId}
                 onPrevious={handlePrevious}

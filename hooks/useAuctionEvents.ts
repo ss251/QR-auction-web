@@ -117,8 +117,8 @@ async function getBidderIdentity(address: string): Promise<string> {
 // ==========================================
 
 type UseAuctionEventsProps = {
-  onAuctionBid?: (tokenId: bigint, bidder: string, amount: bigint, extended: boolean, endTime: bigint) => void;
-  onAuctionSettled?: (tokenId: bigint, winner: string, amount: bigint) => void;
+  onAuctionBid?: (tokenId: bigint, bidder: string, amount: bigint, extended: boolean, endTime: bigint, urlString: string, name: string) => void;
+  onAuctionSettled?: (tokenId: bigint, winner: string, amount: bigint, urlString: string, name: string) => void;
   onAuctionCreated?: (tokenId: bigint, startTime: bigint, endTime: bigint) => void;
   showToasts?: boolean;
   tokenId?: bigint;
@@ -230,7 +230,7 @@ export function useAuctionEvents({
           const { args, transactionHash } = log;
           if (!args) return;
           
-          const { tokenId, bidder, amount, extended, endTime } = args;
+          const { tokenId, bidder, amount, extended, endTime, urlString, name } = args;
           
           // Check if this event is from the user's own transaction
           const isUserTransaction = transactionHash && activeTransactions.has(transactionHash);
@@ -271,8 +271,8 @@ export function useAuctionEvents({
             }
           }
           
-          if (onAuctionBid && tokenId && bidder && amount !== undefined && extended !== undefined && endTime) {
-            onAuctionBid(tokenId, bidder, amount, extended, endTime);
+          if (onAuctionBid && tokenId && bidder && amount !== undefined && extended !== undefined && endTime !== undefined && urlString !== undefined) {
+            onAuctionBid(tokenId, bidder, amount, extended, endTime, urlString, name || "");
           }
         });
       },
@@ -287,7 +287,7 @@ export function useAuctionEvents({
           const { args, transactionHash } = log;
           if (!args) return;
           
-          const { tokenId, winner, amount } = args;
+          const { tokenId, winner, amount, urlString, name } = args;
           
           // Check if this event is from the user's own transaction
           const isUserTransaction = transactionHash && activeTransactions.has(transactionHash);
@@ -320,8 +320,8 @@ export function useAuctionEvents({
             }, COMBINE_WINDOW);
           }
           
-          if (onAuctionSettled && tokenId && winner && amount !== undefined) {
-            onAuctionSettled(tokenId, winner, amount);
+          if (onAuctionSettled && tokenId && winner && amount !== undefined && urlString !== undefined) {
+            onAuctionSettled(tokenId, winner, amount, urlString, name || "");
           }
         });
       },

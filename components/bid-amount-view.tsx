@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAccount, useBalance } from "wagmi";
 import { SafeExternalLink } from "./SafeExternalLink";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { formatURL } from "@/utils/helperFunctions";
 import { registerTransaction } from "@/hooks/useAuctionEvents";
 import { useBaseColors } from "@/hooks/useBaseColors";
@@ -39,6 +39,7 @@ export function BidForm({
   openDialog: (url: string) => boolean;
 }) {
   const [showUniswapModal, setShowUniswapModal] = useState(false);
+  const [isPlacingBid, setIsPlacingBid] = useState(false);
   const isBaseColors = useBaseColors();
   const { isConnected, address: eoaAddress } = useAccount();
   const { handleTypingStart } = useTypingStatus();
@@ -239,6 +240,9 @@ export function BidForm({
       return;
     }
 
+    // Set bidding state to true at the start of the process
+    setIsPlacingBid(true);
+
     try {
       // Calculate bid amount based on auction type
       const fullBidAmount = isV3Auction 
@@ -261,6 +265,7 @@ export function BidForm({
         // Show appropriate message based on token type
         toast.info(`You don't have enough ${tokenSymbol} tokens for this bid`);
         setShowUniswapModal(true);
+        setIsPlacingBid(false); // Reset bidding state
         return;
       }
       
@@ -336,14 +341,17 @@ export function BidForm({
           
           reset();
           onSuccess();
+          setIsPlacingBid(false); // Reset bidding state on success
           return "Bid Successful!";
         },
         error: (data: any) => {
+          setIsPlacingBid(false); // Reset bidding state on error
           return "Failed to create bid";
         },
       });
     } catch (error) {
       console.error(error);
+      setIsPlacingBid(false); // Reset bidding state on error
     }
   };
 
@@ -363,6 +371,7 @@ export function BidForm({
             {...register("bid")}
             onKeyDown={handleKeyDown}
             onInput={handleInputChange}
+            disabled={isPlacingBid}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
             {isV3Auction ? 'USDC' : 'M $QR'}
@@ -382,6 +391,7 @@ export function BidForm({
               {...register("url")}
               onKeyDown={handleKeyDown}
               onInput={handleInputChange}
+              disabled={isPlacingBid}
             />
             <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
               URL
@@ -395,11 +405,18 @@ export function BidForm({
         <Button
           type="submit"
           className={`px-8 py-2 text-white ${
-            isValid ? "bg-gray-900 hover:bg-gray-800" : "bg-gray-500"
+            isValid && !isPlacingBid ? "bg-gray-900 hover:bg-gray-800" : "bg-gray-500"
           } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
-          disabled={!isValid}
+          disabled={!isValid || isPlacingBid}
         >
-          Place Bid
+          {isPlacingBid ? (
+            <span className="flex items-center">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Placing bid...
+            </span>
+          ) : (
+            "Place Bid"
+          )}
         </Button>
 
         <Button
@@ -411,6 +428,7 @@ export function BidForm({
           className={`md:hidden px-8 py-2 text-white ${
             "bg-gray-900 hover:bg-gray-800"
           } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
+          disabled={isPlacingBid}
         >
           {isV3Auction ? 'Buy USDC' : 'Buy $QR'}
         </Button>

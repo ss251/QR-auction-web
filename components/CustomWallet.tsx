@@ -37,6 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { broadcastConnection } from "@/lib/channelManager";
+import sdk from "@farcaster/frame-sdk";
+import { frameSdk } from "@/lib/frame-sdk";
 
 // --- Constants ---
 const BASE_MAINNET_ID = 8453;
@@ -66,6 +68,8 @@ export function CustomWallet() {
   const [selectedToken, setSelectedToken] = useState<Token>("ETH");
   const [isSending, setIsSending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false); // Track connection state
+  const [isFrame, setIsFrame] = useState(false); // Track if we're in a Farcaster frame
+  const [frameFid, setFrameFid] = useState<number | null>(null); // Store the user's FID from frame context
 
   const { ready, authenticated, user } = usePrivy();
   const { address: eoaAddress, chain } = useAccount();
@@ -91,6 +95,36 @@ export function CustomWallet() {
   const userEmail = user?.email?.address;
 
   const isBaseColors = useBaseColors();
+
+  // Check if we're in a Farcaster frame on component mount
+  useEffect(() => {
+    const checkFrameContext = async () => {
+      try {
+        const context = await frameSdk.getContext();
+        if (context && context.user && context.user.fid) {
+          console.log("Running in Farcaster frame context", context);
+          setIsFrame(true);
+          setFrameFid(context.user.fid);
+          // Set profile data from frame context
+          if (context.user.displayName) {
+            setDisplayName(context.user.displayName);
+          } else if (context.user.username) {
+            setDisplayName(`@${context.user.username}`);
+          }
+          if (context.user.pfpUrl) {
+            setPfpUrl(context.user.pfpUrl);
+          }
+        } else {
+          setIsFrame(false);
+        }
+      } catch (error) {
+        console.log("Not in a Farcaster frame context:", error);
+        setIsFrame(false);
+      }
+    };
+
+    checkFrameContext();
+  }, []);
 
   // Extract smart wallet address directly from the client
   const smartWalletAddress = useMemo(() => {
@@ -181,8 +215,23 @@ export function CustomWallet() {
     return false;
   }, []);
 
+  // Handle profile click for Farcaster frame context
+  const handleProfileClick = async () => {
+    if (isFrame && frameFid) {
+      try {
+        // Use the Farcaster SDK to view the user's profile
+        await sdk.actions.viewProfile({ fid: frameFid });
+      } catch (error) {
+        console.error("Error opening profile in frame:", error);
+      }
+    } else {
+      // Regular wallet dialog opening behavior for non-frame environments
+      setIsOpen(true);
+    }
+  };
+
   useEffect(() => {
-    if (eoaAddress && !displayName && !isFetchingName) {
+    if (eoaAddress && !displayName && !isFetchingName && !isFrame) {
       setIsFetchingName(true);
       const fetchIdentity = async () => {
         try {
@@ -206,11 +255,11 @@ export function CustomWallet() {
         }
       };
       fetchIdentity();
-    } else if (!eoaAddress) {
+    } else if (!eoaAddress && !isFrame) {
         setDisplayName(null);
         setPfpUrl(null);
     }
-  }, [eoaAddress, displayName, isFetchingName]);
+  }, [eoaAddress, displayName, isFetchingName, isFrame]);
 
   // Initialize client state but prevent auto-opening on mobile
   useEffect(() => {
@@ -255,8 +304,6 @@ export function CustomWallet() {
     navigator.clipboard.writeText(smartWalletAddress);
     toast.info("Smart Wallet address copied!");
   }
-
-
 
   const handleInitiateSend = () => {
     setShowSendForm(true);
@@ -421,6 +468,33 @@ export function CustomWallet() {
     }
     setIsOpen(open);
   };
+
+  // If we're in a Farcaster frame, don't render the full wallet component
+  // Just render the profile avatar that opens the user's Warpcast profile
+  if (isFrame) {
+    return (
+      <Button
+        variant="outline"
+        className={clsx(
+          "flex items-center gap-2 h-10 md:px-3",
+          "p-0 w-10 md:w-auto",
+          isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
+        )}
+        onClick={handleProfileClick}
+        aria-label="View profile"
+      >
+        <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full md:rounded-md"> 
+          <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? "Profile"} />
+          <AvatarFallback className="text-xs bg-muted">
+            {displayName ? displayName.substring(0, 2).toUpperCase() : <Wallet className="h-4 w-4"/>}
+          </AvatarFallback>
+        </Avatar>
+        <span className="text-sm font-medium hidden md:inline">
+          {displayName || <Skeleton className="h-4 w-20 inline-block" />}
+        </span>
+      </Button>
+    );
+  }
 
   if (!isClient || !ready) {
     return (

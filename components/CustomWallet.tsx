@@ -22,7 +22,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Copy, LogOut, Wallet, Network, Send, Download, ExternalLink, RefreshCcw, Mail, ChevronDown, PlusCircle, Zap } from "lucide-react";
+import { Copy, LogOut, Wallet, Network, Send, ExternalLink, RefreshCcw, Mail, ChevronDown, PlusCircle, Zap } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -46,13 +46,6 @@ const QR_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN as Address;
 // Define Token type
 type Token = "ETH" | "USDC" | "$QR";
 
-// Define LinkedAccount type to avoid 'any'
-interface LinkedAccount {
-  type: string;
-  walletClient?: string;
-  chainId?: string;
-  address?: string;
-}
 
 // --- Helper Function ---
 function formatAddress(address?: string) {
@@ -74,7 +67,7 @@ export function CustomWallet() {
   const [isSending, setIsSending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false); // Track connection state
 
-  const { ready, authenticated, user, exportWallet } = usePrivy();
+  const { ready, authenticated, user } = usePrivy();
   const { address: eoaAddress, chain } = useAccount();
   const { switchChain } = useSwitchChain();
   const { data: ethBalance, isLoading: ethLoading, refetch: refetchEthBalance } = useBalance({ address: eoaAddress });
@@ -263,22 +256,7 @@ export function CustomWallet() {
     toast.info("Smart Wallet address copied!");
   }
 
-  const handleExportKey = async () => {
-      // Find the embedded wallet
-      const embeddedWallet = user?.linkedAccounts?.find(
-          (account: LinkedAccount) => account.type === 'wallet' && account.walletClient === 'privy'
-      );
-      if (!authenticated || !embeddedWallet) {
-          toast.error("Export only available for Privy embedded wallets.");
-          return;
-      }
-      try {
-          await exportWallet();
-      } catch (error) {
-          console.error("Export wallet failed:", error);
-          toast.error("Failed to initiate wallet export.");
-      }
-  };
+
 
   const handleInitiateSend = () => {
     setShowSendForm(true);
@@ -647,15 +625,7 @@ export function CustomWallet() {
                       <Button variant="outline" onClick={handleAddFunds} disabled={!displayAddress}>
                          <PlusCircle className="mr-2 h-4 w-4" /> Add Funds
                       </Button>
-                      <Button
-                            variant="outline"
-                            onClick={handleExportKey} 
-                            disabled={!authenticated || !user?.linkedAccounts?.find((account: LinkedAccount) => account.type === 'wallet' && account.walletClient === 'privy')}
-                            title={!user?.linkedAccounts?.find((account: LinkedAccount) => account.type === 'wallet' && account.walletClient === 'privy') ? "Export only available for embedded wallets" : "Export your wallet's private key"}
-                            className="col-span-2"
-                        >
-                        <Download className="mr-2 h-4 w-4" /> Export Signer Key
-                      </Button>
+
                       <a
                         href={`https://basescan.org/address/${displayAddress}`}
                         target="_blank"

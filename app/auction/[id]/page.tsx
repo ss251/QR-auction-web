@@ -19,7 +19,6 @@ import { useSafetyDialog } from "@/hooks/useSafetyDialog";
 import { SafetyDialog } from "@/components/SafetyDialog";
 import { SafeExternalLink } from "@/components/SafeExternalLink";
 import { useFetchAuctionSettings } from "@/hooks/useFetchAuctionSettings";
-import { ThemeDialog } from "@/components/ThemeDialog";
 import { useAuctionEvents } from "@/hooks/useAuctionEvents";
 import { Button } from "@/components/ui/button";
 import { useBaseColors } from "@/hooks/useBaseColors";
@@ -28,12 +27,8 @@ import { WinnerAnnouncement } from "@/components/WinnerAnnouncement";
 import { UniswapWidget } from "@/components/ui/uniswap-widget";
 import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
-import { QRContextMenu } from "@/components/QRContextMenu";
-import { useAccount } from 'wagmi';
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
-import { CustomWallet } from "@/components/CustomWallet";
 
 interface SettingsResponse {
   data: Array<{
@@ -47,7 +42,6 @@ export default function AuctionPage() {
   const params = useParams();
   const router = useRouter();
   const currentAuctionId = Number(params.id);
-  const { isConnected } = useAccount();
 
   const [mounted, setMounted] = useState(false);
   const [ogImage, setOgImage] = useState<string | null>(null);
@@ -56,7 +50,6 @@ export default function AuctionPage() {
   );
   const [isLoading, setIsLoading] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [themeDialogOpen, setThemeDialogOpen] = useState(false);
   const [isLatestAuction, setIsLatestAuction] = useState(false);
   const [latestAuctionId, setLatestAuctionId] = useState(0);
   const [navigatedFromCreation, setNavigatedFromCreation] = useState(false);
@@ -68,20 +61,6 @@ export default function AuctionPage() {
 
   // Check if this is auction #22 from v1 contract
   const isAuction22 = currentAuctionId === 22;
-
-  const handleLogoClick = () => {
-    if (auctions && auctions.length > 0) {
-      const lastAuction = auctions[auctions.length - 1];
-      const latestId = Number(lastAuction.tokenId);
-      if (latestId > 0) {
-        router.push(`/`);
-      } else {
-        router.push('/');
-      }
-    } else {
-      router.push('/');
-    }
-  };
 
   useEffect(() => {
     if (auctions && auctions.length > 0) {
@@ -221,79 +200,7 @@ export default function AuctionPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-8">
-      <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mb-8 mt-8 md:mt-4 lg:mt-4 lg:mb-8">
-        <QRContextMenu className="inline-block" isHeaderLogo>
-          <h1
-            onClick={handleLogoClick}
-            className="text-2xl font-bold cursor-pointer"
-          >
-            $QR
-          </h1>
-        </QRContextMenu>
-        <div className="flex items-center gap-1 md:gap-3">
-          <Link href="/about">
-            <Button
-              variant="outline"
-              className={isConnected ? "h-10 px-3 text-sm font-medium" : "h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
-            >
-              <span className="md:hidden text-lg">{isConnected ? "What is this?" : "?"}</span>
-              <span className="hidden md:inline">What is this?</span>
-            </Button>
-          </Link>
-          
-          <Link href="/winners">
-            <Button
-              variant="outline"
-              size="icon"
-              className={
-                isBaseColors
-                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-                  : "h-10 w-10"
-              }
-            >
-              <div className="h-5 w-5 flex items-center justify-center">
-                🏆
-              </div>
-            </Button>
-          </Link>
-
-          <Button
-            variant="outline"
-            size="icon"
-            className={
-              isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-                : "h-10 w-10"
-            }
-            onClick={() => setThemeDialogOpen(true)}
-          >
-            <div className="h-5 w-5 flex items-center justify-center">
-              {isBaseColors ? (
-                <img 
-                  src="/basecolors2.jpeg" 
-                  alt="Theme toggle - base colors"
-                  className="h-5 w-5 object-cover "
-                />
-              ) : (
-                <img 
-                  src="/basecolors.jpeg" 
-                  alt="Theme toggle - light/dark" 
-                  className="h-5 w-5 object-cover  border"
-                />
-              )}
-            </div>
-          </Button>
-          
-          <div className="relative">
-            <CustomWallet />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <div className="max-w-3xl mx-auto mt-12 md:mt-14 lg:mt-16">
+      <div className="max-w-3xl mx-auto mt-8 md:mt-0 lg:mt-0">
         <div className="flex flex-col justify-center items-center gap-9">
           <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
             <div
@@ -577,8 +484,6 @@ export default function AuctionPage() {
         targetUrl={pendingUrl || ""}
         onContinue={handleContinue}
       />
-
-      <ThemeDialog open={themeDialogOpen} onOpenChange={setThemeDialogOpen} />
     </main>
   );
 } 

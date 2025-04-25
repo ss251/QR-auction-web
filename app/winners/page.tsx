@@ -4,28 +4,21 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useFetchSettledAuc } from "@/hooks/useFetchSettledAuc";
 import { formatEther } from "viem";
-import { Button } from "@/components/ui/button";
 import { useBaseColors } from "@/hooks/useBaseColors";
-import { useRouter } from "next/navigation";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFarcasterUsersBulk } from "@/utils/farcaster";
 import useEthPrice from "@/hooks/useEthPrice";
 import { useTokenPrice } from "@/hooks/useTokenPrice";
-import { QRContextMenu } from "@/components/QRContextMenu";
 import { Copy, Check, ArrowUp, ArrowDown } from "lucide-react";
 import { getName } from "@coinbase/onchainkit/identity";
 import { base } from "viem/chains";
 import { RandomColorAvatar } from "@/components/RandomAvatar";
-import { ThemeDialog } from "@/components/ThemeDialog";
 import { XLogo } from "@/components/XLogo";
 import { DexscreenerLogo } from "@/components/DexScannerLogo";
 import { UniswapLogo } from "@/components/UniswapLogo";
 import clsx from "clsx";
 import { toast } from "sonner";
 import { WarpcastLogo } from "@/components/WarpcastLogo";
-import { useAccount } from 'wagmi';
-import { CustomWallet } from "@/components/CustomWallet";
-import { ConnectionIndicator } from "@/components/ConnectionIndicator";
 
 // Type definition for winner data
 type WinnerData = {
@@ -53,9 +46,7 @@ export default function WinnersPage() {
   const [winners, setWinners] = useState<WinnerData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dataInitialized, setDataInitialized] = useState(false);
-  const [themeDialogOpen, setThemeDialogOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { isConnected } = useAccount();
   
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>('auction');
@@ -66,7 +57,6 @@ export default function WinnersPage() {
   const { fetchHistoricalAuctions: fetchV2Auctions } = useFetchSettledAuc(23n);
   
   const isBaseColors = useBaseColors();
-  const router = useRouter();
   
   // Price data
   const { ethPrice: ethPriceData, isLoading: ethPriceLoading } = useEthPrice();
@@ -250,10 +240,6 @@ export default function WinnersPage() {
   // Display loading state based on combined conditions
   const showLoading = isLoading || ethPriceLoading || tokenPriceLoading || !pricesLoaded || !dataInitialized;
   
-  const handleLogoClick = () => {
-    router.push('/');
-  };
-
   // Get display name based on priority: basename > farcaster username > ens name > truncated address
   const getDisplayName = (winner: WinnerData) => {
     if (winner.basename) {
@@ -355,76 +341,6 @@ export default function WinnersPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-8">
-      <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mb-8 mt-8 md:mt-4 lg:mt-4 lg:mb-8">
-        <QRContextMenu className="inline-block" isHeaderLogo>
-          <h1
-            onClick={handleLogoClick}
-            className="text-2xl font-bold cursor-pointer"
-          >
-            $QR
-          </h1>
-        </QRContextMenu>
-        <div className="flex items-center gap-1 md:gap-3">
-          <Link href="/about">
-            <Button
-              variant="outline"
-              className={isConnected ? "h-10 px-3 text-sm font-medium" : "h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
-            >
-              <span className="md:hidden text-lg">{isConnected ? "What is this?" : "?"}</span>
-              <span className="hidden md:inline">What is this?</span>
-            </Button>
-          </Link>
-          
-          <Button
-            variant="outline"
-            size="icon"
-            className={
-              isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-                : "h-10 w-10"
-            }
-          >
-            <div className="h-5 w-5 flex items-center justify-center">
-              🏆
-            </div>
-          </Button>
-          
-          <Button
-            variant="outline"
-            size="icon"
-            className={
-              isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-                : "h-10 w-10"
-            }
-            onClick={() => setThemeDialogOpen(true)}
-          >
-            <div className="h-5 w-5 flex items-center justify-center">
-              {isBaseColors ? (
-                <img 
-                  src="/basecolors2.jpeg" 
-                  alt="Theme toggle - base colors"
-                  className="h-5 w-5 object-cover"
-                />
-              ) : (
-                <img 
-                  src="/basecolors.jpeg" 
-                  alt="Theme toggle - light/dark" 
-                  className="h-5 w-5 object-cover border"
-                />
-              )}
-            </div>
-          </Button>
-          
-          <div className="relative">
-            <CustomWallet />
-            <div className="absolute right-0 top-full mt-2 pr-1">
-              <ConnectionIndicator />
-            </div>
-          </div>
-        </div>
-      </nav>
-
       <div className="max-w-3xl mx-auto">
         <div className="flex flex-col mb-6 md:mb-8">
           <div className="flex items-center mb-1 md:mb-2">
@@ -638,8 +554,6 @@ export default function WinnersPage() {
             </Link>
           ))}
       </footer>
-      
-      <ThemeDialog open={themeDialogOpen} onOpenChange={setThemeDialogOpen} />
     </main>
   );
 } 

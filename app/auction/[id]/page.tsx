@@ -55,7 +55,7 @@ export default function AuctionPage() {
 
   const isBaseColors = useBaseColors();
   const { isOpen, pendingUrl, openDialog, closeDialog, handleContinue } = useSafetyDialog();
-  const { auctions, refetch: refetchAuctions } = useFetchAuctions(BigInt(currentAuctionId));
+  const { auctions, refetch: refetchAuctions, forceRefetch: forceRefetchAuctions } = useFetchAuctions(BigInt(currentAuctionId));
   const { refetchSettings } = useFetchAuctionSettings(BigInt(currentAuctionId));
 
   // Check if this is auction #22 from v1 contract
@@ -127,19 +127,20 @@ export default function AuctionPage() {
 
   useAuctionEvents({
     tokenId: BigInt(currentAuctionId),
-    onAuctionBid: (tokenId) => {
+    onAuctionBid: (tokenId, bidder, amount, extended, endTime, urlString, name) => {
       if (Number(tokenId) === currentAuctionId) {
-        refetchAuctions();
+        // Force refresh the auction data to bypass cache
+        forceRefetchAuctions();
       }
     },
-    onAuctionSettled: (tokenId) => {
-      refetchAuctions();
+    onAuctionSettled: (tokenId, winner, amount, urlString, name) => {
+      forceRefetchAuctions();
       if (Number(tokenId) === latestAuctionId && isLatestAuction) {
         fetchOgImage();
       }
     },
     onAuctionCreated: (tokenId) => {
-      refetchAuctions().then(() => {
+      forceRefetchAuctions().then(() => {
         const newLatestId = Number(tokenId);
         if (isLatestAuction || currentAuctionId === newLatestId - 1) {
           router.push(`/auction/${newLatestId}`);

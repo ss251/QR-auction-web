@@ -6,7 +6,7 @@ import QRAuctionV2 from "../abi/QRAuctionV2.json";
 import QRAuctionV3 from "../abi/QRAuctionV3.json";
 import { Address } from "viem";
 import { wagmiConfig } from "@/config/wagmiConfig";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
 
@@ -185,5 +185,22 @@ export function useFetchAuctionDetails(tokenId?: bigint) {
     fetchDetails();
   }, [refetch, auctionDetails, tokenId, contractAddress, auctionDetail]);
 
-  return { refetch, auctionDetail, contractReadError };
+  // Force refetch function that bypasses the cache
+  const forceRefetch = useCallback(async () => {
+    if (!tokenId) return undefined;
+    
+    console.log(`Force refetching auction #${tokenId} data, bypassing cache`);
+    
+    // Clear cache for this auction
+    const cacheKey = `${tokenId}-${contractAddress}`;
+    auctionCache.delete(cacheKey);
+    
+    // Reset the last fetched token ID to force a new fetch
+    lastFetchedTokenId.current = undefined;
+    
+    // Perform a fresh fetch
+    return await refetch();
+  }, [tokenId, contractAddress, refetch]);
+
+  return { refetch, forceRefetch, auctionDetail, contractReadError };
 }

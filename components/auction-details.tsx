@@ -76,7 +76,7 @@ export function AuctionDetails({
   });
 
   const { fetchHistoricalAuctions: auctionsSettled } = useFetchSettledAuc(BigInt(id));
-  const { refetch, auctionDetail, contractReadError } = useFetchAuctionDetails(BigInt(id));
+  const { refetch, forceRefetch, auctionDetail, contractReadError } = useFetchAuctionDetails(BigInt(id));
   const { refetchSettings, settingDetail, error: settingsError } = useFetchAuctionSettings(BigInt(id));
 
   const { settleTxn } = useWriteActions({ tokenId: BigInt(id) });
@@ -334,7 +334,8 @@ export function AuctionDetails({
   }, [isComplete, id, auctionDetail, isConnected, address, isWhitelisted, whitelistLoading, settleTxn, bidderNameInfo, isV3Auction]);
 
   const updateDetails = async () => {
-    await refetch();
+    console.log("Forcing refresh of auction details after successful bid");
+    await forceRefetch();
     await refetchSettings();
   };
 
@@ -428,20 +429,20 @@ export function AuctionDetails({
 
   // Use the auction events hook to listen for real-time updates
   useAuctionEvents({
-    onAuctionBid: (tokenId, bidder, amount, extended, endTime) => {
+    onAuctionBid: (tokenId, bidder, amount, extended, endTime, urlString, name) => {
       // Only update if this event is for the current auction
       if (tokenId === BigInt(id)) {
         console.log(`Real-time update: New bid on auction #${id}`);
-        // Update auction details when a new bid is placed
-        refetch();
+        // Use forceRefetch to bypass the cache and get fresh data
+        forceRefetch();
       }
     },
-    onAuctionSettled: (tokenId, winner, amount) => {
+    onAuctionSettled: (tokenId, winner, amount, urlString, name) => {
       // Only update if this event is for the current auction
       if (tokenId === BigInt(id)) {
         console.log(`Real-time update: Auction #${id} settled`);
-        // Update auction details when the auction is settled
-        refetch();
+        // Use forceRefetch to bypass the cache for settlement as well
+        forceRefetch();
       }
     },
     onAuctionCreated: (tokenId, startTime, endTime) => {

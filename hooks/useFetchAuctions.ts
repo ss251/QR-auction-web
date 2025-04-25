@@ -150,6 +150,10 @@ export function useFetchAuctions(tokenId?: bigint) {
 
   return { 
     auctions: state.auctions,
-    refetch: fetchHistoricalAuctions 
+    refetch: fetchHistoricalAuctions,
+    forceRefetch: async () => {
+      console.log('Force refetching auctions list, bypassing cache');
+      return await fetchHistoricalAuctions();
+    }
   };
 }

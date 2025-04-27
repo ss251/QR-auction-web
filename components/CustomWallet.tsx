@@ -6,7 +6,7 @@ import {
 } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useState, useEffect, useMemo } from "react";
-import { useAccount, useBalance, useReadContracts, useSwitchChain } from "wagmi";
+import { useAccount, useBalance, useReadContracts, useSwitchChain, useDisconnect } from "wagmi";
 import { base } from "viem/chains";
 import { formatEther, Address, erc20Abi, parseUnits, isAddress, encodeFunctionData } from "viem";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { Copy, LogOut, Wallet, Network, Send, ExternalLink, RefreshCcw, Mail, ChevronDown, PlusCircle, Zap } from "lucide-react";
+import { LogOut, Wallet, Network, Send, ExternalLink, RefreshCcw, Copy, ChevronDown, PlusCircle, Loader2, Check } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -48,6 +48,13 @@ const QR_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN as Address;
 // Define Token type
 type Token = "ETH" | "USDC" | "$QR";
 
+// Define type for Privy linked accounts
+interface PrivyLinkedAccount {
+  type: string;
+  address: string;
+  chain?: string;
+  // Other properties might exist but we don't need to specify them
+}
 
 // --- Helper Function ---
 function formatAddress(address?: string) {
@@ -62,6 +69,7 @@ export function CustomWallet() {
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [pfpUrl, setPfpUrl] = useState<string | null>(null);
   const [isFetchingName, setIsFetchingName] = useState(false);
+  const [isWalletLoading, setIsWalletLoading] = useState(true); // Add loading state for wallet
   const [showSendForm, setShowSendForm] = useState(false);
   const [sendRecipient, setSendRecipient] = useState("");
   const [sendAmount, setSendAmount] = useState("");
@@ -70,10 +78,12 @@ export function CustomWallet() {
   const [isConnecting, setIsConnecting] = useState(false); // Track connection state
   const [isFrame, setIsFrame] = useState(false); // Track if we're in a Farcaster frame
   const [frameFid, setFrameFid] = useState<number | null>(null); // Store the user's FID from frame context
+  const [copied, setCopied] = useState(false); // Track whether the address was just copied
 
   const { ready, authenticated, user } = usePrivy();
   const { address: eoaAddress, chain } = useAccount();
   const { switchChain } = useSwitchChain();
+  const { disconnect: wagmiDisconnect } = useDisconnect();
   const { data: ethBalance, isLoading: ethLoading, refetch: refetchEthBalance } = useBalance({ address: eoaAddress });
   const { logout } = useLogout();
   const { login } = useLogin({
@@ -95,6 +105,16 @@ export function CustomWallet() {
   const userEmail = user?.email?.address;
 
   const isBaseColors = useBaseColors();
+  
+  // Helper function to determine avatar fallback content
+  const getAvatarFallback = () => {
+    if (userEmail) {
+      return userEmail.substring(0, 1).toUpperCase();
+    } else if (displayName) {
+      return displayName.substring(0, 2).toUpperCase();
+    }
+    return <Wallet className="h-4 w-4"/>;
+  };
 
   // Check if we're in a Farcaster frame on component mount
   useEffect(() => {
@@ -135,20 +155,44 @@ export function CustomWallet() {
     return undefined;
   }, [smartWalletClient]);
   
-  const displayAddress = smartWalletAddress ?? eoaAddress;
+  // Get smart wallet address directly from user object (more reliable according to Privy docs)
+  // https://docs.privy.io/wallets/using-wallets/evm-smart-wallets/usage
+  const smartWalletAddressFromUser = useMemo(() => {
+    if (authenticated && user?.linkedAccounts) {
+      const smartWallet = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'smart_wallet');
+      return smartWallet?.address as Address | undefined;
+    }
+    return undefined;
+  }, [authenticated, user?.linkedAccounts]);
+
+  // Use the address from linkedAccounts if available, fall back to client
+  const finalSmartWalletAddress = smartWalletAddressFromUser || smartWalletAddress;
+  
+  const displayAddress = finalSmartWalletAddress ?? eoaAddress;
   const headerAddress = eoaAddress;
   
   // Debug logging
   useEffect(() => {
     console.log("Smart wallet client:", smartWalletClient?.account?.address);
     console.log("Smart wallet address:", smartWalletAddress);
+    console.log("Smart wallet address from user:", smartWalletAddressFromUser);
+    console.log("Final smart wallet address:", finalSmartWalletAddress);
     console.log("EOA address:", eoaAddress);
     console.log("Display address:", displayAddress);
     
-    if (smartWalletClient && !smartWalletAddress) {
+    if (smartWalletClient && !finalSmartWalletAddress) {
       console.warn("Smart wallet client exists but no address found - check initialization");
     }
-  }, [smartWalletClient, smartWalletAddress, eoaAddress, displayAddress]);
+    
+    // Only mark loading as complete when both loading paths are checked
+    const walletDataLoaded = authenticated && 
+      ((user?.linkedAccounts !== undefined) || (smartWalletClient !== undefined));
+    
+    if (walletDataLoaded) {
+      setIsWalletLoading(false);
+    }
+  }, [smartWalletClient, smartWalletAddress, smartWalletAddressFromUser, 
+      finalSmartWalletAddress, eoaAddress, displayAddress, authenticated, user?.linkedAccounts]);
 
   const isOnBase = useMemo(() => {
     return chain?.id === BASE_MAINNET_ID;
@@ -230,36 +274,52 @@ export function CustomWallet() {
     }
   };
 
+  // Clear profile data when not authenticated or when address changes
   useEffect(() => {
-    if (eoaAddress && !displayName && !isFetchingName && !isFrame) {
+    // If not authenticated, reset the profile data
+    if (!authenticated && !isFrame) {
+      setDisplayName(null);
+      setPfpUrl(null);
+      return;
+    }
+    
+    // Only proceed with fetching if wallet is loaded, we have an address, and are authenticated
+    if (!isWalletLoading && (finalSmartWalletAddress || eoaAddress) && authenticated && !isFrame && !isFetchingName) {
       setIsFetchingName(true);
       const fetchIdentity = async () => {
         try {
-          const fcUser = await getFarcasterUser(eoaAddress);
+          // Always prioritize looking up by smart wallet if available
+          const addressToLookup = finalSmartWalletAddress || eoaAddress;
+          
+          if (addressToLookup) {
+            const fcUser = await getFarcasterUser(addressToLookup);
           if (fcUser) {
             setDisplayName(fcUser.displayName || `@${fcUser.username}`);
             setPfpUrl(fcUser.pfpUrl);
             return;
           }
-          const ensName = await getName({ address: eoaAddress as `0x${string}`, chain: base });
+            const ensName = await getName({ address: addressToLookup as `0x${string}`, chain: base });
           if (ensName) {
             setDisplayName(ensName);
             return;
           }
-          setDisplayName(formatAddress(eoaAddress));
+            
+            // If no social identities found, use smart wallet address if available, otherwise EOA
+            setDisplayName(formatAddress(addressToLookup));
+          }
         } catch (error) {
           console.error("Error fetching identity:", error);
-          setDisplayName(formatAddress(eoaAddress));
+          const addressToShow = finalSmartWalletAddress || eoaAddress;
+          if (addressToShow) {
+            setDisplayName(formatAddress(addressToShow));
+          }
         } finally {
           setIsFetchingName(false);
         }
       };
       fetchIdentity();
-    } else if (!eoaAddress && !isFrame) {
-        setDisplayName(null);
-        setPfpUrl(null);
     }
-  }, [eoaAddress, displayName, isFetchingName, isFrame]);
+  }, [eoaAddress, finalSmartWalletAddress, authenticated, isFetchingName, isFrame, isWalletLoading]);
 
   // Initialize client state but prevent auto-opening on mobile
   useEffect(() => {
@@ -279,8 +339,12 @@ export function CustomWallet() {
       setDisplayName(null);
       setPfpUrl(null);
       setIsOpen(false);
+      setShowSendForm(false);
       
-      // Actually log out from Privy - this is the critical part
+      // Disconnect from wagmi first
+      wagmiDisconnect();
+      
+      // Then log out from Privy 
       await logout();
       
     } catch (error) {
@@ -293,24 +357,12 @@ export function CustomWallet() {
     switchChain({ chainId: BASE_MAINNET_ID });
   };
 
-  const copyAddress = () => {
-    if (!headerAddress) return;
-    navigator.clipboard.writeText(headerAddress);
-    toast.info("Signer address copied!");
-  };
-
-  const copySmartWalletAddress = () => {
-    if (!smartWalletAddress) return;
-    navigator.clipboard.writeText(smartWalletAddress);
-    toast.info("Smart Wallet address copied!");
-  }
-
   const handleInitiateSend = () => {
     setShowSendForm(true);
   };
 
   const handleAddFunds = () => {
-      const targetAddress = smartWalletAddress ?? eoaAddress;
+      const targetAddress = finalSmartWalletAddress ?? eoaAddress;
       if (!targetAddress) {
           toast.error("No wallet address found to fund.");
           return;
@@ -486,11 +538,14 @@ export function CustomWallet() {
         <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full"> 
           <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? "Profile"} />
           <AvatarFallback className="text-xs bg-muted">
-            {displayName ? displayName.substring(0, 2).toUpperCase() : <Wallet className="h-4 w-4"/>}
+            {isWalletLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : getAvatarFallback()}
           </AvatarFallback>
         </Avatar>
         <span className="text-sm font-medium hidden md:inline">
-          {displayName || <Skeleton className="h-4 w-20 inline-block" />}
+          {isWalletLoading ? 
+            <Skeleton className="h-4 w-20 inline-block" /> : 
+            (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-4 w-20 inline-block" />)
+          }
         </span>
       </Button>
     );
@@ -511,21 +566,23 @@ export function CustomWallet() {
           <Button
             variant="outline"
             className={clsx(
-              "flex items-center gap-2 h-10 md:px-3",
-              "p-0 w-10 md:w-auto",
-              isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
+              "flex items-center gap-2 h-10",
+              "p-0 w-10",
+              isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground"
             )}
             aria-label="Open wallet dialog"
           >
-            <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full"> 
+            <Avatar className="h-7 w-7 md:h-7 md:w-7 border-none rounded-full"> 
               <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? headerAddress} />
               <AvatarFallback className="text-xs bg-muted">
-                {displayName ? displayName.substring(0, 2).toUpperCase() : <Wallet className="h-4 w-4"/>}
+                {isWalletLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : getAvatarFallback()}
               </AvatarFallback>
             </Avatar>
-            <span className="text-sm font-medium hidden md:inline">
-              {displayName ? displayName : <Skeleton className="h-4 w-20 inline-block" />}
-              {smartWalletAddress && <Zap className="h-3 w-3 ml-1 inline-block text-yellow-500" />}
+            <span className="text-sm font-medium hidden">
+              {isWalletLoading ? 
+                <Skeleton className="h-4 w-20 inline-block" /> : 
+                (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-4 w-20 inline-block" />)
+              }
             </span>
           </Button>
         ) : (
@@ -550,32 +607,33 @@ export function CustomWallet() {
                 <DialogHeader>
                   <DialogTitle className="flex items-center gap-2">
                     <Avatar className="h-8 w-8">
-                        <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? headerAddress} />
+                        <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? ""} />
                         <AvatarFallback className="text-sm bg-muted">
-                            {displayName ? displayName.substring(0, 2).toUpperCase() : "..."}
+                            {isWalletLoading ? "..." : getAvatarFallback()}
                         </AvatarFallback>
                     </Avatar>
-                    {displayName || <Skeleton className="h-5 w-24" />}
+                    {isWalletLoading ? 
+                      <Skeleton className="h-5 w-24" /> : 
+                      (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-5 w-24" />)
+                    }
                   </DialogTitle>
-                  <DialogDescription
-                    className="flex items-center gap-1 text-xs text-muted-foreground pt-1 cursor-pointer hover:text-foreground"
-                    onClick={copyAddress}
-                    title="Copy Signer (EOA) address"
-                  >
-                    Signer: {formatAddress(headerAddress)} <Copy className="h-3 w-3" />
-                  </DialogDescription>
-                  {smartWalletAddress && (
-                     <DialogDescription
-                        className="flex items-center gap-1 text-xs text-muted-foreground pt-1 cursor-pointer hover:text-foreground"
-                        onClick={copySmartWalletAddress}
-                        title="Copy Smart Wallet address"
-                     >
-                        <Zap className="h-3 w-3 mr-0.5 text-yellow-500"/> Smart Wallet: {formatAddress(smartWalletAddress)} <Copy className="h-3 w-3" />
-                     </DialogDescription>
-                  )}
-                  {userEmail && (
+                  {displayAddress && (
                       <DialogDescription className="flex items-center gap-1 text-xs text-muted-foreground pt-1">
-                          <Mail className="h-3 w-3"/> {userEmail}
+                          <Wallet className="h-3 w-3"/> {formatAddress(displayAddress)} {copied ? (
+                            <Check className="h-3 w-3 text-green-500" />
+                          ) : (
+                            <Copy className="h-3 w-3" onClick={() => {
+                              if (smartWalletAddress) {
+                                navigator.clipboard.writeText(smartWalletAddress);
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 1400);
+                              } else {
+                                navigator.clipboard.writeText(displayAddress);
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 1400);
+                              }
+                            }} />
+                          )}
                       </DialogDescription>
                   )}
                 </DialogHeader>

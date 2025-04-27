@@ -26,6 +26,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useFetchBids } from "@/hooks/useFetchBids";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { Address } from "viem";
+import { useFundWallet } from "@privy-io/react-auth";
 
 export function BidForm({
   auctionDetail,
@@ -44,6 +45,7 @@ export function BidForm({
   const { isConnected, address: eoaAddress } = useAccount();
   const { handleTypingStart } = useTypingStatus();
   const { fetchHistoricalAuctions } = useFetchBids();
+  const { fundWallet } = useFundWallet();
   
   // Get smart wallet information
   const { client: smartWalletClient } = useSmartWallets();
@@ -58,6 +60,20 @@ export function BidForm({
   
   // Use smart wallet address if available, fall back to EOA
   const activeAddress = smartWalletAddress ?? eoaAddress;
+  
+  // Check if user has a smart wallet
+  const hasSmartWallet = !!smartWalletAddress;
+
+  // Handle the buy USDC action
+  const handleBuyUSDC = () => {
+    if (hasSmartWallet && activeAddress) {
+      // For smart wallet users, use Privy's fundWallet
+      fundWallet(activeAddress);
+    } else {
+      // For regular users, show the Uniswap modal
+      setShowUniswapModal(true);
+    }
+  };
   
   // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
@@ -422,7 +438,7 @@ export function BidForm({
         <Button
           onClick={(e) => {
             e.preventDefault(); // Prevent form submission
-            setShowUniswapModal(true);
+            handleBuyUSDC();
           }}
           type="button" // Explicitly set type to button to avoid form submission
           className={`md:hidden px-8 py-2 text-white ${
@@ -430,16 +446,13 @@ export function BidForm({
           } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
           disabled={isPlacingBid}
         >
-          {isV3Auction ? 'Buy USDC' : 'Buy $QR'}
+          Buy USDC
         </Button>
         <UniswapModal
           open={showUniswapModal}
           onOpenChange={setShowUniswapModal}
           inputCurrency="NATIVE"
-          outputCurrency={isV3Auction ? 
-            "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" : // USDC
-            "0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"   // QR
-          }
+          outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC
         />
 
         {displayUrl !== "" && (

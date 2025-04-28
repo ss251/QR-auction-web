@@ -60,7 +60,6 @@ export default function AuctionPage() {
 
   // Check if this is auction #22 from v1 contract
   const isAuction22 = currentAuctionId === 22;
-  const isAuction36 = currentAuctionId === 36;
 
   useEffect(() => {
     if (auctions && auctions.length > 0) {
@@ -242,7 +241,7 @@ export default function AuctionPage() {
           <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
             <div className="flex flex-col w-full">
               {/* Mobile Winner Display - displayed as block on mobile, hidden on desktop */}
-              {isLatestAuction && ogImage && !isAuction22 && !isAuction36 && (
+              {isLatestAuction && ogImage && !isAuction22 && (
                 <div className="block md:hidden">
                   <div className="flex flex-col justify-center items-center w-[calc(100vw-32px)] max-w-[376px] mx-auto gap-1">
                     <label className="font-semibold text-xl md:text-2xl flex items-center justify-center w-full">
@@ -293,7 +292,7 @@ export default function AuctionPage() {
               )}
               
               {/* Desktop Winner Display - hidden on mobile, displayed on desktop */}
-              {isLatestAuction && ogImage && !isAuction22 && !isAuction36 && (
+              {isLatestAuction && ogImage && !isAuction22 && (
                 <div className="hidden md:flex flex-col justify-center items-center gap-1 w-full max-w-[376px] mx-auto">
                   <label className="font-semibold text-xl md:text-2xl flex items-center justify-center w-full">
                     <span className="hidden md:inline">🏆</span>
@@ -353,7 +352,7 @@ export default function AuctionPage() {
             </div>
 
             <div className="hidden md:flex flex-col gap-1">
-              {isLatestAuction && !isAuction22 && !isAuction36 && (
+              {isLatestAuction && !isAuction22 && (
                 <>
                   <h2 className="font-semibold text-xl md:text-2xl text-center">
                     <span className="">Buy USDC</span>
@@ -366,12 +365,12 @@ export default function AuctionPage() {
             </div>
           </div>
 
-          {(!isLatestAuction || isAuction22 || isAuction36) && currentAuctionId > 0 && (
+          {(!isLatestAuction || isAuction22) && currentAuctionId > 0 && (
             <WinnerAnnouncement auctionId={currentAuctionId} />
           )}
           
           {/* Mobile Uniswap Widget */}
-          {isLatestAuction && !isAuction22 && !isAuction36 && (
+          {isLatestAuction && !isAuction22 && (
             <div className="md:hidden w-full">
               <h2 className="font-semibold text-xl text-center mb-1">
                 <span className="">Buy $QR</span>

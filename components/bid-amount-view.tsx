@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAccount, useBalance } from "wagmi";
 import { SafeExternalLink } from "./SafeExternalLink";
-import { ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2, X } from "lucide-react";
 import { formatURL } from "@/utils/helperFunctions";
 import { registerTransaction } from "@/hooks/useAuctionEvents";
 import { useBaseColors } from "@/hooks/useBaseColors";
@@ -22,11 +22,17 @@ import { useTypingStatus } from "@/hooks/useTypingStatus";
 import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
 import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
 import { UniswapModal } from "./ui/uniswap-modal";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useFetchBids } from "@/hooks/useFetchBids";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
-import { Address } from "viem";
+import { Address, Chain } from "viem";
 import { useFundWallet } from "@privy-io/react-auth";
+import { base } from "viem/chains";
+
+// Polling configuration
+const BALANCE_POLL_INTERVAL = 3000; // 3 seconds
+const MAX_POLLING_DURATION = 120000; // 2 minutes
+const CONFIRMATION_DELAY = 10000; // 10 seconds before executing bid after funds arrive
 
 export function BidForm({
   auctionDetail,
@@ -41,11 +47,26 @@ export function BidForm({
 }) {
   const [showUniswapModal, setShowUniswapModal] = useState(false);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
+  
+  // Single state to track funding status - this represents both which button initiated funding
+  // and whether we're waiting for funds
+  const [fundingState, setFundingState] = useState<'idle' | 'waiting_from_bid' | 'waiting_from_buy'>('idle');
+  
+  // Store pending bid data for auto-execution after funding
+  const pendingBidRef = useRef<{
+    amount: number;
+    url: string;
+    requiredBalance: number;
+  } | null>(null);
+  
+  // References for polling
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingStartTimeRef = useRef<number | null>(null);
+  
   const isBaseColors = useBaseColors();
   const { isConnected, address: eoaAddress } = useAccount();
   const { handleTypingStart } = useTypingStatus();
   const { fetchHistoricalAuctions } = useFetchBids();
-  const { fundWallet } = useFundWallet();
   
   // Get smart wallet information
   const { client: smartWalletClient } = useSmartWallets();
@@ -64,17 +85,18 @@ export function BidForm({
   // Check if user has a smart wallet
   const hasSmartWallet = !!smartWalletAddress;
 
-  // Handle the buy USDC action
-  const handleBuyUSDC = () => {
-    if (hasSmartWallet && activeAddress) {
-      // For smart wallet users, use Privy's fundWallet
-      fundWallet(activeAddress);
-    } else {
-      // For regular users, show the Uniswap modal
-      setShowUniswapModal(true);
+  // Use Privy's useFundWallet hook
+  const { fundWallet } = useFundWallet({
+    onUserExited: ({ address, balance, chain, fundingMethod }: { address: Address, balance: bigint, chain: Chain, fundingMethod: string }) => {
+      console.log(`[Funding] User exited funding flow. Address: ${address}, Balance: ${balance.toString()}, Chain: ${chain.name}, Method: ${fundingMethod}`);
+      // We don't change any visible state here - polling will continue in the background
     }
-  };
+  });
   
+  const { bidAmount } = useWriteActions({
+    tokenId: auctionDetail?.tokenId ? auctionDetail.tokenId : 0n,
+  });
+
   // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
   const isV2Auction = auctionDetail?.tokenId >= 23n && auctionDetail?.tokenId <= 35n;
@@ -90,15 +112,11 @@ export function BidForm({
     token: qrTokenAddress as `0x${string}`,
   });
   
-  const { data: usdcBalance } = useBalance({
+  const { data: usdcBalance, refetch: refetchUsdcBalance } = useBalance({
     address: activeAddress,
-    token: usdcTokenAddress as `0x${string}`,
+    token: usdcTokenAddress as `0x${string}`
   });
   
-  const { bidAmount } = useWriteActions({
-    tokenId: auctionDetail?.tokenId ? auctionDetail.tokenId : 0n,
-  });
-
   // Calculate the minimum bid value from the contract data
   const lastHighestBid = auctionDetail?.highestBid
     ? auctionDetail.highestBid
@@ -113,7 +131,7 @@ export function BidForm({
   
   // Calculate full token value based on auction type
   const fullMinimumBid = lastHighestBid === 0n 
-    ? (isV3Auction ? 5 : MIN_QR_BID) // For V3, we use 5 USDC flat minimum
+    ? (isV3Auction ? 1 : MIN_QR_BID) // For V3, we use 1 USDC flat minimum
     : isV3Auction 
       ? Number(formatUnits(lastHighestBid + increment, 6)) // USDC has 6 decimals
       : Number(formatEther(lastHighestBid + increment)); // ETH/QR have 18 decimals
@@ -180,11 +198,250 @@ export function BidForm({
     handleSubmit,
     reset,
     setValue,
+    watch,
+    getValues,
     formState: { errors, isValid },
   } = useForm<FormSchemaType>({
     resolver: zodResolver(formSchema),
     mode: "onChange", // Validate as the user types
   });
+  
+  // Watch the bid amount for use in the funding flow
+  const bidAmount_formValue = watch("bid");
+  const urlValue = watch("url");
+
+  // Function to cancel funding process and clear up state
+  const cancelFunding = () => {
+    clearPolling();
+    setFundingState('idle');
+    pendingBidRef.current = null;
+    toast.info("Funding process canceled");
+  };
+
+  // Clear all polling
+  const clearPolling = () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+    pollingStartTimeRef.current = null;
+  };
+
+  // Start balance polling after funding initiation
+  const startBalancePolling = (requiredBalance: number) => {
+    // Clean up any existing polling
+    clearPolling();
+    
+    // Mark polling start time
+    pollingStartTimeRef.current = Date.now();
+    
+    // Save exact amount needed
+    const pendingBid = pendingBidRef.current;
+    if (pendingBid) {
+      pendingBid.requiredBalance = requiredBalance;
+    }
+    
+    console.log(`[Polling] Started polling for balance >= ${requiredBalance} USDC`);
+    
+    let lastSeenBalance = 0;
+    
+    // Start polling interval
+    pollingIntervalRef.current = setInterval(async () => {
+      // Check if we've exceeded max polling time
+      if (pollingStartTimeRef.current && Date.now() - pollingStartTimeRef.current > MAX_POLLING_DURATION) {
+        console.log(`[Polling] Exceeded maximum polling time of ${MAX_POLLING_DURATION}ms`);
+        clearPolling();
+        setFundingState('idle');
+        pendingBidRef.current = null;
+        toast.error("Funding timeout. You can try placing your bid again.");
+        return;
+      }
+      
+      try {
+        // Fetch latest balance
+        const freshBalance = await refetchUsdcBalance();
+        const balance = freshBalance.data?.value || 0n;
+        const formattedBalance = Number(formatUnits(balance, 6));
+        
+        // Log only when balance changes
+        if (formattedBalance !== lastSeenBalance) {
+          console.log(`[Polling] Current balance: ${formattedBalance} USDC, Required: ${requiredBalance} USDC`);
+          lastSeenBalance = formattedBalance;
+        }
+        
+        // Check if balance is sufficient
+        if (formattedBalance >= requiredBalance) {
+          console.log(`[Polling] Sufficient balance detected! Waiting ${CONFIRMATION_DELAY/1000}s for confirmation before executing bid...`);
+          
+          // Clear polling
+          clearPolling();
+          
+          // Toast
+          toast.success(`Funding successful! Your bid will be placed automatically in a few seconds...`);
+          
+          // Set timeout for bid execution to allow transaction to fully confirm
+          setTimeout(() => {
+            executePendingBid();
+          }, CONFIRMATION_DELAY);
+        }
+      } catch (error) {
+        console.error("[Polling] Error checking balance:", error);
+      }
+    }, BALANCE_POLL_INTERVAL);
+  };
+
+  // Execute the pending bid after funding is confirmed
+  const executePendingBid = async () => {
+    const pendingBid = pendingBidRef.current;
+    if (!pendingBid) {
+      console.log("[AutoBid] No pending bid found");
+      setFundingState('idle');
+      return;
+    }
+    
+    console.log(`[AutoBid] Executing pending bid: ${pendingBid.amount} USDC on URL ${pendingBid.url}`);
+    
+    // Update UI
+    setFundingState('idle');
+    setIsPlacingBid(true);
+    
+    try {
+      // Final balance check
+      const freshBalance = await refetchUsdcBalance();
+      const currentBalance = freshBalance.data?.value || 0n;
+      const formattedBalance = Number(formatUnits(currentBalance, 6));
+      
+      if (formattedBalance < pendingBid.requiredBalance) {
+        console.log(`[AutoBid] Final balance check failed: ${formattedBalance} USDC < ${pendingBid.requiredBalance} USDC`);
+        toast.error("Unable to place bid automatically. Please try again.");
+        setIsPlacingBid(false);
+        pendingBidRef.current = null;
+        return;
+      }
+      
+      // Bid value with 6 decimals for USDC
+      const bidValue = parseUnits(`${pendingBid.amount}`, 6);
+      
+      // Execute bid with smart wallet
+      let hash;
+      if (smartWalletClient) {
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: pendingBid.url,
+          smartWalletClient: smartWalletClient
+        });
+      } else {
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: pendingBid.url
+        });
+      }
+      
+      // Register transaction
+      registerTransaction(hash);
+      
+      // Get previous bidder info for notifications
+      const previousBidder = auctionDetail?.highestBidder;
+      const previousBid = auctionDetail?.highestBid;
+      const auctionTokenId = auctionDetail?.tokenId;
+      
+      // Wait for transaction receipt
+      const transactionReceiptPr = waitForTransactionReceipt(wagmiConfig, {
+        hash: hash,
+      });
+      
+      toast.promise(transactionReceiptPr, {
+        loading: "Placing your bid...",
+        success: async (data: any) => {
+          // Send notification to previous highest bidder
+          if (previousBidder && 
+              previousBidder !== activeAddress &&
+              previousBidder !== "0x0000000000000000000000000000000000000000" &&
+              previousBid && previousBid > 0n) {
+            
+            // Skip notifications in development environment
+            const isDev = process.env.NODE_ENV === 'development';
+            if (!isDev) {
+              try {
+                console.log(`Sending outbid notification to previous bidder: ${previousBidder}`);
+                await fetch('/api/notifications/outbid', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    bidderAddress: previousBidder,
+                    auctionId: Number(auctionTokenId),
+                  }),
+                });
+              } catch (error) {
+                console.error('Failed to send outbid notification:', error);
+              }
+            } else {
+              console.log('[DEV MODE] Skipping outbid notification in development environment');
+            }
+          }
+          
+          // Reset
+          reset();
+          onSuccess();
+          setIsPlacingBid(false);
+          pendingBidRef.current = null;
+          return "Bid placed successfully!";
+        },
+        error: (data: any) => {
+          setIsPlacingBid(false);
+          pendingBidRef.current = null;
+          return "Failed to create bid";
+        },
+      });
+    } catch (error) {
+      console.error("[AutoBid] Error executing bid:", error);
+      toast.error("Failed to place bid automatically. Please try again.");
+      setIsPlacingBid(false);
+      pendingBidRef.current = null;
+    }
+  };
+
+  // Handle the buy USDC action with specified amount
+  const handleBuyUSDC = (amount?: number, source: 'waiting_from_bid' | 'waiting_from_buy' = 'waiting_from_bid') => {
+    console.log("[Fund] Starting funding process");
+    
+    if (hasSmartWallet && activeAddress) {
+      // For smart wallet users, use Privy's fundWallet with specific amount
+      const fundingAmount = amount?.toString() || '5'; // Default to 5 USDC if no amount specified
+      
+      console.log(`[Funding] Opening funding modal for ${fundingAmount} USDC`);
+      
+      // Start balance polling for auto-execution
+      startBalancePolling(amount || 5);
+      
+      // Set the funding state based on which button initiated it
+      setFundingState(source);
+      
+      // Initiate funding with Privy
+      fundWallet(activeAddress, {
+        chain: base,
+        amount: fundingAmount,
+        asset: 'USDC',
+        defaultFundingMethod: 'card', // Skip directly to card payment
+        uiConfig: {
+          receiveFundsTitle: `Add ${fundingAmount} USDC to your wallet`,
+          receiveFundsSubtitle: 'Fund your wallet to place a bid on qrcoin.fun'
+        }
+      });
+    } else {
+      // For regular users, show the Uniswap modal
+      setShowUniswapModal(true);
+    }
+  };
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      clearPolling();
+    };
+  }, []);
 
   // Auto-populate the URL field with the user's previous bid URL
   useEffect(() => {
@@ -229,16 +486,8 @@ export function BidForm({
   }, [isConnected, setValue]);
 
   // Handle typing event separately from form validation
-  const handleKeyDown = () => {
-    // Always trigger typing events, even from anonymous users
-    console.log('Triggering typing event from keyboard input');
-    handleTypingStart();
-  };
-
-  // Also trigger typing on input change to catch paste events
-  const handleInputChange = () => {
-    // Always trigger typing events, even from anonymous users
-    console.log('Triggering typing event from input change');
+  const handleTypingEvent = () => {
+    console.log('Triggering typing event');
     handleTypingStart();
   };
 
@@ -256,16 +505,40 @@ export function BidForm({
       return;
     }
 
-    // Set bidding state to true at the start of the process
-    setIsPlacingBid(true);
-
-    try {
-      // Calculate bid amount based on auction type
-      const fullBidAmount = isV3Auction 
-        ? data.bid  // For USDC, use the actual value without multiplying
-        : data.bid * 1_000_000; // For QR, multiply by 1M
+    // Calculate bid amount based on auction type
+    const fullBidAmount = isV3Auction 
+      ? data.bid  // For USDC, use the actual value without multiplying
+      : data.bid * 1_000_000; // For QR, multiply by 1M
+    
+    // For smart wallet users, always fetch fresh balance first
+    if (hasSmartWallet && isV3Auction) {
+      // Refresh USDC balance
+      const freshBalanceResult = await refetchUsdcBalance();
+      const currentUsdcBalance = freshBalanceResult.data;
       
-      // Check if user has enough tokens
+      // Format current balance for comparison
+      const formattedBalance = currentUsdcBalance 
+        ? Number(formatUnits(currentUsdcBalance.value, 6)) 
+        : 0;
+      
+      console.log(`[Balance Check] Current USDC balance: ${formattedBalance}, Required: ${fullBidAmount}`);
+      
+      // If balance is insufficient, store bid details and open funding flow
+      if (formattedBalance < fullBidAmount) {
+        // Store pending bid for later execution
+        pendingBidRef.current = {
+          amount: fullBidAmount,
+          url: data.url,
+          requiredBalance: fullBidAmount,
+        };
+        
+        // Open funding modal with exact bid amount and start polling
+        toast.info(`Insufficient balance. Opening payment to add ${fullBidAmount} USDC. Your bid will be placed automatically when funded.`);
+        handleBuyUSDC(fullBidAmount, 'waiting_from_bid');
+        return;
+      }
+    } else {
+      // For regular wallets, check balance normally
       let hasEnoughTokens = false;
       let tokenSymbol = '';
       
@@ -281,10 +554,14 @@ export function BidForm({
         // Show appropriate message based on token type
         toast.info(`You don't have enough ${tokenSymbol} tokens for this bid`);
         setShowUniswapModal(true);
-        setIsPlacingBid(false); // Reset bidding state
         return;
       }
-      
+    }
+    
+    // Set bidding state to true only when actually submitting a transaction
+    setIsPlacingBid(true);
+
+    try {
       // For V3/USDC, use 6 decimal places instead of 18
       const bidValue = isV3Auction
         ? parseUnits(`${fullBidAmount}`, 6)  // USDC has 6 decimals
@@ -371,8 +648,9 @@ export function BidForm({
     }
   };
 
-  // Determine the token symbol suffix based on auction type
-  const tokenSuffix = isV3Auction ? 'USDC' : 'M $QR';
+  // Check if button should be disabled
+  const isPlaceBidDisabled = !isValid || isPlacingBid || fundingState === 'waiting_from_bid';
+  const isBuyUsdcDisabled = isPlacingBid || fundingState === 'waiting_from_buy';
 
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
@@ -385,9 +663,9 @@ export function BidForm({
             placeholder={`${formattedMinBid} or more`}
             className="pr-16 border p-2 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             {...register("bid")}
-            onKeyDown={handleKeyDown}
-            onInput={handleInputChange}
-            disabled={isPlacingBid}
+            onKeyDown={handleTypingEvent}
+            onInput={handleTypingEvent}
+            disabled={isPlacingBid || fundingState !== 'idle'}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
             {isV3Auction ? 'USDC' : 'M $QR'}
@@ -405,9 +683,9 @@ export function BidForm({
               className="pr-16 border p-2 w-full"
               spellCheck="false"
               {...register("url")}
-              onKeyDown={handleKeyDown}
-              onInput={handleInputChange}
-              disabled={isPlacingBid}
+              onKeyDown={handleTypingEvent}
+              onInput={handleTypingEvent}
+              disabled={isPlacingBid || fundingState !== 'idle'}
             />
             <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
               URL
@@ -418,36 +696,89 @@ export function BidForm({
           </div>
         </div>
 
-        <Button
-          type="submit"
-          className={`px-8 py-2 text-white ${
-            isValid && !isPlacingBid ? "bg-gray-900 hover:bg-gray-800" : "bg-gray-500"
-          } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
-          disabled={!isValid || isPlacingBid}
-        >
-          {isPlacingBid ? (
-            <span className="flex items-center">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Placing bid...
-            </span>
-          ) : (
-            "Place Bid"
+        {/* Place Bid Button with Cancel Option */}
+        <div className="relative">
+          <Button
+            type="submit"
+            className={`px-8 py-2 text-white w-full ${
+              !isPlaceBidDisabled ? "bg-gray-900 hover:bg-gray-800" : "bg-gray-500"
+            } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
+            disabled={isPlaceBidDisabled}
+          >
+            {isPlacingBid ? (
+              <span className="flex items-center justify-center">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Placing bid...
+              </span>
+            ) : fundingState === 'waiting_from_bid' ? (
+              <span className="flex items-center justify-center">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Waiting for funds...
+              </span>
+            ) : (
+              "Place Bid"
+            )}
+          </Button>
+          
+          {/* Cancel button for the Place Bid button */}
+          {fundingState === 'waiting_from_bid' && (
+            <button
+              type="button"
+              onClick={cancelFunding}
+              className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 flex items-center justify-center rounded-full hover:bg-black/10 transition-colors"
+              aria-label="Cancel funding"
+            >
+              <X className="h-4 w-4 text-white" />
+            </button>
           )}
-        </Button>
+        </div>
 
-        <Button
-          onClick={(e) => {
-            e.preventDefault(); // Prevent form submission
-            handleBuyUSDC();
-          }}
-          type="button" // Explicitly set type to button to avoid form submission
-          className={`md:hidden px-8 py-2 text-white ${
-            "bg-gray-900 hover:bg-gray-800"
-          } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
-          disabled={isPlacingBid}
-        >
-          Buy USDC
-        </Button>
+        {/* Buy USDC Button with Cancel Option - Only show for non-smart wallet users */}
+        {!hasSmartWallet && (
+          <div className="relative md:hidden">
+            <Button
+              onClick={(e) => {
+                e.preventDefault();
+                
+                // Store potential bid data in case the user makes a successful payment
+                pendingBidRef.current = {
+                  amount: bidAmount_formValue,
+                  url: urlValue,
+                  requiredBalance: bidAmount_formValue,
+                };
+                
+                handleBuyUSDC(bidAmount_formValue, 'waiting_from_buy');
+              }}
+              type="button"
+              className={`w-full px-8 py-2 text-white ${
+                !isBuyUsdcDisabled ? "bg-gray-900 hover:bg-gray-800" : "bg-gray-500"
+              } ${isBaseColors ? "bg-primary hover:bg-primary/90 hover:text-foreground text-foreground border-none" : ""}`}
+              disabled={isBuyUsdcDisabled}
+            >
+              {fundingState === 'waiting_from_buy' ? (
+                <span className="flex items-center justify-center">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Waiting for funds...
+                </span>
+              ) : (
+                "Buy USDC"
+              )}
+            </Button>
+            
+            {/* Cancel button for the Buy USDC button */}
+            {fundingState === 'waiting_from_buy' && (
+              <button
+                type="button"
+                onClick={cancelFunding}
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-6 w-6 flex items-center justify-center rounded-full hover:bg-black/10 transition-colors"
+                aria-label="Cancel funding"
+              >
+                <X className="h-4 w-4 text-white" />
+              </button>
+            )}
+          </div>
+        )}
+        
         <UniswapModal
           open={showUniswapModal}
           onOpenChange={setShowUniswapModal}

@@ -5,15 +5,15 @@ import { QueryClientProvider, QueryClient } from "@tanstack/react-query";
 import { FarcasterFrameProvider } from "./FrameProvider";
 import { SupabaseProvider } from "./SupabaseProvider";
 import { useTheme } from "next-themes";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react"; // Import useMemo
 
 // Import Privy-specific components
 import { PrivyProvider } from "@privy-io/react-auth";
 import { WagmiProvider } from "@privy-io/wagmi";
 import { SmartWalletsProvider } from "@privy-io/react-auth/smart-wallets";
 
-// Import configurations
-import { privyConfig } from "../config/privyConfig";
+// Import the FUNCTION to get the config, not the config object directly
+import { getPrivyConfig } from "../config/privyConfig";
 import { wagmiConfig } from "../config/wagmiConfig";
 
 const queryClient = new QueryClient();
@@ -22,45 +22,45 @@ export function Provider(props: { children: ReactNode }) {
   // Get current theme
   const { theme, resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
-  
+
   // Need to wait for client-side hydration to get the actual theme
   useEffect(() => {
     setMounted(true);
   }, []);
-  
+
   // Use the current theme or fallback to light if not mounted yet
   const currentTheme = mounted ? (resolvedTheme || theme) : 'light';
-  
-  // Apply theme-specific appearance options
-  const themeAwareConfig = {
-    ...privyConfig,
-    theme: currentTheme === 'dark' ? 'dark' : 'light', // Set Privy theme based on app theme
-    appearance: {
-      ...privyConfig.appearance,
-      ...(currentTheme === 'dark' ? {
-        accentColor: "#FFFFFF",  // White accent for dark mode
-        textColor: "#000000",    // Black text for controls in dark mode
-      } : {}),
-    }
-  };
+
+  // Call getPrivyConfig() inside the component render logic
+  // Use useMemo to prevent recalculating on every render unless theme changes
+  const dynamicPrivyConfig = useMemo(() => {
+    const config = getPrivyConfig(); // Get base config
+    return {
+      ...config,
+      theme: currentTheme === 'dark' ? 'dark' : 'light',
+      appearance: {
+        ...config.appearance,
+        ...(currentTheme === 'dark' ? {
+          accentColor: "#FFFFFF",
+          textColor: "#000000",
+        } : {}),
+      },
+      // Ensure embeddedWallets structure is correct
+      embeddedWallets: {
+        ...config.embeddedWallets,
+         // No need for showWalletUIs here unless specifically required by Privy
+      }
+    };
+  }, [currentTheme]); // Recompute only when theme changes
 
   return (
     <FarcasterFrameProvider>
+      {/* Pass the dynamically generated config */}
       <PrivyProvider
         appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ""}
-        config={{
-            ...themeAwareConfig,
-            // Add recommended embedded wallet config for AA
-            embeddedWallets: {
-                createOnLogin: 'users-without-wallets', 
-                // Ensure showWalletUIs is false if you don't want Privy modals
-                // This might need configuration in the Privy Dashboard instead
-                // showWalletUIs: false, 
-            }
-        }}
+        config={dynamicPrivyConfig}
       >
-        <SmartWalletsProvider
-        >
+        <SmartWalletsProvider>
           <QueryClientProvider client={queryClient}>
             <WagmiProvider config={wagmiConfig}>
               <SupabaseProvider>{props.children}</SupabaseProvider>

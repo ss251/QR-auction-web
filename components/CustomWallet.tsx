@@ -371,29 +371,34 @@ export function CustomWallet() {
   };
 
   const handleConfirmSend = async () => {
-    // Verify smart wallet client is available
-    if (!smartWalletClient) {
-        console.error("Smart wallet client not available");
-        toast.error("Smart wallet not initialized. Please try reconnecting your wallet.");
-        return;
-    }
-    
-    // Log which address we're sending from
-    console.log("Sending transaction from:", smartWalletClient.account?.address);
-    
+    // Verify we have necessary data
     if (!displayAddress || !isOnBase) {
-        toast.error("Smart wallet not ready or not on Base network.");
+        toast.error("Wallet not ready or not on Base network.");
         return;
     }
     
+    // Ensure recipient is a valid address and convert to proper format
     if (!isAddress(sendRecipient)) {
         toast.error("Invalid recipient address.");
         return;
     }
+    const recipientAddress = sendRecipient as `0x${string}`;
     
     const amount = parseFloat(sendAmount);
     if (isNaN(amount) || amount <= 0) {
         toast.error("Invalid amount.");
+        return;
+    }
+    
+    // Check balances before proceeding
+    if (selectedToken === "ETH" && ethBalanceFormatted < amount) {
+        toast.error("Insufficient ETH balance.");
+        return;
+    } else if (selectedToken === "USDC" && usdcBalance < amount) {
+        toast.error("Insufficient USDC balance.");
+        return;
+    } else if (selectedToken === "$QR" && qrBalance < amount) {
+        toast.error("Insufficient $QR balance.");
         return;
     }
 
@@ -401,68 +406,81 @@ export function CustomWallet() {
     const toastId = toast.loading(`Preparing ${selectedToken} transaction...`);
 
     try {
-        let tx: { to: Address; value?: bigint; data?: `0x${string}` };
-        let sufficientBalance = false;
-
-        if (selectedToken === "ETH") {
-            sufficientBalance = ethBalanceFormatted >= amount;
-            if (!sufficientBalance) throw new Error("Insufficient ETH balance.");
-            const value = parseUnits(sendAmount, 18);
-            tx = { to: sendRecipient as Address, value };
-        } else {
-            const tokenAddress = selectedToken === "USDC" ? USDC_ADDRESS : QR_ADDRESS;
-            const balance = selectedToken === "USDC" ? usdcBalance : qrBalance;
-            const decimals = selectedToken === "USDC" ? usdcDecimals : qrDecimals;
-            sufficientBalance = balance >= amount;
-            if (!sufficientBalance) throw new Error(`Insufficient ${selectedToken} balance.`);
-            const parsedAmount = parseUnits(sendAmount, decimals);
-            
-            // Encode ERC20 transfer data
-            const transferData = encodeFunctionData({
-                abi: erc20Abi,
-                functionName: 'transfer',
-                args: [sendRecipient as Address, parsedAmount],
-            });
-
-            tx = { to: tokenAddress, data: transferData };
-        }
-
+        // Update the toast to show sending status
         toast.loading(`Sending ${amount} ${selectedToken}...`, { id: toastId });
-
-        // Ensure we're using the smart wallet client for transactions
-        if (!smartWalletClient.account) {
-            throw new Error("Smart wallet client account not initialized");
+        
+        // Properly format and send the transaction using smart wallet client
+        if (!smartWalletClient) {
+            throw new Error("Smart wallet client not available");
         }
         
-        // Send transaction using the smart wallet client
-        const txResponse = await smartWalletClient.sendTransaction(tx);
-        const txHash = txResponse;
-
-        toast.success(`Sent ${amount} ${selectedToken}!`, {
-            id: toastId,
-            description: (
-                <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer" className="underline">
-                    View on Basescan
-                </a>
-            )
-        });
-
+        console.log("Using smart wallet client for transaction:", smartWalletClient.account?.address);
+            
+        // Setup UI options for better user experience
+        const uiOptions = {
+            title: `Send ${selectedToken}`,
+            description: `Sending ${amount} ${selectedToken} to ${formatAddress(sendRecipient)}`,
+            buttonText: "Confirm Send"
+        };
+        
+        // Create the transaction parameters based on token type
+        const txParams = selectedToken === "ETH" 
+            ? {
+                to: recipientAddress,
+                value: parseUnits(sendAmount, 18),
+                chain: base
+              }
+            : {
+                to: selectedToken === "USDC" ? USDC_ADDRESS : QR_ADDRESS,
+                data: encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: 'transfer',
+                    args: [recipientAddress, parseUnits(sendAmount, selectedToken === "USDC" ? usdcDecimals : qrDecimals)]
+                }),
+                chain: base
+              };
+              
+        // Fire and forget - immediately show success and let the transaction process
+        // This works around the issue with Privy's promise resolution
+        smartWalletClient.sendTransaction(txParams, { uiOptions })
+            .then(txHash => {
+                console.log("Transaction sent with hash:", txHash);
+                
+                // Update the toast when we have the hash
+                toast.success(`Sent ${amount} ${selectedToken}!`, {
+                    id: toastId,
+                    description: (
+                        <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer" className="underline">
+                            View on Basescan
+                        </a>
+                    )
+                });
+            })
+            .catch(error => {
+                console.error("Transaction failed:", error);
+                toast.error(`Transaction failed: ${error instanceof Error ? error.message : "Unknown error"}`, {
+                    id: toastId
+                });
+            });
+        
+        // Immediately clear form and show success, allowing transaction to process in background
+        toast.success(`Transaction submitted!`, { id: toastId });
+        
         // Reset form and refresh balances
         setSendRecipient("");
         setSendAmount("");
         setShowSendForm(false);
-        setTimeout(refreshBalances, 2000); 
+        setTimeout(refreshBalances, 1000);
 
     } catch (error: unknown) {
-        console.error("Send failed:", error);
-        let errorMessage = "Failed to send transaction.";
+        console.error("Send preparation failed:", error);
+        let errorMessage = "Failed to prepare transaction.";
         if (error instanceof Error) {
-            // The shortMessage property is specific to ethers/viem errors
-            const ethersError = error as { shortMessage?: string; message: string };
-            errorMessage = ethersError.shortMessage || ethersError.message || errorMessage;
+            errorMessage = error.message || errorMessage;
         } else if (typeof error === 'string') {
             errorMessage = error;
         }
+        // Make sure to dismiss the loading toast by updating it to an error toast
         toast.error(errorMessage, { id: toastId });
     } finally {
         setIsSending(false);
@@ -601,7 +619,7 @@ export function CustomWallet() {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto">
         {authenticated && (
             <> 
                 <DialogHeader>
@@ -699,7 +717,7 @@ export function CustomWallet() {
                 <Separator />
         
                 {showSendForm ? (
-                    <div className="space-y-3 pt-2">
+                    <div className="space-y-2 pt-2">
                         <DialogTitle className="text-base">Send Funds</DialogTitle>
                         <div className="flex gap-2">
                             <DropdownMenu>
@@ -740,14 +758,18 @@ export function CustomWallet() {
                             value={sendRecipient}
                             onChange={(e) => setSendRecipient(e.target.value)}
                         />
-                        <Button 
-                            onClick={handleConfirmSend} 
-                            disabled={!isOnBase || isSending || !sendRecipient || !sendAmount}
-                            className="w-full"
-                        >
-                            {isSending ? "Sending..." : `Confirm Send ${selectedToken}`}
-                        </Button>
-                        <Button variant="ghost" onClick={() => setShowSendForm(false)} className="w-full text-xs text-muted-foreground">Cancel</Button>
+                        <div className="flex gap-2 pt-1">
+                            <Button 
+                                onClick={handleConfirmSend} 
+                                disabled={!isOnBase || isSending || !sendRecipient || !sendAmount}
+                                className="flex-1"
+                            >
+                                {isSending ? "Sending..." : `Send ${selectedToken}`}
+                            </Button>
+                            <Button variant="outline" onClick={() => setShowSendForm(false)} className="flex-1">
+                                Cancel
+                            </Button>
+                        </div>
                     </div>
                 ) : (
                     <div className="grid grid-cols-2 gap-3 pt-2">

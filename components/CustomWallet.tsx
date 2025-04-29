@@ -619,12 +619,12 @@ export function CustomWallet() {
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto mt-8 md:mt-0 p-3 sm:p-6">
         {authenticated && (
             <> 
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <Avatar className="h-8 w-8">
+                <DialogHeader className="pb-2">
+                  <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+                    <Avatar className="h-7 w-7 sm:h-8 sm:w-8">
                         <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? ""} />
                         <AvatarFallback className="text-sm bg-muted">
                             {isWalletLoading ? "..." : getAvatarFallback()}
@@ -632,15 +632,19 @@ export function CustomWallet() {
                     </Avatar>
                     {isWalletLoading ? 
                       <Skeleton className="h-5 w-24" /> : 
-                      (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-5 w-24" />)
+                      <span className="truncate max-w-[180px] sm:max-w-[250px]">
+                        {userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-5 w-24" />}
+                      </span>
                     }
                   </DialogTitle>
                   {displayAddress && (
                       <DialogDescription className="flex items-center gap-1 text-xs text-muted-foreground pt-1">
-                          <Wallet className="h-3 w-3"/> {formatAddress(displayAddress)} {copied ? (
-                            <Check className="h-3 w-3 text-green-500" />
+                          <Wallet className="h-3 w-3 flex-shrink-0"/> 
+                          <span className="truncate">{formatAddress(displayAddress)}</span> 
+                          {copied ? (
+                            <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
                           ) : (
-                            <Copy className="h-3 w-3" onClick={() => {
+                            <Copy className="h-3 w-3 flex-shrink-0 cursor-pointer" onClick={() => {
                               if (smartWalletAddress) {
                                 navigator.clipboard.writeText(smartWalletAddress);
                                 setCopied(true);
@@ -657,26 +661,26 @@ export function CustomWallet() {
                 </DialogHeader>
         
                 <div className={clsx(
-                    "flex items-center justify-between p-2 rounded-md text-sm",
+                    "flex items-center justify-between p-2 rounded-md text-xs sm:text-sm",
                     isOnBase ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300"
                   )}>
                   <div className="flex items-center gap-1.5">
                     {isOnBase ? (
-                       <Image src="/base-logo.png" alt="Base" width={16} height={16} /> 
+                       <Image src="/base-logo.png" alt="Base" width={14} height={14} className="sm:w-4 sm:h-4" /> 
                     ) : (
-                       <Network className="h-4 w-4"/> 
+                       <Network className="h-3 w-3 sm:h-4 sm:w-4"/> 
                     )}
                     {isOnBase ? "Base Mainnet" : `Connected to ${chain?.name ?? 'Unknown Network'}`}
                   </div>
                   {!isOnBase && (
-                    <Button size="sm" variant="outline" onClick={handleSwitchNetwork}>Switch to Base</Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={handleSwitchNetwork}>Switch to Base</Button>
                   )}
                 </div>
         
-                <Separator />
+                <Separator className="my-2" />
         
-                <div className="space-y-3 py-2">
-                    <DialogTitle className="text-base flex justify-between items-center">
+                <div className="space-y-2 py-1">
+                    <DialogTitle className="text-sm sm:text-base flex justify-between items-center">
                         Balances
                         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={refreshBalances} title="Refresh balances">
                             <RefreshCcw className="h-3 w-3" />
@@ -684,63 +688,63 @@ export function CustomWallet() {
                     </DialogTitle>
                     {isOnBase ? (
                         <>
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={16} height={16} className="rounded-full"/> ETH
+                            <div className="flex justify-between items-center text-xs sm:text-sm">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="rounded-full sm:w-4 sm:h-4"/> ETH
                                 </span>
-                                {ethLoading ? <Skeleton className="h-5 w-20" /> :
+                                {ethLoading ? <Skeleton className="h-4 w-16" /> :
                                 <span className="font-mono">{parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(5)}</span>
                                 }
                             </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={16} height={16} /> USDC
+                            <div className="flex justify-between items-center text-xs sm:text-sm">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="sm:w-4 sm:h-4" /> USDC
                                 </span>
-                                {tokensLoading ? <Skeleton className="h-5 w-20" /> :
+                                {tokensLoading ? <Skeleton className="h-4 w-16" /> :
                                 <span className="font-mono">{usdcBalance.toFixed(2)}</span>
                                 }
                             </div>
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="/qrLogo.png" alt="$QR" width={16} height={16} /> $QR
+                            <div className="flex justify-between items-center text-xs sm:text-sm">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="sm:w-4 sm:h-4" /> $QR
                                 </span>
-                                {tokensLoading ? <Skeleton className="h-5 w-20" /> :
+                                {tokensLoading ? <Skeleton className="h-4 w-16" /> :
                                 <span className="font-mono">{qrBalance.toFixed(2)}</span>
                                 }
                             </div>
                         </>
                     ) : (
-                        <p className="text-sm text-center text-muted-foreground py-4">Switch to Base network to see balances.</p>
+                        <p className="text-xs sm:text-sm text-center text-muted-foreground py-2">Switch to Base network to see balances.</p>
                     )}
                 </div>
         
-                <Separator />
+                <Separator className="my-2" />
         
                 {showSendForm ? (
-                    <div className="space-y-2 pt-2">
-                        <DialogTitle className="text-base">Send Funds</DialogTitle>
+                    <div className="space-y-2 pt-1">
+                        <DialogTitle className="text-sm sm:text-base">Send Funds</DialogTitle>
                         <div className="flex gap-2">
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" className="w-[80px] flex items-center justify-between">
+                                    <Button variant="outline" className="w-[70px] sm:w-[80px] flex items-center justify-between text-xs sm:text-sm h-8 sm:h-10">
                                         <Image 
                                             src={selectedToken === 'ETH' ? 'https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040' : selectedToken === 'USDC' ? 'https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040' : '/qr-logo.svg'}
                                             alt={selectedToken}
-                                            width={16} height={16}
-                                            className={clsx(selectedToken === 'ETH' && 'rounded-full')}
+                                            width={14} height={14}
+                                            className={clsx('sm:w-4 sm:h-4', selectedToken === 'ETH' && 'rounded-full')}
                                         />
-                                        <ChevronDown className="h-4 w-4 opacity-50"/>
+                                        <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50"/>
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="start">
                                     <DropdownMenuItem onClick={() => setSelectedToken('ETH')}>
-                                        <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={16} height={16} className="mr-2 rounded-full"/> ETH
+                                        <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="mr-2 rounded-full sm:w-4 sm:h-4"/> ETH
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setSelectedToken('USDC')}>
-                                        <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={16} height={16} className="mr-2"/> USDC
+                                        <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> USDC
                                     </DropdownMenuItem>
                                     <DropdownMenuItem onClick={() => setSelectedToken('$QR')}>
-                                        <Image src="/qrLogo.png" alt="$QR" width={16} height={16} className="mr-2"/> $QR
+                                        <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> $QR
                                     </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
@@ -749,7 +753,7 @@ export function CustomWallet() {
                                 placeholder="Amount" 
                                 value={sendAmount}
                                 onChange={(e) => setSendAmount(e.target.value)}
-                                className="flex-1"
+                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
                             />
                         </div>
                         <Input 
@@ -757,27 +761,28 @@ export function CustomWallet() {
                             placeholder="Recipient Address (0x...)" 
                             value={sendRecipient}
                             onChange={(e) => setSendRecipient(e.target.value)}
+                            className="h-8 sm:h-10 text-xs sm:text-sm"
                         />
                         <div className="flex gap-2 pt-1">
                             <Button 
                                 onClick={handleConfirmSend} 
                                 disabled={!isOnBase || isSending || !sendRecipient || !sendAmount}
-                                className="flex-1"
+                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
                             >
                                 {isSending ? "Sending..." : `Send ${selectedToken}`}
                             </Button>
-                            <Button variant="outline" onClick={() => setShowSendForm(false)} className="flex-1">
+                            <Button variant="outline" onClick={() => setShowSendForm(false)} className="flex-1 h-8 sm:h-10 text-xs sm:text-sm">
                                 Cancel
                             </Button>
                         </div>
                     </div>
                 ) : (
-                    <div className="grid grid-cols-2 gap-3 pt-2">
-                      <Button variant="outline" onClick={handleInitiateSend} disabled={!isOnBase}>
-                        <Send className="mr-2 h-4 w-4" /> Send
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <Button variant="outline" onClick={handleInitiateSend} disabled={!isOnBase} className="h-8 sm:h-10 text-xs sm:text-sm">
+                        <Send className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Send
                       </Button>
-                      <Button variant="outline" onClick={handleAddFunds} disabled={!displayAddress}>
-                         <PlusCircle className="mr-2 h-4 w-4" /> Add Funds
+                      <Button variant="outline" onClick={handleAddFunds} disabled={!displayAddress} className="h-8 sm:h-10 text-xs sm:text-sm">
+                         <PlusCircle className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Add Funds
                       </Button>
 
                       <a
@@ -786,18 +791,18 @@ export function CustomWallet() {
                         rel="noopener noreferrer"
                         className="col-span-2"
                       >
-                          <Button variant="outline" className="w-full">
-                            <ExternalLink className="mr-2 h-4 w-4" /> View on Basescan
+                          <Button variant="outline" className="w-full h-8 sm:h-10 text-xs sm:text-sm">
+                            <ExternalLink className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> View on Basescan
                           </Button>
                       </a>
                     </div>
                 )}
         
-                <Separator className="mt-4 mb-2"/> 
+                <Separator className="mt-3 mb-2"/> 
 
                 <DialogFooter>
-                  <Button variant="destructive" onClick={handleDisconnect} className="w-full">
-                    <LogOut className="mr-2 h-4 w-4" /> Disconnect
+                  <Button variant="destructive" onClick={handleDisconnect} className="w-full h-8 sm:h-10 text-xs sm:text-sm">
+                    <LogOut className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Disconnect
                   </Button>
                 </DialogFooter>
             </> 

@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import clsx from "clsx";
 import { WinnerAnnouncement } from "@/components/WinnerAnnouncement";
-import { UniswapWidget } from "@/components/ui/uniswap-widget";
+import { LiFiWidgetComponent } from "@/components/ui/lifi-widget";
 import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
@@ -357,8 +357,11 @@ export default function AuctionPage() {
                   <h2 className="font-semibold text-xl md:text-2xl text-center">
                     <span className="">Buy USDC</span>
                   </h2>
-                  <div style={{ height: "510px" }}>
-                    <UniswapWidget />
+                  <div style={{ height: "510px" }} className="overflow-hidden rounded-lg w-full mx-auto">
+                    <LiFiWidgetComponent 
+                      inputCurrency="NATIVE"
+                      outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC on Base
+                    />
                   </div>
                 </>
               )}
@@ -369,14 +372,17 @@ export default function AuctionPage() {
             <WinnerAnnouncement auctionId={currentAuctionId} />
           )}
           
-          {/* Mobile Uniswap Widget */}
+          {/* Mobile LiFi Widget */}
           {isLatestAuction && !isAuction22 && (
             <div className="md:hidden w-full">
               <h2 className="font-semibold text-xl text-center mb-1">
-                <span className="">Buy $QR</span>
+                <span className="">Buy USDC</span>
               </h2>
-              <div style={{ height: "570px" }}>
-                <UniswapWidget />
+              <div style={{ height: "570px" }} className="overflow-hidden rounded-lg w-full max-w-[95vw] mx-auto sm:max-w-sm">
+                <LiFiWidgetComponent 
+                  inputCurrency="NATIVE"
+                  outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC on Base
+                />
               </div>
             </div>
           )}

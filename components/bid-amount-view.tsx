@@ -21,7 +21,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { useTypingStatus } from "@/hooks/useTypingStatus";
 import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
 import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
-import { UniswapModal } from "./ui/uniswap-modal";
+import { LiFiModal } from "./ui/lifi-modal";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useFetchBids } from "@/hooks/useFetchBids";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
@@ -45,7 +45,7 @@ export function BidForm({
   onSuccess: () => void;
   openDialog: (url: string) => boolean;
 }) {
-  const [showUniswapModal, setShowUniswapModal] = useState(false);
+  const [showLiFiModal, setShowLiFiModal] = useState(false);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   
   // Single state to track funding status - this represents both which button initiated funding
@@ -431,8 +431,8 @@ export function BidForm({
         }
       });
     } else {
-      // For regular users, show the Uniswap modal
-      setShowUniswapModal(true);
+      // For regular users, show the LiFi modal
+      setShowLiFiModal(true);
     }
   };
 
@@ -553,7 +553,7 @@ export function BidForm({
       if (!hasEnoughTokens) {
         // Show appropriate message based on token type
         toast.info(`You don't have enough ${tokenSymbol} tokens for this bid`);
-        setShowUniswapModal(true);
+        setShowLiFiModal(true);
         return;
       }
     }
@@ -779,9 +779,9 @@ export function BidForm({
           </div>
         )}
         
-        <UniswapModal
-          open={showUniswapModal}
-          onOpenChange={setShowUniswapModal}
+        <LiFiModal
+          open={showLiFiModal}
+          onOpenChange={setShowLiFiModal}
           inputCurrency="NATIVE"
           outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC
         />

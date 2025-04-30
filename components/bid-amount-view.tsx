@@ -660,7 +660,7 @@ export function BidForm({
             type="number"
             min={safeMinimumBid}
             step={stepSize}
-            placeholder={`${formattedMinBid} or more`}
+            placeholder={isV3Auction ? `$${formattedMinBid} or more` : `${formattedMinBid} or more`}
             className="pr-16 border p-2 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             {...register("bid")}
             onKeyDown={handleTypingEvent}

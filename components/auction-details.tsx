@@ -575,7 +575,7 @@ export function AuctionDetails({
                         <div className="text-xl md:text-2xl font-bold">
                           {isV3Auction ? (
                             // For V3 auctions, USDC has 6 decimals, not 18
-                            `${formatUnits(auctionDetail?.highestBid || 0n, 6)} USDC`
+                            `$${formatUnits(auctionDetail?.highestBid || 0n, 6)}`
                           ) : isLegacyAuction ? (
                             // For legacy auctions (V1), show ETH
                             `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} ETH`

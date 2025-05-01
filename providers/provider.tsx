@@ -49,7 +49,13 @@ export function Provider(props: { children: ReactNode }) {
       embeddedWallets: {
         ...config.embeddedWallets,
          // No need for showWalletUIs here unless specifically required by Privy
-      }
+      },
+      externalWallets: {
+        coinbaseWallet: {
+          connectionOptions: 'eoaOnly'
+        },
+        // No need for showWalletUIs here unless specifically required by Privy
+      },
     };
   }, [currentTheme]); // Recompute only when theme changes
 

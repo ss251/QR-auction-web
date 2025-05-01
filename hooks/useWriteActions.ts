@@ -63,7 +63,22 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
       if (smartWalletClient) {
         console.log("Using smart wallet for transaction");
         
-        // Smart wallets skip directly to executing phase
+        // First approve USDC tokens to be spent by the auction contract using the smart wallet
+        console.log("Approving USDC tokens with smart wallet:", value.toString());
+        
+        // Use smart wallet for approval
+        const approveTxData = {
+          address: USDC_TOKEN_ADDRESS as Address,
+          abi: erc20ABI,
+          functionName: "approve",
+          args: [process.env.NEXT_PUBLIC_QRAuctionV3 as Address, value],
+        };
+        
+        const approveTx = await smartWalletClient.writeContract(approveTxData);
+        console.log("Smart wallet approval tx:", approveTx);
+        
+        // Wait for approval to complete
+        await new Promise(resolve => setTimeout(resolve, 5000));
         onPhaseChange?.('executing');
         
         // Use the 3-parameter version of createBid instead of the backward compatibility one

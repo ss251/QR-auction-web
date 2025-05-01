@@ -1,11 +1,15 @@
 // config/privyConfig.ts
 import { baseSepolia, base } from "wagmi/chains";
+import { addRpcUrlOverrideToChain } from "@privy-io/chains";
+
 
 // Check if testnets are enabled
 const useTestnets = (process.env.NEXT_PUBLIC_ENABLE_TESTNETS as string) === "true";
 
+const mainnetOverride = addRpcUrlOverrideToChain(base, `https://base-mainnet.g.alchemy.com/v2/zRmt5RAPz_-zQRJYVgXx-FtqhUcYNkGn`);
+
 // App chains configuration
-const chains = useTestnets ? [baseSepolia] : [base];
+const chains = useTestnets ? [baseSepolia] : [mainnetOverride];
 
 // Make this function safe for server-side execution
 const isInFarcasterFrame = () => {
@@ -45,7 +49,7 @@ const basePrivyConfig = {
     logo: `https://qrcoin.fun/qrLogo.png`,
   },
   supportedChains: chains,
-  defaultChain: useTestnets ? baseSepolia : base,
+  defaultChain: useTestnets ? baseSepolia : mainnetOverride,
   walletConnectCloudProjectId: process.env.NEXT_PUBLIC_WALLET_CONNECT_ID || "",
 };
 
@@ -58,7 +62,7 @@ export const getPrivyConfig = () => {
       ...basePrivyConfig.appearance,
        walletList: isFrame
         ? ['detected_ethereum_wallets']
-        : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'],
+        : ['detected_ethereum_wallets','coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'],
     },
     embeddedWallets: {
       createOnLogin: isFrame ? false : "users-without-wallets" as const,

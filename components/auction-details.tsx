@@ -364,10 +364,10 @@ export function AuctionDetails({
     if (isAuctionActive) {
       if (isV3Auction) {
         // For V3 auctions, use USDC format (6 decimals)
-        const currentBid = Number(formatUnits(auctionDetail.highestBid, 6));
+        const currentBid = Number(formatUnits(auctionDetail?.highestBid || 0n, 6));
         // For whole numbers, don't show decimal places
-        const bidText = Number.isInteger(currentBid) ? `${currentBid} USDC` : `${currentBid.toFixed(2)} USDC`;
-        document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
+        const bidText = `$${currentBid.toFixed(2)}`;
+        document.title = `${bidText} - ${bidderNameInfo.displayName}`;
       } else {
         // For legacy and V2 auctions, use QR format (18 decimals)
         const currentBid = Number(formatEther(auctionDetail.highestBid));
@@ -574,8 +574,7 @@ export function AuctionDetails({
                       <div className="flex flex-row items-center gap-1">
                         <div className="text-xl md:text-2xl font-bold">
                           {isV3Auction ? (
-                            // For V3 auctions, USDC has 6 decimals, not 18
-                            `$${formatUnits(auctionDetail?.highestBid || 0n, 6)}`
+                            `$${Number(formatUnits(auctionDetail?.highestBid || 0n, 6)).toFixed(2)}`
                           ) : isLegacyAuction ? (
                             // For legacy auctions (V1), show ETH
                             `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} ETH`
@@ -686,7 +685,7 @@ export function AuctionDetails({
                           <div className="text-gray-600 dark:text-[#696969]">Winning bid</div>
                           <div className="text-2xl font-bold">
                             {isV3Auction ? (
-                              `${formatUnits(auctionDetail?.highestBid || 0n, 6)} USDC`
+                              `$${Number(formatUnits(auctionDetail?.highestBid || 0n, 6)).toFixed(2)}`
                             ) : isLegacyAuction ? (
                               `${formatQRAmount(Number(formatEther(auctionDetail?.highestBid || 0n)))} ETH`
                             ) : (

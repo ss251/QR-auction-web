@@ -256,7 +256,7 @@ export function useAuctionEvents({
                 } else if (isV2Auction) {
                   bidText = `${formatQRAmount(amount_num)} $QR`;
                 } else if (isV3Auction) {
-                  bidText = `${amount_num.toFixed(2)} USDC`;
+                  bidText = `$${amount_num.toFixed(2)}`;
                 }
                 
                 toast(`New bid: ${bidText} by ${displayName}`, { 

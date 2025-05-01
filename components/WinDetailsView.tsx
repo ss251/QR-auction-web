@@ -145,8 +145,8 @@ export function WinDetailsView(winnerdata: AuctionType) {
     } else if (isV2Auction) {
       return `${formatQRAmount(tokenAmount)} $QR`;
     } else if (isV3Auction) {
-      // For whole numbers, don't show decimal places
-      return Number.isInteger(tokenAmount) ? `${tokenAmount} USDC` : `${tokenAmount.toFixed(2)} USDC`;
+      // Always show 2 decimal places for dollar amounts
+      return `$${tokenAmount.toFixed(2)}`;
     }
     return '';
   };

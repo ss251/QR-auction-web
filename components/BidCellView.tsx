@@ -65,8 +65,8 @@ export function BidCellView({
     } else if (isV2) {
       return `${formatQRAmount(amount)} $QR`;
     } else if (isV3) {
-      // For whole numbers, don't show decimal places
-      return Number.isInteger(amount) ? `${amount} USDC` : `${amount.toFixed(2)} USDC`;
+      // Always show 2 decimal places for dollar amounts
+      return `$${amount.toFixed(2)}`;
     }
   }
 

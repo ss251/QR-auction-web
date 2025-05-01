@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import clsx from "clsx";
 import { WinnerAnnouncement } from "@/components/WinnerAnnouncement";
-import { LiFiWidgetComponent } from "@/components/ui/lifi-widget";
+import { UniswapWidget } from "@/components/ui/uniswap-widget";
 import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
@@ -60,7 +60,8 @@ export default function AuctionPage() {
 
   // Check if this is auction #22 from v1 contract
   const isAuction22 = currentAuctionId === 22;
-
+  // Check if this is auction #56 from v2 contract
+  const isAuction56 = currentAuctionId === 56;
   useEffect(() => {
     if (auctions && auctions.length > 0) {
       const lastAuction = auctions[auctions.length - 1];
@@ -352,16 +353,19 @@ export default function AuctionPage() {
             </div>
 
             <div className="hidden md:flex flex-col gap-1">
-              {isLatestAuction && !isAuction22 && (
+              {isLatestAuction && !isAuction22 && !isAuction56 && (
                 <>
                   <h2 className="font-semibold text-xl md:text-2xl text-center">
                     <span className="">Buy USDC</span>
                   </h2>
-                  <div style={{ height: "510px" }} className="overflow-hidden rounded-lg w-full mx-auto">
+                  {/* <div style={{ height: "510px" }} className="overflow-hidden rounded-lg w-full mx-auto">
                     <LiFiWidgetComponent 
                       inputCurrency="NATIVE"
                       outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC on Base
                     />
+                  </div> */}
+                  <div style={{ height: "510px" }}>
+                    <UniswapWidget />
                   </div>
                 </>
               )}
@@ -373,7 +377,7 @@ export default function AuctionPage() {
           )}
           
           {/* Mobile LiFi Widget */}
-          {isLatestAuction && !isAuction22 && (
+          {/* {isLatestAuction && !isAuction22 && (
             <div className="md:hidden w-full">
               <h2 className="font-semibold text-xl text-center mb-1">
                 <span className="">Buy USDC</span>
@@ -385,7 +389,19 @@ export default function AuctionPage() {
                 />
               </div>
             </div>
-          )}
+          )} */}
+
+          {/* Mobile Uniswap Widget */}
+          {/* {isLatestAuction && !isAuction22 && !isAuction56 && (
+            <div className="md:hidden w-full">
+              <h2 className="font-semibold text-xl text-center mb-1">
+                <span className="">Buy USDC</span>
+              </h2>
+              <div style={{ height: "570px" }}>
+                <UniswapWidget />
+              </div>
+            </div>
+          )} */}
           
           {/* BidStats for mobile - centered */}
           <div className="md:hidden mx-auto w-full">

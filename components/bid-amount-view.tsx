@@ -21,7 +21,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { useTypingStatus } from "@/hooks/useTypingStatus";
 import { MIN_QR_BID, MIN_USDC_BID } from "@/config/tokens";
 import { formatQRAmount, formatUsdValue } from "@/utils/formatters";
-import { LiFiModal } from "./ui/lifi-modal";
+import { UniswapModal } from "./ui/uniswap-modal";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useFetchBids } from "@/hooks/useFetchBids";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
@@ -45,7 +45,7 @@ export function BidForm({
   onSuccess: () => void;
   openDialog: (url: string) => boolean;
 }) {
-  const [showLiFiModal, setShowLiFiModal] = useState(false);
+  const [showUniswapModal, setShowUniswapModal] = useState(false);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   const [txPhase, setTxPhase] = useState<'idle' | 'approving' | 'confirming' | 'executing'>('idle');
   
@@ -446,7 +446,7 @@ export function BidForm({
       });
     } else {
       // For regular users, show the LiFi modal
-      setShowLiFiModal(true);
+      setShowUniswapModal(true);
     }
   };
 
@@ -567,7 +567,7 @@ export function BidForm({
       if (!hasEnoughTokens) {
         // Show appropriate message based on token type
         toast.info(`You don't have enough ${tokenSymbol} tokens for this bid`);
-        setShowLiFiModal(true);
+        setShowUniswapModal(true);
         return;
       }
     }
@@ -792,7 +792,7 @@ export function BidForm({
         {/* Buy USDC Button with Cancel Option - Only show for non-smart wallet users */}
         {!hasSmartWallet && (
           <div className="relative md:hidden">
-            <Button
+            {/* <Button
               onClick={(e) => {
                 e.preventDefault();
                 
@@ -819,10 +819,10 @@ export function BidForm({
               ) : (
                 "Buy USDC"
               )}
-            </Button>
+            </Button> */}
             
             {/* Cancel button for the Buy USDC button */}
-            {fundingState === 'waiting_from_buy' && (
+            {/* {fundingState === 'waiting_from_buy' && (
               <button
                 type="button"
                 onClick={cancelFunding}
@@ -831,16 +831,16 @@ export function BidForm({
               >
                 <X className="h-4 w-4 text-white" />
               </button>
-            )}
+            )} */}
           </div>
         )}
         
-        <LiFiModal
-          open={showLiFiModal}
-          onOpenChange={setShowLiFiModal}
+        {/* <UniswapModal
+          open={showUniswapModal}
+          onOpenChange={setShowUniswapModal}
           inputCurrency="NATIVE"
           outputCurrency="0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" // USDC
-        />
+        /> */}
 
         {displayUrl !== "" && (
           <div className={`mt-0.5 p-3 bg-orange-50/30 border border-orange-100/50 rounded-md ${isBaseColors ? "bg-background" : "bg-gray-900 dark:bg-[#131313]"}`}>

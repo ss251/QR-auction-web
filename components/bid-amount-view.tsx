@@ -47,6 +47,7 @@ export function BidForm({
 }) {
   const [showLiFiModal, setShowLiFiModal] = useState(false);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
+  const [txPhase, setTxPhase] = useState<'idle' | 'approving' | 'confirming' | 'executing'>('idle');
   
   // Single state to track funding status - this represents both which button initiated funding
   // and whether we're waiting for funds
@@ -304,6 +305,7 @@ export function BidForm({
     // Update UI
     setFundingState('idle');
     setIsPlacingBid(true);
+    setTxPhase('approving'); // Start with approval phase
     
     try {
       // Final balance check
@@ -315,9 +317,16 @@ export function BidForm({
         console.log(`[AutoBid] Final balance check failed: ${formattedBalance} USDC < ${pendingBid.requiredBalance} USDC`);
         toast.error("Unable to place bid automatically. Please try again.");
         setIsPlacingBid(false);
+        setTxPhase('idle');
         pendingBidRef.current = null;
         return;
       }
+      
+      // Define the phase change handler
+      const handlePhaseChange = (phase: 'approving' | 'confirming' | 'executing') => {
+        console.log(`[AutoBid] Transaction phase changed to: ${phase}`);
+        setTxPhase(phase);
+      };
       
       // Bid value with 6 decimals for USDC
       const bidValue = parseUnits(`${pendingBid.amount}`, 6);
@@ -328,12 +337,14 @@ export function BidForm({
         hash = await bidAmount({
           value: bidValue,
           urlString: pendingBid.url,
-          smartWalletClient: smartWalletClient
+          smartWalletClient: smartWalletClient,
+          onPhaseChange: handlePhaseChange
         });
       } else {
         hash = await bidAmount({
           value: bidValue,
-          urlString: pendingBid.url
+          urlString: pendingBid.url,
+          onPhaseChange: handlePhaseChange
         });
       }
       
@@ -351,7 +362,7 @@ export function BidForm({
       });
       
       toast.promise(transactionReceiptPr, {
-        loading: "Placing your bid...",
+        loading: "Executing Transaction...",
         success: async (data: any) => {
           // Send notification to previous highest bidder
           if (previousBidder && 
@@ -386,11 +397,13 @@ export function BidForm({
           reset();
           onSuccess();
           setIsPlacingBid(false);
+          setTxPhase('idle');
           pendingBidRef.current = null;
           return "Bid placed successfully!";
         },
         error: (data: any) => {
           setIsPlacingBid(false);
+          setTxPhase('idle');
           pendingBidRef.current = null;
           return "Failed to create bid";
         },
@@ -399,6 +412,7 @@ export function BidForm({
       console.error("[AutoBid] Error executing bid:", error);
       toast.error("Failed to place bid automatically. Please try again.");
       setIsPlacingBid(false);
+      setTxPhase('idle');
       pendingBidRef.current = null;
     }
   };
@@ -560,6 +574,7 @@ export function BidForm({
     
     // Set bidding state to true only when actually submitting a transaction
     setIsPlacingBid(true);
+    setTxPhase('approving'); // Default to approval phase initially
 
     try {
       // For V3/USDC, use 6 decimal places instead of 18
@@ -567,23 +582,46 @@ export function BidForm({
         ? parseUnits(`${fullBidAmount}`, 6)  // USDC has 6 decimals
         : parseUnits(`${fullBidAmount}`, 18); // QR/ETH have 18 decimals
       
+      // Define the phase change handler
+      const handlePhaseChange = (phase: 'approving' | 'confirming' | 'executing') => {
+        console.log(`Transaction phase changed to: ${phase}`);
+        setTxPhase(phase);
+      };
+      
       // Use smart wallet client if available, otherwise fall back to regular client
       let hash;
       if (smartWalletClient) {
         console.log("Placing bid using smart wallet:", smartWalletClient.account?.address);
         
-        // Pass the smart wallet client to bidAmount
-        hash = await bidAmount({
-          value: bidValue,
-          urlString: data.url,
-          smartWalletClient: smartWalletClient
-        });
+        try {
+          // Pass the smart wallet client to bidAmount along with phase change handler
+          hash = await bidAmount({
+            value: bidValue,
+            urlString: data.url,
+            smartWalletClient: smartWalletClient,
+            onPhaseChange: handlePhaseChange
+          });
+        } catch (error) {
+          console.error("Error during smart wallet bid process:", error);
+          setIsPlacingBid(false);
+          setTxPhase('idle');
+          throw error;
+        }
       } else {
         console.log("Placing bid using EOA wallet");
-        hash = await bidAmount({
-          value: bidValue,
-          urlString: data.url
-        });
+        try {
+          // Pass the phase change handler to bidAmount
+          hash = await bidAmount({
+            value: bidValue,
+            urlString: data.url,
+            onPhaseChange: handlePhaseChange
+          });
+        } catch (error) {
+          console.error("Error during EOA wallet bid process:", error);
+          setIsPlacingBid(false);
+          setTxPhase('idle');
+          throw error;
+        }
       }
       
       // Register the transaction hash to prevent duplicate toasts
@@ -594,6 +632,9 @@ export function BidForm({
       const previousBid = auctionDetail?.highestBid;
       const auctionTokenId = auctionDetail?.tokenId;
 
+      // We no longer need to set the confirming phase here as it comes from the hook
+      // The hook will set executing phase after transaction submission
+      
       const transactionReceiptPr = waitForTransactionReceipt(wagmiConfig, {
         hash: hash,
       });
@@ -635,16 +676,19 @@ export function BidForm({
           reset();
           onSuccess();
           setIsPlacingBid(false); // Reset bidding state on success
+          setTxPhase('idle'); // Reset transaction phase
           return "Bid Successful!";
         },
         error: (data: any) => {
           setIsPlacingBid(false); // Reset bidding state on error
+          setTxPhase('idle'); // Reset transaction phase
           return "Failed to create bid";
         },
       });
     } catch (error) {
       console.error(error);
       setIsPlacingBid(false); // Reset bidding state on error
+      setTxPhase('idle'); // Reset transaction phase
     }
   };
 
@@ -708,7 +752,19 @@ export function BidForm({
             {isPlacingBid ? (
               <span className="flex items-center justify-center">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Placing bid...
+                {/* Smart wallet users only see "Placing bid..." */}
+                {hasSmartWallet ? (
+                  "Placing bid..."
+                ) : (
+                  /* EOA wallet users see the multi-phase messages */
+                  <>
+                    {txPhase === 'approving' && "Waiting for approval..."}
+                    {txPhase === 'confirming' && "Waiting for confirmation..."}
+                    {txPhase === 'executing' && "Finalizing bid..."}
+                  </>
+                )}
+                {/* Still show funding message for both wallet types */}
+                {txPhase === 'idle' && fundingState === 'waiting_from_bid' && "Waiting for funds..."}
               </span>
             ) : fundingState === 'waiting_from_bid' ? (
               <span className="flex items-center justify-center">
@@ -720,7 +776,7 @@ export function BidForm({
             )}
           </Button>
           
-          {/* Cancel button for the Place Bid button */}
+          {/* Cancel button for the Place Bid button - only during funding */}
           {fundingState === 'waiting_from_bid' && (
             <button
               type="button"

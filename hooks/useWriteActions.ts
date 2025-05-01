@@ -47,11 +47,13 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
   const bidAmount = async ({
     value,
     urlString,
-    smartWalletClient
+    smartWalletClient,
+    onPhaseChange
   }: {
     value: bigint;
     urlString: string;
     smartWalletClient?: any;
+    onPhaseChange?: (phase: 'approving' | 'confirming' | 'executing') => void;
   }) => {
     try {
       console.log(`Bidding on V3 auction #${tokenId.toString()}`);
@@ -61,22 +63,8 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
       if (smartWalletClient) {
         console.log("Using smart wallet for transaction");
         
-        // First approve USDC tokens to be spent by the auction contract using the smart wallet
-        console.log("Approving USDC tokens with smart wallet:", value.toString());
-        
-        // Use smart wallet for approval
-        const approveTxData = {
-          address: USDC_TOKEN_ADDRESS as Address,
-          abi: erc20ABI,
-          functionName: "approve",
-          args: [process.env.NEXT_PUBLIC_QRAuctionV3 as Address, value],
-        };
-        
-        const approveTx = await smartWalletClient.writeContract(approveTxData);
-        console.log("Smart wallet approval tx:", approveTx);
-        
-        // Wait for approval to complete
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Smart wallets skip directly to executing phase
+        onPhaseChange?.('executing');
         
         // Use the 3-parameter version of createBid instead of the backward compatibility one
         console.log("Placing bid with smart wallet and URL:", urlString);
@@ -91,8 +79,11 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
         const tx = await smartWalletClient.writeContract(bidTxData);
         return tx;
       } else {
-        // Use regular EOA wallet
+        // Use regular EOA wallet - this path still needs approval
         console.log("Using EOA wallet for transaction");
+        
+        // Notify that we're in approval phase
+        onPhaseChange?.('approving');
         
         // First approve USDC tokens to be spent by the auction contract
         console.log("Approving USDC tokens with EOA:", value.toString());
@@ -108,6 +99,9 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
         // Wait for approval to complete
         await new Promise(resolve => setTimeout(resolve, 5000));
         
+        // Notify that we're in confirmation phase
+        onPhaseChange?.('confirming');
+        
         // Use the 3-parameter version of createBid instead of the backward compatibility one
         console.log("Placing bid with EOA and URL:", urlString);
         const tx = await bidAuction({
@@ -117,6 +111,8 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
           args: [tokenId, urlString, ""], // Add empty string as name parameter
         });
 
+        // After submitting the transaction, move to executing phase
+        onPhaseChange?.('executing');
         return tx;
       }
     } catch (error: any) {

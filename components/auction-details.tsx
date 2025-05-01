@@ -230,7 +230,7 @@ export function AuctionDetails({
           // After successful transaction, send notifications
           try {
             // Skip notifications in development environment
-            const isDev = process.env.NODE_ENV === 'development';
+            const isDev = process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview';
             
             if (isDev) {
               console.log('[DEV MODE] Skipping notifications in development environment');

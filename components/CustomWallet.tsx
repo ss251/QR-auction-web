@@ -5,7 +5,7 @@ import {
   useFundWallet
 } from "@privy-io/react-auth";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useAccount, useBalance, useReadContracts, useSwitchChain, useDisconnect } from "wagmi";
 import { base } from "viem/chains";
 import { formatEther, Address, erc20Abi, parseUnits, isAddress, encodeFunctionData } from "viem";
@@ -22,7 +22,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-import { LogOut, Wallet, Network, Send, ExternalLink, RefreshCcw, Copy, ChevronDown, PlusCircle, Loader2, Check } from "lucide-react";
+import { LogOut, Wallet, Network, Send, ExternalLink, RefreshCcw, Copy, ChevronDown, PlusCircle, Loader2, Check, UserCircle, ArrowRight } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { getName } from "@coinbase/onchainkit/identity";
@@ -37,8 +37,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { broadcastConnection } from "@/lib/channelManager";
-import sdk from "@farcaster/frame-sdk";
 import { frameSdk } from "@/lib/frame-sdk";
+import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
 
 // --- Constants ---
 const BASE_MAINNET_ID = 8453;
@@ -56,6 +56,14 @@ interface PrivyLinkedAccount {
   // Other properties might exist but we don't need to specify them
 }
 
+// Define interface for frameUser to avoid TypeScript errors
+interface FrameUser {
+  fid?: number;
+  username?: string;
+  displayName?: string;
+  pfpUrl?: string;
+}
+
 // --- Helper Function ---
 function formatAddress(address?: string) {
   if (!address) return "";
@@ -66,6 +74,7 @@ function formatAddress(address?: string) {
 export function CustomWallet() {
   const [isClient, setIsClient] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [pfpUrl, setPfpUrl] = useState<string | null>(null);
   const [isFetchingName, setIsFetchingName] = useState(false);
@@ -77,8 +86,12 @@ export function CustomWallet() {
   const [isSending, setIsSending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false); // Track connection state
   const [isFrame, setIsFrame] = useState(false); // Track if we're in a Farcaster frame
-  const [frameFid, setFrameFid] = useState<number | null>(null); // Store the user's FID from frame context
+  // We'll use frameUser object to store all frame context user data
+  const [frameUser, setFrameUser] = useState<FrameUser | null>(null);
   const [copied, setCopied] = useState(false); // Track whether the address was just copied
+  
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const dragControls = useDragControls();
 
   const { ready, authenticated, user } = usePrivy();
   const { address: eoaAddress, chain } = useAccount();
@@ -121,16 +134,25 @@ export function CustomWallet() {
     const checkFrameContext = async () => {
       try {
         const context = await frameSdk.getContext();
-        if (context && context.user && context.user.fid) {
+        if (context && context.user) {
           console.log("Running in Farcaster frame context", context);
           setIsFrame(true);
-          setFrameFid(context.user.fid);
-          // Set profile data from frame context
+          
+          // Store frame user data with correct typing
+          setFrameUser({
+            fid: context.user.fid,
+            displayName: context.user.displayName || undefined,
+            username: context.user.username || undefined,
+            pfpUrl: context.user.pfpUrl || undefined
+          });
+          
+          // Still set these for backward compatibility
           if (context.user.displayName) {
             setDisplayName(context.user.displayName);
           } else if (context.user.username) {
             setDisplayName(`@${context.user.username}`);
           }
+          
           if (context.user.pfpUrl) {
             setPfpUrl(context.user.pfpUrl);
           }
@@ -145,6 +167,31 @@ export function CustomWallet() {
 
     checkFrameContext();
   }, []);
+
+  // Handle drag to dismiss
+  const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (info.offset.y > 100) {
+      // If dragged down more than 100px, close the drawer
+      setIsDrawerOpen(false);
+    }
+  };
+
+  // Handle clicks outside the drawer
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (drawerRef.current && !drawerRef.current.contains(event.target as Node)) {
+        setIsDrawerOpen(false);
+      }
+    };
+
+    if (isDrawerOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isDrawerOpen]);
 
   // Extract smart wallet address directly from the client
   const smartWalletAddress = useMemo(() => {
@@ -194,9 +241,19 @@ export function CustomWallet() {
   }, [smartWalletClient, smartWalletAddress, smartWalletAddressFromUser, 
       finalSmartWalletAddress, eoaAddress, displayAddress, authenticated, user?.linkedAccounts]);
 
+  // More reliable check for valid wallet connection - must have an actual address
+  const hasConnectedWallet = useMemo(() => {
+    return authenticated && Boolean(eoaAddress || finalSmartWalletAddress);
+  }, [authenticated, eoaAddress, finalSmartWalletAddress]);
+
   const isOnBase = useMemo(() => {
     return chain?.id === BASE_MAINNET_ID;
   }, [chain]);
+
+  // Determine if user is fully connected (authenticated + has address + on Base network)
+  const isFullyConnected = useMemo(() => {
+    return authenticated && hasConnectedWallet && isOnBase;
+  }, [authenticated, hasConnectedWallet, isOnBase]);
 
   const { data: tokenBalances, isLoading: tokensLoading, refetch: refetchTokenBalances } = useReadContracts({
     contracts: [
@@ -249,7 +306,7 @@ export function CustomWallet() {
 
   const ethBalanceFormatted = useMemo(() => {
       return parseFloat(formatEther(ethBalance?.value ?? 0n));
-  }, [ethBalance])
+  }, [ethBalance]);
 
   // Detect if we're on mobile
   const isMobile = useMemo(() => {
@@ -261,16 +318,80 @@ export function CustomWallet() {
 
   // Handle profile click for Farcaster frame context
   const handleProfileClick = async () => {
-    if (isFrame && frameFid) {
-      try {
-        // Use the Farcaster SDK to view the user's profile
-        await sdk.actions.viewProfile({ fid: frameFid });
-      } catch (error) {
-        console.error("Error opening profile in frame:", error);
-      }
+    if (isFrame) {
+      // Always toggle drawer in frame context, regardless of auth status
+      setIsDrawerOpen(prev => !prev);
     } else {
       // Regular wallet dialog opening behavior for non-frame environments
       setIsOpen(true);
+    }
+  };
+
+  // Detect inconsistent state on mount and clean up
+  useEffect(() => {
+    if (!ready) return;
+    
+    // Check for inconsistent state: authenticated but no wallet connected
+    const isInconsistentState = authenticated && !eoaAddress && !finalSmartWalletAddress;
+    
+    if (isInconsistentState) {
+      console.log("Detected inconsistent authentication state on mount, cleaning up...");
+      // Auto-reset bad state
+      logout().catch((e: Error) => console.error("Auto-logout failed:", e));
+    }
+  }, [ready, authenticated, eoaAddress, finalSmartWalletAddress, logout]);
+
+  // Handle connect wallet properly in drawer for frames
+  const handleConnectInDrawer = async () => {
+    // Do not close the drawer yet
+    console.log("Starting Privy wallet connection from drawer...", { authenticated, hasConnectedWallet });
+    
+    try {
+      // First check if we have a connected wallet
+      if (hasConnectedWallet) {
+        // If we have a wallet but are on the wrong network, switch network
+        if (!isOnBase) {
+          toast.info("Switching to Base network...");
+          switchChain({ chainId: BASE_MAINNET_ID });
+        }
+      } else {
+        // We don't have a connected wallet
+        if (authenticated) {
+          // If authenticated but no wallet, force logout then login in one step
+          console.log("Authenticated but no wallet detected, forcing reset");
+          await logout();
+        }
+        
+        // Always call login after handling potential logout
+        console.log("Showing login modal");
+        login();
+      }
+    } catch (error) {
+      console.error("Error in connect flow:", error);
+      // Fallback to direct login in case of errors
+      login();
+    }
+  };
+
+  // Navigate to user's profile using frameSdk
+  const goToProfile = async () => {
+    if (frameUser?.fid) {
+      try {
+        // Use the correct SDK method from Farcaster SDK to view a profile
+        await frameSdk.redirectToUrl(`https://warpcast.com/${frameUser.username || `~/~/~/~/~/${frameUser.fid}`}`);
+        setIsDrawerOpen(false);
+      } catch (error) {
+        console.error("Error navigating to profile:", error);
+        toast.error("Could not open profile");
+      }
+    }
+  };
+
+  // Open Basescan using frameSdk
+  const openBasescan = () => {
+    if (displayAddress) {
+      frameSdk.redirectToUrl(`https://basescan.org/address/${displayAddress}`);
+      setIsDrawerOpen(false);
     }
   };
 
@@ -334,6 +455,9 @@ export function CustomWallet() {
   const handleDisconnect = async () => {
     try {
       console.log("Logging out from Privy and clearing session...");
+      
+      // Close drawer first
+      setIsDrawerOpen(false);
       
       // Clear local state first
       setDisplayName(null);
@@ -525,6 +649,7 @@ export function CustomWallet() {
       // Reset states on unmount
       setIsConnecting(false);
       setIsOpen(false);
+      setIsDrawerOpen(false);
     };
   }, []);
 
@@ -539,33 +664,263 @@ export function CustomWallet() {
     setIsOpen(open);
   };
 
-  // If we're in a Farcaster frame, don't render the full wallet component
-  // Just render the profile avatar that opens the user's Warpcast profile
+  // Auto-prompt for network switch when component mounts or chain changes
+  useEffect(() => {
+    if (authenticated && eoaAddress && chain && chain.id !== BASE_MAINNET_ID) {
+      // Add small delay to avoid immediate prompt on initial load
+      const timer = setTimeout(() => {
+        toast.info("You're not on Base network. Switch to participate in auctions.", {
+          action: {
+            label: "Switch to Base",
+            onClick: () => switchChain({ chainId: BASE_MAINNET_ID })
+          },
+          duration: 5000
+        });
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [authenticated, eoaAddress, chain, switchChain]);
+
+  // Improve debugging by logging state changes
+  useEffect(() => {
+    console.log("Authentication state change:", { 
+      authenticated, 
+      ready, 
+      hasEOA: Boolean(eoaAddress), 
+      hasSmartWallet: Boolean(finalSmartWalletAddress),
+      chain: chain?.id,
+      isOnBase
+    });
+  }, [authenticated, ready, eoaAddress, finalSmartWalletAddress, chain, isOnBase]);
+
+  // If we're in a Farcaster frame, use the slide-up drawer
   if (isFrame) {
     return (
+      <>
       <Button
         variant="outline"
         className={clsx(
-          "flex items-center gap-2 h-10 md:px-3",
-          "p-0 w-10 md:w-auto",
+            "flex items-center justify-center h-10 w-10",
           isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
         )}
         onClick={handleProfileClick}
         aria-label="View profile"
       >
-        <Avatar className="h-10 w-10 md:h-6 md:w-6 border-none rounded-full"> 
-          <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? "Profile"} />
+          <Avatar className="h-8 w-8 border rounded-full overflow-hidden"> 
+            <AvatarImage 
+              src={frameUser?.pfpUrl ?? undefined} 
+              alt={frameUser?.displayName ?? "Profile"} 
+              className="object-cover"
+            />
           <AvatarFallback className="text-xs bg-muted">
-            {isWalletLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : getAvatarFallback()}
+              {frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
+               frameUser?.username?.substring(0, 2)?.toUpperCase() || 
+               <Wallet className="h-4 w-4" />}
           </AvatarFallback>
         </Avatar>
-        <span className="text-sm font-medium hidden md:inline">
-          {isWalletLoading ? 
-            <Skeleton className="h-4 w-20 inline-block" /> : 
-            (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-4 w-20 inline-block" />)
-          }
-        </span>
-      </Button>
+        </Button>
+
+        {/* Slide-up drawer */}
+        <AnimatePresence>
+          {isDrawerOpen && (
+            <>
+              {/* Backdrop */}
+              <motion.div
+                className="fixed inset-0 bg-black/50 z-50 backdrop-blur-sm"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setIsDrawerOpen(false)}
+              />
+              
+              {/* Drawer */}
+              <motion.div
+                ref={drawerRef}
+                className="fixed bottom-0 left-0 right-0 bg-background rounded-t-[24px] shadow-xl z-50 overflow-hidden max-h-[420px]"
+                initial={{ y: "100%" }}
+                animate={{ y: 0 }}
+                exit={{ y: "100%" }}
+                transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                drag="y"
+                dragConstraints={{ top: 0, bottom: 0 }}
+                dragElastic={0.1}
+                dragControls={dragControls}
+                onDragEnd={handleDragEnd}
+                dragListener={false}
+              >
+                {/* Drawer handle for drag */}
+                <div 
+                  className="w-12 h-1 bg-muted/70 mx-auto my-2 rounded-full cursor-grab"
+                  onPointerDown={(e) => {
+                    dragControls.start(e);
+                  }}
+                />
+                
+                {/* Drawer content - show as not connected if not on Base */}
+                <div className="px-3 pt-0 pb-4 overflow-y-auto max-h-[calc(420px-24px)]">
+                  {/* Profile section with improved layout */}
+                  <div className="flex items-center gap-3 mb-3">
+                    <Avatar className="h-10 w-10 border border-border/30 rounded-full overflow-hidden shadow-sm">
+                      <AvatarImage 
+                        src={frameUser?.pfpUrl ?? undefined} 
+                        alt={frameUser?.displayName ?? "Profile"} 
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="text-sm">
+                        {frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
+                         frameUser?.username?.substring(0, 2)?.toUpperCase() || 
+                        <UserCircle className="h-5 w-5" />}
+                      </AvatarFallback>
+                    </Avatar>
+                    
+                    <div className="flex-1">
+                      <h3 className="text-sm font-medium -mb-0.5 line-clamp-1">
+                        {frameUser?.displayName || 
+                         (frameUser?.username ? `@${frameUser.username}` : "Anonymous")}
+                      </h3>
+                      
+                      {isFullyConnected && (
+                        <div className="flex items-center">
+                          <span className="text-xs text-muted-foreground">{formatAddress(displayAddress)}</span>
+                          {copied ? (
+                            <Check className="h-3 w-3 text-green-500 ml-1" />
+                          ) : (
+                            <Copy 
+                              className="h-3 w-3 cursor-pointer text-muted-foreground hover:text-foreground ml-1" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                navigator.clipboard.writeText(displayAddress || "");
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 1400);
+                              }} 
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    
+                    {isFullyConnected && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleDisconnect}
+                        className="h-8 w-8 rounded-full text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        title="Disconnect wallet"
+                      >
+                        <LogOut className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </div>
+                  
+                  {isFullyConnected ? (
+                    <div className="space-y-3">
+                      {/* Token balances in a compact card layout */}
+                      <div className="grid grid-cols-3 gap-2">
+                        {/* ETH balance */}
+                        <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
+                          <Image 
+                            src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" 
+                            alt="ETH" 
+                            width={18} 
+                            height={18} 
+                            className="rounded-full mb-1"
+                          />
+                          <span className="text-xs font-mono">
+                            {ethLoading ? 
+                              <Skeleton className="h-3 w-10" /> : 
+                              parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(4)
+                            }
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">ETH</span>
+                        </div>
+                        
+                        {/* USDC balance */}
+                        <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
+                          <Image 
+                            src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" 
+                            alt="USDC" 
+                            width={18} 
+                            height={18}
+                            className="mb-1" 
+                          />
+                          <span className="text-xs font-mono">
+                            {tokensLoading ? 
+                              <Skeleton className="h-3 w-10" /> : 
+                              usdcBalance.toFixed(2)
+                            }
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">USDC</span>
+                        </div>
+                        
+                        {/* QR balance */}
+                        <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
+                          <Image 
+                            src="/qrLogo.png" 
+                            alt="$QR" 
+                            width={18} 
+                            height={18}
+                            className="mb-1" 
+                          />
+                          <span className="text-xs font-mono">
+                            {tokensLoading ? 
+                              <Skeleton className="h-3 w-10" /> : 
+                              qrBalance.toFixed(2)
+                            }
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">$QR</span>
+                        </div>
+                      </div>
+                      
+                      {/* View Profile button */}
+                      <Button 
+                        variant="outline"
+                        onClick={goToProfile}
+                        className="w-full justify-between px-4 py-1.5 h-9 text-xs bg-muted/20 hover:bg-primary/5 border-border/40"
+                      >
+                        <span className="flex items-center">
+                          <UserCircle className="mr-2 h-3.5 w-3.5 text-primary" />
+                          View Profile
+                        </span>
+                        <ArrowRight className="h-3.5 w-3.5 opacity-70" />
+                      </Button>
+                      
+                      {/* View on Basescan button */}
+                      <Button 
+                        onClick={openBasescan}
+                        variant="outline"
+                        className="w-full justify-between px-4 py-1.5 h-9 text-xs bg-muted/20 hover:bg-primary/5 border-border/40 mb-2"
+                      >
+                        <span className="flex items-center">
+                          <ExternalLink className="mr-2 h-3.5 w-3.5 text-primary" /> 
+                          View on Basescan
+                        </span>
+                        <ArrowRight className="h-3.5 w-3.5 opacity-70" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="px-1 py-2 space-y-3">
+                      <Button 
+                        className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-9 text-sm" 
+                        onClick={handleConnectInDrawer}
+                      >
+                        <Wallet className="mr-2 h-3.5 w-3.5" /> 
+                        {hasConnectedWallet && !isOnBase ? "Switch to Base" : "Connect Wallet"}
+                      </Button>
+                      
+                      <p className="text-xs text-center text-muted-foreground px-3">
+                        {hasConnectedWallet && !isOnBase 
+                          ? "You need to switch to Base network to participate in auctions" 
+                          : "Connect your wallet to see your balances and participate in auctions"}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </>
     );
   }
 

@@ -19,6 +19,7 @@ import { UniswapLogo } from "@/components/UniswapLogo";
 import clsx from "clsx";
 import { toast } from "sonner";
 import { WarpcastLogo } from "@/components/WarpcastLogo";
+import { getAuctionPriceData } from "@/utils/auctionPriceData";
 
 // Type definition for winner data
 type WinnerData = {
@@ -139,9 +140,14 @@ export default function WinnersPage() {
           const farcasterInfo = farcasterInfoMapV1.get(address);
           const ensName = ensMap.get(address);
           
-          // Calculate USD value using ETH price for v1 auctions
+          // Get the historical price data
+          const histData = getAuctionPriceData(auction.tokenId);
+          
+          // Calculate USD value using historical spot price if available, otherwise use current ETH price
           const ethAmount = parseFloat(formatEther(auction.amount));
-          const usdValue = ethAmount * ethPrice;
+          const usdValue = histData 
+            ? histData.spotPrice 
+            : ethAmount * ethPrice;
           
           uniqueAuctions.push({
             ...auction,
@@ -198,9 +204,14 @@ export default function WinnersPage() {
           const farcasterInfo = farcasterInfoMapV2.get(address);
           const ensName = ensMap.get(address);
           
-          // Calculate USD value using token price for v2 auctions
+          // Get the historical price data
+          const histData = getAuctionPriceData(auction.tokenId);
+          
+          // Calculate USD value using historical spot price if available, otherwise use current token price
           const qrTokenAmount = parseFloat(formatEther(auction.amount));
-          const usdValue = qrTokenAmount * (tokenPriceUsd || 0);
+          const usdValue = histData 
+            ? histData.spotPrice 
+            : qrTokenAmount * (tokenPriceUsd || 0);
           
           uniqueAuctions.push({
             ...auction,

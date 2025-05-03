@@ -505,28 +505,36 @@ export function BidForm({
 
   // Auto-populate the URL field with the user's previous bid URL
   useEffect(() => {
+    const isMounted = true;
+
     if (auctionDetail?.tokenId && activeAddress) {
       const fetchPreviousBid = async () => {
         try {
-          const bids = await fetchHistoricalAuctions();
-          if (bids) {
-            // Filter bids by current auction and user address
-            const userBidsForThisAuction = bids.filter(
-              bid => 
-                bid.tokenId === auctionDetail.tokenId && 
-                bid.bidder.toLowerCase() === activeAddress.toLowerCase()
-            );
-            
-            // Sort by timestamp/amount to get the most recent bid
-            // Assuming higher amount means more recent bid
-            userBidsForThisAuction.sort((a, b) => 
-              Number(b.amount) - Number(a.amount)
-            );
-            
-            // Get the user's most recent bid URL
-            if (userBidsForThisAuction.length > 0 && userBidsForThisAuction[0].url) {
-              // Pre-populate the URL field with the user's last bid URL
-              setValue("url", userBidsForThisAuction[0].url);
+          // Get current URL field value
+          const currentUrlValue = getValues("url");
+          
+          // Only proceed with auto-population if the field is empty
+          if (!currentUrlValue) {
+            const bids = await fetchHistoricalAuctions();
+            if (bids && isMounted) {
+              // Filter bids by current auction and user address
+              const userBidsForThisAuction = bids.filter(
+                bid => 
+                  bid.tokenId === auctionDetail.tokenId && 
+                  bid.bidder.toLowerCase() === activeAddress.toLowerCase()
+              );
+              
+              // Sort by timestamp/amount to get the most recent bid
+              // Assuming higher amount means more recent bid
+              userBidsForThisAuction.sort((a, b) => 
+                Number(b.amount) - Number(a.amount)
+              );
+              
+              // Get the user's most recent bid URL
+              if (userBidsForThisAuction.length > 0 && userBidsForThisAuction[0].url) {
+                // Pre-populate the URL field with the user's last bid URL
+                setValue("url", userBidsForThisAuction[0].url);
+              }
             }
           }
         } catch (error) {

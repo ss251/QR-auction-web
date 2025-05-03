@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { useAccount } from 'wagmi';
 import { Button } from '@/components/ui/button';
 import { CustomWallet } from '@/components/CustomWallet';
 import { ConnectionIndicator } from '@/components/ConnectionIndicator';
@@ -13,7 +12,6 @@ import { useBaseColors } from '@/hooks/useBaseColors';
 
 export function Header() {
   const router = useRouter();
-  const { isConnected } = useAccount();
   const isBaseColors = useBaseColors();
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
 
@@ -36,10 +34,10 @@ export function Header() {
         <Link href="/about">
           <Button
             variant="outline"
-            className={isConnected ? "h-10 px-3 text-sm font-medium" : "h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
+            className={"h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
           >
             <span className="md:hidden text-lg">?</span>
-            <span className="hidden md:inline">?</span>
+            <span className="hidden md:inline text-lg mx-0.5">?</span>
           </Button>
         </Link>
         

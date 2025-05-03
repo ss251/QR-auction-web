@@ -772,7 +772,7 @@ export function BidForm({
             type="number"
             min={safeMinimumBid}
             step={stepSize}
-            placeholder={isV3Auction ? `${Number(formattedMinBid).toFixed(2)} or more` : `${formattedMinBid} or more`}
+            placeholder={isV3Auction ? `$${Number(formattedMinBid).toFixed(2)} or more` : `${formattedMinBid} or more`}
             className="pr-16 border p-2 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             {...register("bid")}
             onKeyDown={handleTypingEvent}
@@ -780,7 +780,7 @@ export function BidForm({
             disabled={isPlacingBid || fundingState !== 'idle'}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
-            {isV3Auction ? 'USDC ($)' : 'M $QR'}
+            {isV3Auction ? 'USDC' : 'M $QR'}
           </div>
           {errors.bid && (
             <p className="text-red-500 text-sm mt-1">{errors.bid.message}</p>

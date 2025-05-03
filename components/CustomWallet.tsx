@@ -98,7 +98,10 @@ export function CustomWallet() {
   const { address: eoaAddress, chain } = useAccount();
   const { switchChain } = useSwitchChain();
   const { disconnect: wagmiDisconnect } = useDisconnect();
-  const { data: ethBalance, isLoading: ethLoading, refetch: refetchEthBalance } = useBalance({ address: eoaAddress });
+  const { data: ethBalance, isLoading: ethLoading, refetch: refetchEthBalance } = useBalance({ 
+    address: isFrame && frameWalletAddress ? frameWalletAddress as Address : eoaAddress,
+    chainId: BASE_MAINNET_ID // Explicitly use Base network
+  });
   const { logout } = useLogout();
   const { login } = useLogin({
     onComplete: () => {
@@ -167,9 +170,6 @@ export function CustomWallet() {
               console.log("Frame wallet already connected:", accounts[0]);
             }
           }
-          
-          
-          
           
         } else {
           setIsFrame(false);
@@ -288,7 +288,7 @@ export function CustomWallet() {
       { address: QR_ADDRESS, abi: erc20Abi, functionName: "decimals" },
     ],
     query: {
-      enabled: !!displayAddress && isOnBase,
+      enabled: !!displayAddress,
     },
   });
 

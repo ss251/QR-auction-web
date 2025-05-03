@@ -794,6 +794,8 @@ export function BidForm({
               placeholder="https://"
               className="pr-16 border p-2 w-full"
               spellCheck="false"
+              autoCapitalize="none"
+              autoCorrect="off"
               {...register("url")}
               onKeyDown={handleTypingEvent}
               onInput={handleTypingEvent}

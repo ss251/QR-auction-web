@@ -89,6 +89,7 @@ export function CustomWallet() {
   // We'll use frameUser object to store all frame context user data
   const [frameUser, setFrameUser] = useState<FrameUser | null>(null);
   const [copied, setCopied] = useState(false); // Track whether the address was just copied
+  const [frameWalletAddress, setFrameWalletAddress] = useState<string | null>(null); // Track wallet address in frame context
   
   const drawerRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
@@ -156,6 +157,38 @@ export function CustomWallet() {
           if (context.user.pfpUrl) {
             setPfpUrl(context.user.pfpUrl);
           }
+          
+          // Directly check if wallet is connected using the frame SDK
+          const isWalletConnected = await frameSdk.isWalletConnected();
+          if (isWalletConnected) {
+            const accounts = await frameSdk.connectWallet();
+            if (accounts.length > 0) {
+              setFrameWalletAddress(accounts[0]);
+              console.log("Frame wallet already connected:", accounts[0]);
+            }
+          }
+          
+          // Set up polling to quickly detect wallet connection changes in frame
+          const checkWalletInterval = setInterval(async () => {
+            try {
+              const connected = await frameSdk.isWalletConnected();
+              if (connected) {
+                const accounts = await frameSdk.connectWallet();
+                if (accounts.length > 0 && accounts[0] !== frameWalletAddress) {
+                  setFrameWalletAddress(accounts[0]);
+                  console.log("Frame wallet connected (poll):", accounts[0]);
+                }
+              } else if (frameWalletAddress) {
+                // Wallet was connected but is now disconnected
+                setFrameWalletAddress(null);
+                console.log("Frame wallet disconnected");
+              }
+            } catch (error) {
+              console.error("Error checking wallet in frame:", error);
+            }
+          }, 1000); // Check every second
+          
+          return () => clearInterval(checkWalletInterval);
         } else {
           setIsFrame(false);
         }
@@ -166,7 +199,7 @@ export function CustomWallet() {
     };
 
     checkFrameContext();
-  }, []);
+  }, [frameWalletAddress]);
 
   // Handle drag to dismiss
   const handleDragEnd = (event: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
@@ -215,7 +248,10 @@ export function CustomWallet() {
   // Use the address from linkedAccounts if available, fall back to client
   const finalSmartWalletAddress = smartWalletAddressFromUser || smartWalletAddress;
   
-  const displayAddress = finalSmartWalletAddress ?? eoaAddress;
+  // Use frameWalletAddress in frame context if available
+  const displayAddress = isFrame && frameWalletAddress 
+    ? frameWalletAddress as Address
+    : finalSmartWalletAddress ?? eoaAddress;
   const headerAddress = eoaAddress;
   
   // Debug logging
@@ -243,17 +279,24 @@ export function CustomWallet() {
 
   // More reliable check for valid wallet connection - must have an actual address
   const hasConnectedWallet = useMemo(() => {
+    // For Frame context, don't check authenticated state, just the wallet address
+    if (isFrame) {
+      // First check our direct frame wallet connection
+      if (frameWalletAddress) {
+        return true;
+      }
+      // Fall back to wagmi address detection
+      return Boolean(eoaAddress || finalSmartWalletAddress);
+    }
+    // For regular context, check authenticated state as well
     return authenticated && Boolean(eoaAddress || finalSmartWalletAddress);
-  }, [authenticated, eoaAddress, finalSmartWalletAddress]);
+  }, [authenticated, eoaAddress, finalSmartWalletAddress, isFrame, frameWalletAddress]);
 
   const isOnBase = useMemo(() => {
     return chain?.id === BASE_MAINNET_ID;
   }, [chain]);
 
-  // Determine if user is fully connected (authenticated + has address + on Base network)
-  const isFullyConnected = useMemo(() => {
-    return authenticated && hasConnectedWallet && isOnBase;
-  }, [authenticated, hasConnectedWallet, isOnBase]);
+  // We'll handle different connection states for Frame vs regular context separately
 
   const { data: tokenBalances, isLoading: tokensLoading, refetch: refetchTokenBalances } = useReadContracts({
     contracts: [
@@ -344,32 +387,53 @@ export function CustomWallet() {
   // Handle connect wallet properly in drawer for frames
   const handleConnectInDrawer = async () => {
     // Do not close the drawer yet
-    console.log("Starting Privy wallet connection from drawer...", { authenticated, hasConnectedWallet });
+    console.log("Starting wallet connection from drawer...", { authenticated, hasConnectedWallet });
     
     try {
-      // First check if we have a connected wallet
-      if (hasConnectedWallet) {
-        // If we have a wallet but are on the wrong network, switch network
-        if (!isOnBase) {
-          toast.info("Switching to Base network...");
-          switchChain({ chainId: BASE_MAINNET_ID });
+      if (isFrame) {
+        // In frame context, use Frame SDK's connect wallet function directly
+        console.log("Using Frame SDK connect for frame context");
+        
+        // Direct call to Frame SDK's connect wallet
+        const accounts = await frameSdk.connectWallet();
+        if (accounts.length > 0) {
+          setFrameWalletAddress(accounts[0]);
+          console.log("Frame wallet connected via SDK:", accounts[0]);
+          
+          // If connected but on wrong chain, try to switch to Base
+          if (!isOnBase) {
+            switchChain({ chainId: BASE_MAINNET_ID });
+          }
+        } else {
+          console.log("No accounts returned from frame wallet connect");
         }
       } else {
-        // We don't have a connected wallet
-        if (authenticated) {
-          // If authenticated but no wallet, force logout then login in one step
-          console.log("Authenticated but no wallet detected, forcing reset");
-          await logout();
+        // Regular Privy flow for non-frame context
+        // First check if we have a connected wallet
+        if (hasConnectedWallet) {
+          // If we have a wallet but are on the wrong network, switch network
+          if (!isOnBase) {
+            switchChain({ chainId: BASE_MAINNET_ID });
+          }
+        } else {
+          // We don't have a connected wallet
+          if (authenticated) {
+            // If authenticated but no wallet, force logout then login in one step
+            console.log("Authenticated but no wallet detected, forcing reset");
+            await logout();
+          }
+          
+          // Always call login after handling potential logout
+          console.log("Showing login modal");
+          login();
         }
-        
-        // Always call login after handling potential logout
-        console.log("Showing login modal");
-        login();
       }
     } catch (error) {
       console.error("Error in connect flow:", error);
-      // Fallback to direct login in case of errors
-      login();
+      // Fallback to direct login in case of errors in non-frame context
+      if (!isFrame) {
+        login();
+      }
     }
   };
 
@@ -464,6 +528,12 @@ export function CustomWallet() {
       setPfpUrl(null);
       setIsOpen(false);
       setShowSendForm(false);
+      
+      // For frame context, just reset the local state
+      if (isFrame) {
+        setFrameWalletAddress(null);
+        return;
+      }
       
       // Disconnect from wagmi first
       wagmiDisconnect();
@@ -757,7 +827,7 @@ export function CustomWallet() {
                   }}
                 />
                 
-                {/* Drawer content - show as not connected if not on Base */}
+                {/* Drawer content - show as not connected if no wallet or not on Base */}
                 <div className="px-3 pt-0 pb-4 overflow-y-auto max-h-[calc(420px-24px)]">
                   {/* Profile section with improved layout */}
                   <div className="flex items-center gap-3 mb-3">
@@ -780,7 +850,7 @@ export function CustomWallet() {
                          (frameUser?.username ? `@${frameUser.username}` : "Anonymous")}
                       </h3>
                       
-                      {isFullyConnected && (
+                      {displayAddress && (
                         <div className="flex items-center">
                           <span className="text-xs text-muted-foreground">{formatAddress(displayAddress)}</span>
                           {copied ? (
@@ -799,21 +869,9 @@ export function CustomWallet() {
                         </div>
                       )}
                     </div>
-                    
-                    {isFullyConnected && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={handleDisconnect}
-                        className="h-8 w-8 rounded-full text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                        title="Disconnect wallet"
-                      >
-                        <LogOut className="h-4 w-4" />
-                      </Button>
-                    )}
                   </div>
                   
-                  {isFullyConnected ? (
+                  {hasConnectedWallet ? (
                     <div className="space-y-3">
                       {/* Token balances in a compact card layout */}
                       <div className="grid grid-cols-3 gap-2">
@@ -901,17 +959,15 @@ export function CustomWallet() {
                   ) : (
                     <div className="px-1 py-2 space-y-3">
                       <Button 
-                        className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-9 text-sm" 
+                        className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-11 text-sm font-medium" 
                         onClick={handleConnectInDrawer}
                       >
-                        <Wallet className="mr-2 h-3.5 w-3.5" /> 
-                        {hasConnectedWallet && !isOnBase ? "Switch to Base" : "Connect Wallet"}
+                        <Wallet className="mr-2 h-4 w-4" /> 
+                        Connect Wallet
                       </Button>
                       
                       <p className="text-xs text-center text-muted-foreground px-3">
-                        {hasConnectedWallet && !isOnBase 
-                          ? "You need to switch to Base network to participate in auctions" 
-                          : "Connect your wallet to see your balances and participate in auctions"}
+                        Connect your wallet to see your balances and participate in auctions
                       </p>
                     </div>
                   )}

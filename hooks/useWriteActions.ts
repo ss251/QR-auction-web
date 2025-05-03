@@ -4,6 +4,8 @@ import QRAuctionV3 from "../abi/QRAuctionV3.json";
 import { Address, encodeFunctionData } from "viem";
 import { useWriteContract } from "wagmi";
 import { USDC_TOKEN_ADDRESS } from "@/config/tokens";
+import { frameSdk } from "@/lib/frame-sdk";
+import { useEffect, useRef } from "react";
 
 // ERC20 ABI for token approval
 const erc20ABI = [
@@ -24,6 +26,25 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
   const { writeContractAsync: bidAuction } = useWriteContract();
   const { writeContractAsync: settleAndCreate } = useWriteContract();
   const { writeContractAsync: approveToken } = useWriteContract();
+  
+  // Reference to track if we're in frame context
+  const isFrame = useRef(false);
+  
+  // Check if we're in frame context when the component mounts
+  useEffect(() => {
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check:", isFrame.current ? "Running in frame" : "Not in frame");
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, []);
 
   // Determine which auction version we're dealing with
   const isLegacyAuction = tokenId <= 22n;
@@ -59,11 +80,8 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
       console.log(`Bidding on V3 auction #${tokenId.toString()}`);
       console.log(`Using USDC token, address: ${USDC_TOKEN_ADDRESS}`);
       
-      // Check if we're in Warpcast
-      const isWarpcast = typeof navigator !== 'undefined' && 
-        (navigator.userAgent.toLowerCase().includes('warpcast') || 
-         window.location.href.includes('frame.warpcast.com'));
-      console.log("Bidding environment:", { isWarpcast });
+      // Check if we're in a Farcaster frame context
+      console.log("Bidding environment:", { isFrame: isFrame.current });
       
       // Check if we have a smart wallet client
       if (smartWalletClient) {
@@ -99,53 +117,24 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
         
         const tx = await smartWalletClient.writeContract(bidTxData);
         return tx;
-      } else if (isWarpcast && typeof window !== 'undefined' && (window as any).sdk?.wallet?.ethProvider) {
-        // Use direct Warpcast wallet integration
+      } else if (isFrame.current && await frameSdk.isWalletConnected()) {
+        // Use Farcaster SDK for bidding in frames
         try {
-          console.log("Using Warpcast wallet for bidding");
+          console.log("Using Farcaster SDK for bidding");
           onPhaseChange?.('approving');
           
-          // Access global Farcaster SDK
-          const farcasterSdk = (window as any).sdk;
-          
-          if (!farcasterSdk?.wallet?.ethProvider) {
-            throw new Error("Farcaster SDK wallet not available");
-          }
-          
-          // Make sure SDK is ready
-          await farcasterSdk.actions.ready();
-          
           // Get connected accounts
-          const accounts = await farcasterSdk.wallet.ethProvider.request({
-            method: "eth_accounts",
-          });
+          const accounts = await frameSdk.connectWallet();
           
-          // Request connection if needed
-          if (!Array.isArray(accounts) || accounts.length === 0) {
-            console.log("No accounts connected, requesting access...");
-            const requestedAccounts = await farcasterSdk.wallet.ethProvider.request({
-              method: "eth_requestAccounts",
-            });
-            
-            if (!Array.isArray(requestedAccounts) || requestedAccounts.length === 0) {
-              throw new Error("Failed to connect Warpcast wallet");
-            }
+          if (accounts.length === 0) {
+            throw new Error("No Farcaster wallet connected");
           }
           
-          // Get accounts again after possible connection
-          const connectedAccounts = await farcasterSdk.wallet.ethProvider.request({
-            method: "eth_accounts",
-          });
-          
-          if (!Array.isArray(connectedAccounts) || connectedAccounts.length === 0) {
-            throw new Error("No Warpcast wallet connected");
-          }
-          
-          const fromAddress = connectedAccounts[0];
-          console.log("Using Warpcast wallet address:", fromAddress);
+          const fromAddress = accounts[0];
+          console.log("Using Farcaster wallet address:", fromAddress);
           
           // First need to approve USDC spending
-          console.log("Approving USDC tokens with Warpcast wallet:", value.toString());
+          console.log("Approving USDC tokens with Farcaster wallet:", value.toString());
           
           // Properly encode approval call data
           const approveData = encodeFunctionData({
@@ -156,18 +145,31 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
           
           // Create approval transaction parameters
           const approveTxParams = {
-            from: fromAddress,
-            to: USDC_TOKEN_ADDRESS,
+            from: fromAddress as `0x${string}`,
+            to: USDC_TOKEN_ADDRESS as `0x${string}`,
             data: approveData,
           };
           
+          // Get direct access to SDK methods using our wrapper
+          // Get the ethProvider from our wrapper
+          if (!frameSdk.isWalletConnected) {
+            throw new Error("Farcaster SDK wallet not available");
+          }
+          
+          // Use native JS SDK methods if needed
+          const { wallet } = await import("@farcaster/frame-sdk").then(module => module.default);
+          
+          if (!wallet?.ethProvider) {
+            throw new Error("Farcaster ethProvider not available");
+          }
+          
           // Send approval transaction
-          const approveTxHash = await farcasterSdk.wallet.ethProvider.request({
+          const approveTxHash = await wallet.ethProvider.request({
             method: "eth_sendTransaction",
             params: [approveTxParams],
           });
           
-          console.log("Warpcast USDC approval transaction sent:", approveTxHash);
+          console.log("Farcaster USDC approval transaction sent:", approveTxHash);
           
           // Wait for approval confirmation
           onPhaseChange?.('confirming');
@@ -185,21 +187,21 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
           
           // Create bid transaction parameters
           const bidTxParams = {
-            from: fromAddress,
+            from: fromAddress as `0x${string}`,
             to: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
             data: bidData,
           };
           
           // Send bid transaction
-          const bidTxHash = await farcasterSdk.wallet.ethProvider.request({
+          const bidTxHash = await wallet.ethProvider.request({
             method: "eth_sendTransaction",
             params: [bidTxParams],
           });
           
-          console.log("Warpcast bid transaction sent:", bidTxHash);
+          console.log("Farcaster bid transaction sent:", bidTxHash);
           return bidTxHash;
-        } catch (warpcastError) {
-          console.error("Warpcast bidding error:", warpcastError);
+        } catch (farcasterError) {
+          console.error("Farcaster bidding error:", farcasterError);
           console.log("Falling back to regular bidding");
           // Fall through to regular EOA path
         }
@@ -250,11 +252,9 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
     try {
       console.log(`Settling V3 auction #${tokenId.toString()}`);
       
-      // First check if we're in Warpcast
-      const isWarpcast = typeof navigator !== 'undefined' && 
-        (navigator.userAgent.toLowerCase().includes('warpcast') || 
-         window.location.href.includes('frame.warpcast.com'));
-      console.log("Settlement environment:", { isWarpcast });
+      console.log("navigator.userAgent", navigator.userAgent);
+      // Check if we're in a frame context
+      console.log("Settlement environment:", { isFrame: isFrame.current });
       
       if (smartWalletClient) {
         console.log("Using smart wallet for settlement");
@@ -268,49 +268,33 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
         
         const tx = await smartWalletClient.writeContract(settleTxData);
         return tx;
-      } else if (isWarpcast && typeof window !== 'undefined' && (window as any).sdk?.wallet?.ethProvider) {
-        // Use direct Warpcast wallet integration
+      } else if (isFrame.current && await frameSdk.isWalletConnected()) {
+        // Use Farcaster SDK for settlement in frames
         try {
-          console.log("Using Warpcast wallet for settlement");
+          console.log("Using Farcaster SDK for settlement");
           
-          // Access global Farcaster SDK
-          const farcasterSdk = (window as any).sdk;
+          // Get connected accounts
+          const accounts = await frameSdk.connectWallet();
           
-          if (!farcasterSdk?.wallet?.ethProvider) {
+          if (accounts.length === 0) {
+            throw new Error("No Farcaster wallet connected");
+          }
+          
+          const fromAddress = accounts[0];
+          console.log("Using Farcaster wallet address:", fromAddress);
+          
+          // Get direct access to SDK methods using our wrapper
+          // Get the ethProvider from our wrapper
+          if (!frameSdk.isWalletConnected) {
             throw new Error("Farcaster SDK wallet not available");
           }
           
-          // Make sure SDK is ready
-          await farcasterSdk.actions.ready();
+          // Use native JS SDK methods if needed
+          const { wallet } = await import("@farcaster/frame-sdk").then(module => module.default);
           
-          // Get connected accounts
-          const accounts = await farcasterSdk.wallet.ethProvider.request({
-            method: "eth_accounts",
-          });
-          
-          // Request connection if needed
-          if (!Array.isArray(accounts) || accounts.length === 0) {
-            console.log("No accounts connected, requesting access...");
-            const requestedAccounts = await farcasterSdk.wallet.ethProvider.request({
-              method: "eth_requestAccounts",
-            });
-            
-            if (!Array.isArray(requestedAccounts) || requestedAccounts.length === 0) {
-              throw new Error("Failed to connect Warpcast wallet");
-            }
+          if (!wallet?.ethProvider) {
+            throw new Error("Farcaster ethProvider not available");
           }
-          
-          // Get accounts again after possible connection
-          const connectedAccounts = await farcasterSdk.wallet.ethProvider.request({
-            method: "eth_accounts",
-          });
-          
-          if (!Array.isArray(connectedAccounts) || connectedAccounts.length === 0) {
-            throw new Error("No Warpcast wallet connected");
-          }
-          
-          const fromAddress = connectedAccounts[0];
-          console.log("Using Warpcast wallet address:", fromAddress);
           
           // Encode settlement function call data (no parameters needed)
           const settleData = encodeFunctionData({
@@ -321,21 +305,21 @@ export function useWriteActions({ tokenId }: { tokenId: bigint }) {
           
           // Create transaction parameters
           const txParams = {
-            from: fromAddress,
+            from: fromAddress as `0x${string}`,
             to: process.env.NEXT_PUBLIC_QRAuctionV3 as Address,
             data: settleData,
           };
           
           // Send transaction
-          const txHash = await farcasterSdk.wallet.ethProvider.request({
+          const txHash = await wallet.ethProvider.request({
             method: "eth_sendTransaction",
             params: [txParams],
           });
           
-          console.log("Warpcast settlement transaction sent:", txHash);
+          console.log("Farcaster settlement transaction sent:", txHash);
           return txHash;
-        } catch (warpcastError) {
-          console.error("Warpcast settlement error:", warpcastError);
+        } catch (farcasterError) {
+          console.error("Farcaster settlement error:", farcasterError);
           console.log("Falling back to regular settlement");
           // Fall through to regular EOA path
         }

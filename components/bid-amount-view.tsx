@@ -28,6 +28,7 @@ import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { Address, Chain } from "viem";
 import { useFundWallet } from "@privy-io/react-auth";
 import { base } from "viem/chains";
+import { frameSdk } from "@/lib/frame-sdk";
 
 // Polling configuration
 const BALANCE_POLL_INTERVAL = 3000; // 3 seconds
@@ -45,6 +46,11 @@ export function BidForm({
   onSuccess: () => void;
   openDialog: (url: string) => boolean;
 }) {
+  // Add ref to track if we're in a Farcaster frame context
+  const isFrame = useRef(false);
+  const frameWalletAddress = useRef<string | null>(null);
+  
+  // Normal component state
   const [showUniswapModal, setShowUniswapModal] = useState(false);
   const [isPlacingBid, setIsPlacingBid] = useState(false);
   const [txPhase, setTxPhase] = useState<'idle' | 'approving' | 'confirming' | 'executing'>('idle');
@@ -80,8 +86,10 @@ export function BidForm({
     return undefined;
   }, [smartWalletClient]);
   
-  // Use smart wallet address if available, fall back to EOA
-  const activeAddress = smartWalletAddress ?? eoaAddress;
+  // Use smart wallet address if available, fall back to EOA, finally use frame wallet address
+  const activeAddress = useMemo(() => {
+    return smartWalletAddress ?? eoaAddress ?? (frameWalletAddress.current as Address | undefined);
+  }, [smartWalletAddress, eoaAddress, frameWalletAddress.current]);
   
   // Check if user has a smart wallet
   const hasSmartWallet = !!smartWalletAddress;
@@ -98,6 +106,38 @@ export function BidForm({
     tokenId: auctionDetail?.tokenId ? auctionDetail.tokenId : 0n,
   });
 
+  // Check if we're in Farcaster frame context on mount
+  useEffect(() => {
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check in BidForm:", isFrame.current ? "Running in frame" : "Not in frame");
+        
+        // If we're in a frame, also check if wallet is connected and get the address
+        if (isFrame.current) {
+          const isWalletConnected = await frameSdk.isWalletConnected();
+          if (isWalletConnected) {
+            try {
+              const accounts = await frameSdk.connectWallet();
+              if (accounts && accounts.length > 0) {
+                frameWalletAddress.current = accounts[0];
+                console.log("[BidForm] Frame wallet address:", frameWalletAddress.current);
+              }
+            } catch (error) {
+              console.error("[BidForm] Error getting frame wallet accounts:", error);
+            }
+          }
+        }
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, []);
+
   // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
   const isV2Auction = auctionDetail?.tokenId >= 23n && auctionDetail?.tokenId <= 35n;
@@ -111,11 +151,17 @@ export function BidForm({
   const { data: qrBalance } = useBalance({
     address: activeAddress,
     token: qrTokenAddress as `0x${string}`,
+    query: {
+      enabled: !!activeAddress, // Only run if we have an address
+    }
   });
   
   const { data: usdcBalance, refetch: refetchUsdcBalance } = useBalance({
     address: activeAddress,
-    token: usdcTokenAddress as `0x${string}`
+    token: usdcTokenAddress as `0x${string}`,
+    query: {
+      enabled: !!activeAddress, // Only run if we have an address
+    }
   });
   
   // Calculate the minimum bid value from the contract data
@@ -507,25 +553,38 @@ export function BidForm({
 
   const onSubmit = async (data: FormSchemaType) => {
     console.log("Form data:", data);
+    console.log("Frame context:", { isFrame: isFrame.current, frameWalletAddress: frameWalletAddress.current });
 
-    if (!isConnected) {
+    // Check if we have a valid connection - this could be EOA, smart wallet, or frame wallet
+    const hasFrameWallet = isFrame.current && !!frameWalletAddress.current;
+    const effectivelyConnected = isConnected || hasFrameWallet;
+
+    if (!effectivelyConnected) {
       toast.error("Connect a wallet");
       return;
     }
 
-    // Check if smart wallet is available when needed
-    if (!activeAddress) {
+    // Check if we have a valid address to use
+    if (!activeAddress && !hasFrameWallet) {
       toast.error("No wallet address available");
       return;
     }
+
+    // Record which kind of wallet is being used
+    const walletType = hasSmartWallet ? 'smart' : hasFrameWallet ? 'frame' : 'eoa';
+    console.log(`[BidForm] Using wallet type: ${walletType}`);
 
     // Calculate bid amount based on auction type
     const fullBidAmount = isV3Auction 
       ? data.bid  // For USDC, use the actual value without multiplying
       : data.bid * 1_000_000; // For QR, multiply by 1M
     
+    // Skip balance checks for frame wallets - they're handled by the useWriteActions hook
+    if (hasFrameWallet) {
+      console.log("[BidForm] Frame wallet detected, skipping balance checks");
+    } 
     // For smart wallet users, always fetch fresh balance first
-    if (hasSmartWallet && isV3Auction) {
+    else if (hasSmartWallet && isV3Auction) {
       // Refresh USDC balance
       const freshBalanceResult = await refetchUsdcBalance();
       const currentUsdcBalance = freshBalanceResult.data;
@@ -552,7 +611,7 @@ export function BidForm({
         return;
       }
     } else {
-      // For regular wallets, check balance normally
+      // For regular EOA wallets, check balance normally
       let hasEnoughTokens = false;
       let tokenSymbol = '';
       
@@ -584,23 +643,32 @@ export function BidForm({
       
       // Define the phase change handler
       const handlePhaseChange = (phase: 'approving' | 'confirming' | 'executing') => {
-        console.log(`Transaction phase changed to: ${phase}`);
+        console.log(`[BidTransaction] Phase changed to: ${phase}`);
         setTxPhase(phase);
       };
       
-      // Use smart wallet client if available, otherwise fall back to regular client
+      // Use appropriate client based on context
       let hash;
-      if (smartWalletClient) {
-        console.log("Placing bid using smart wallet:", smartWalletClient.account?.address);
+      
+      if (hasFrameWallet) {
+        console.log("[BidTransaction] Using Frame wallet flow");
         
+        // Just call bidAmount without smart wallet client - the hook will detect frame context
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: data.url,
+          onPhaseChange: handlePhaseChange
+        });
+      } else if (hasSmartWallet) {
+        console.log("[BidTransaction] Using smart wallet:", smartWalletAddress);
         try {
-          // Pass the smart wallet client to bidAmount along with phase change handler
-          hash = await bidAmount({
-            value: bidValue,
-            urlString: data.url,
-            smartWalletClient: smartWalletClient,
-            onPhaseChange: handlePhaseChange
-          });
+          // Pass the smart wallet client to bidAmount
+        hash = await bidAmount({
+          value: bidValue,
+          urlString: data.url,
+          smartWalletClient: smartWalletClient,
+          onPhaseChange: handlePhaseChange
+        });
         } catch (error) {
           console.error("Error during smart wallet bid process:", error);
           setIsPlacingBid(false);
@@ -608,9 +676,9 @@ export function BidForm({
           throw error;
         }
       } else {
-        console.log("Placing bid using EOA wallet");
+        console.log("[BidTransaction] Using EOA wallet");
         try {
-          // Pass the phase change handler to bidAmount
+          // Standard EOA flow
           hash = await bidAmount({
             value: bidValue,
             urlString: data.url,

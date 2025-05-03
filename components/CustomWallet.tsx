@@ -168,27 +168,9 @@ export function CustomWallet() {
             }
           }
           
-          // Set up polling to quickly detect wallet connection changes in frame
-          const checkWalletInterval = setInterval(async () => {
-            try {
-              const connected = await frameSdk.isWalletConnected();
-              if (connected) {
-                const accounts = await frameSdk.connectWallet();
-                if (accounts.length > 0 && accounts[0] !== frameWalletAddress) {
-                  setFrameWalletAddress(accounts[0]);
-                  console.log("Frame wallet connected (poll):", accounts[0]);
-                }
-              } else if (frameWalletAddress) {
-                // Wallet was connected but is now disconnected
-                setFrameWalletAddress(null);
-                console.log("Frame wallet disconnected");
-              }
-            } catch (error) {
-              console.error("Error checking wallet in frame:", error);
-            }
-          }, 1000); // Check every second
           
-          return () => clearInterval(checkWalletInterval);
+          
+          
         } else {
           setIsFrame(false);
         }

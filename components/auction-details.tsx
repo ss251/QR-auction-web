@@ -3,7 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 
 import { useCountdown } from "@/hooks/useCountdown";
@@ -34,6 +34,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { TypingIndicator } from "./TypingIndicator";
 import { useWhitelistStatus } from "@/hooks/useWhitelistStatus";
 import { Address } from "viem";
+import { frameSdk } from "@/lib/frame-sdk";
 
 interface AuctionDetailsProps {
   id: number;
@@ -186,6 +187,25 @@ export function AuctionDetails({
     }
   }, [isComplete, auctionDetail, id]);
 
+  // Add ref to track if we're in a Farcaster frame context
+  const isFrame = useRef(false);
+  
+  // Check if we're in Farcaster frame context on mount
+  useEffect(() => {
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check in auction-details:", isFrame.current ? "Running in frame" : "Not in frame");
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, []);
+
   const handleSettle = useCallback(async () => {
     console.log(`[DEBUG] handleSettle called, isComplete: ${isComplete}, isWhitelisted: ${isWhitelisted}, isV3Auction: ${isV3Auction}`);
     console.log(`[DEBUG] Whitelist check for ${address}: isWhitelisted=${isWhitelisted}, isLoading=${whitelistLoading}`);
@@ -194,7 +214,26 @@ export function AuctionDetails({
       return;
     }
 
-    if (!isConnected) {
+    console.log("navigator.userAgent", navigator.userAgent);
+    console.log("isConnected", isConnected);
+    console.log("isFrame.current", isFrame.current);
+
+    // Check if we have a frame wallet connection
+    let hasFrameWallet = false;
+    if (isFrame.current) {
+      try {
+        const isWalletConnected = await frameSdk.isWalletConnected();
+        console.log("isWalletConnected", isWalletConnected);
+        hasFrameWallet = isWalletConnected;
+      } catch (error) {
+        console.error("[DEBUG] Error checking frame wallet:", error);
+      }
+    }
+    
+    // Consider connected if either wagmi reports connection or we have a frame wallet
+    const effectivelyConnected = isConnected || hasFrameWallet;
+    
+    if (!effectivelyConnected) {
       toast.error("Connect a wallet");
       return;
     }
@@ -205,7 +244,7 @@ export function AuctionDetails({
       return;
     }
 
-    if (!isWhitelisted) {
+    if (!isFrame.current && !isWhitelisted) {
       console.error(`[DEBUG] Settlement blocked: Address ${address} is not whitelisted in contract ${process.env.NEXT_PUBLIC_QRAuctionV3}`);
       toast.error("Only whitelisted settlers can settle auctions");
       return;

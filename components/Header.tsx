@@ -38,8 +38,8 @@ export function Header() {
             variant="outline"
             className={isConnected ? "h-10 px-3 text-sm font-medium" : "h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
           >
-            <span className="md:hidden text-lg">{isConnected ? "What is this?" : "?"}</span>
-            <span className="hidden md:inline">What is this?</span>
+            <span className="md:hidden text-lg">?</span>
+            <span className="hidden md:inline">?</span>
           </Button>
         </Link>
         

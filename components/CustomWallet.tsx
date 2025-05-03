@@ -341,7 +341,7 @@ export function CustomWallet() {
 
     return [
         formatBalance(usdcRaw as bigint, usdcDecimals as number),
-        formatBalance(qrRaw as bigint, qrDecimals as number),
+        Math.floor(formatBalance(qrRaw as bigint, qrDecimals as number)),
         usdcDecimals as number,
         qrDecimals as number
     ];
@@ -448,14 +448,6 @@ export function CustomWallet() {
         console.error("Error navigating to profile:", error);
         toast.error("Could not open profile");
       }
-    }
-  };
-
-  // Open Basescan using frameSdk
-  const openBasescan = () => {
-    if (displayAddress) {
-      frameSdk.redirectToUrl(`https://basescan.org/address/${displayAddress}`);
-      setIsDrawerOpen(false);
     }
   };
 
@@ -846,8 +838,7 @@ export function CustomWallet() {
                     
                     <div className="flex-1">
                       <h3 className="text-sm font-medium -mb-0.5 line-clamp-1">
-                        {frameUser?.displayName || 
-                         (frameUser?.username ? `@${frameUser.username}` : "Anonymous")}
+                        {(frameUser?.username ? `@${frameUser.username}` : "Anonymous")}
                       </h3>
                       
                       {displayAddress && (
@@ -875,24 +866,6 @@ export function CustomWallet() {
                     <div className="space-y-3">
                       {/* Token balances in a compact card layout */}
                       <div className="grid grid-cols-3 gap-2">
-                        {/* ETH balance */}
-                        <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
-                          <Image 
-                            src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" 
-                            alt="ETH" 
-                            width={18} 
-                            height={18} 
-                            className="rounded-full mb-1"
-                          />
-                          <span className="text-xs font-mono">
-                            {ethLoading ? 
-                              <Skeleton className="h-3 w-10" /> : 
-                              parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(4)
-                            }
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">ETH</span>
-                        </div>
-                        
                         {/* USDC balance */}
                         <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
                           <Image 
@@ -923,10 +896,28 @@ export function CustomWallet() {
                           <span className="text-xs font-mono">
                             {tokensLoading ? 
                               <Skeleton className="h-3 w-10" /> : 
-                              qrBalance.toFixed(2)
+                              new Intl.NumberFormat().format(qrBalance)
                             }
                           </span>
                           <span className="text-[10px] text-muted-foreground">$QR</span>
+                        </div>
+                        
+                        {/* ETH balance */}
+                        <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
+                          <Image 
+                            src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" 
+                            alt="ETH" 
+                            width={18} 
+                            height={18} 
+                            className="rounded-full mb-1"
+                          />
+                          <span className="text-xs font-mono">
+                            {ethLoading ? 
+                              <Skeleton className="h-3 w-10" /> : 
+                              parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(4)
+                            }
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">ETH</span>
                         </div>
                       </div>
                       
@@ -943,18 +934,6 @@ export function CustomWallet() {
                         <ArrowRight className="h-3.5 w-3.5 opacity-70" />
                       </Button>
                       
-                      {/* View on Basescan button */}
-                      <Button 
-                        onClick={openBasescan}
-                        variant="outline"
-                        className="w-full justify-between px-4 py-1.5 h-9 text-xs bg-muted/20 hover:bg-primary/5 border-border/40 mb-2"
-                      >
-                        <span className="flex items-center">
-                          <ExternalLink className="mr-2 h-3.5 w-3.5 text-primary" /> 
-                          View on Basescan
-                        </span>
-                        <ArrowRight className="h-3.5 w-3.5 opacity-70" />
-                      </Button>
                     </div>
                   ) : (
                     <div className="px-1 py-2 space-y-3">
@@ -1120,7 +1099,7 @@ export function CustomWallet() {
                                     <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="sm:w-4 sm:h-4" /> $QR
                                 </span>
                                 {tokensLoading ? <Skeleton className="h-4 w-16" /> :
-                                <span className="font-mono">{qrBalance.toFixed(2)}</span>
+                                <span className="font-mono">{new Intl.NumberFormat().format(qrBalance)}</span>
                                 }
                             </div>
                         </>

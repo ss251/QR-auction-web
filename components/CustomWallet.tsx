@@ -745,13 +745,13 @@ export function CustomWallet() {
       <Button
         variant="outline"
         className={clsx(
-            "flex items-center justify-center h-10 w-10",
+            "flex items-center justify-center h-8 w-8 md:h-10 md:w-10",
           isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
         )}
         onClick={handleProfileClick}
         aria-label="View profile"
       >
-          <Avatar className="h-8 w-8 border rounded-full overflow-hidden"> 
+          <Avatar className="h-6 w-6 border rounded-full overflow-hidden md:h-8 md:w-8"> 
             <AvatarImage 
               src={frameUser?.pfpUrl ?? undefined} 
               alt={frameUser?.displayName ?? "Profile"} 
@@ -760,7 +760,7 @@ export function CustomWallet() {
           <AvatarFallback className="text-xs bg-muted">
               {frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
                frameUser?.username?.substring(0, 2)?.toUpperCase() || 
-               <Wallet className="h-4 w-4" />}
+               <Wallet className="h-3 w-3 md:h-4 md:w-4" />}
           </AvatarFallback>
         </Avatar>
         </Button>
@@ -943,8 +943,8 @@ export function CustomWallet() {
 
   if (!isClient || !ready) {
     return (
-      <Button variant="outline" size="icon" className="h-10 w-10">
-        <Wallet className="h-5 w-5" />
+      <Button variant="outline" size="icon" className="h-8 w-8">
+        <Wallet className="h-4 w-4" />
       </Button>
     );
   }
@@ -956,13 +956,13 @@ export function CustomWallet() {
           <Button
             variant="outline"
             className={clsx(
-              "flex items-center gap-2 h-10",
-              "p-0 w-10",
-              isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground"
+              "flex items-center gap-2 h-8 w-8 md:h-10 md:w-10",
+              "p-0",
+              isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
             )}
             aria-label="Open wallet dialog"
           >
-            <Avatar className="h-7 w-7 md:h-7 md:w-7 border-none rounded-full"> 
+            <Avatar className="h-6 w-6 border-none rounded-full"> 
               <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? headerAddress} />
               <AvatarFallback className="text-xs bg-muted">
                 {isWalletLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : getAvatarFallback()}
@@ -979,14 +979,14 @@ export function CustomWallet() {
           <Button
             variant="outline"
             className={clsx(
-              "h-10 text-sm font-medium",
+              "h-8 text-sm font-medium md:h-10",
               "px-3 md:px-3",
               "w-auto",
               isBaseColors && "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none"
             )}
             onClick={handleConnectWallet}
           >
-            <Wallet className="h-5 w-5 md:hidden" />
+            <Wallet className="h-4 w-4 md:hidden" />
             <span className="hidden md:inline">Connect Wallet</span>
           </Button>
         )}

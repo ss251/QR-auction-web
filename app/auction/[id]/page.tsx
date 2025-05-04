@@ -29,6 +29,7 @@ import Link from "next/link";
 import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
+import styles from "./AuctionPageDesktopText.module.css";
 
 interface SettingsResponse {
   data: Array<{
@@ -197,33 +198,40 @@ export default function AuctionPage() {
 
   return (
     <main className="min-h-screen p-4 md:p-8">
-      <div className="max-w-3xl mx-auto mt-8 md:mt-0 lg:mt-0">
+      <div className="max-w-3xl mx-auto mt-3 md:mt-0 lg:mt-0">
+        <div className="md:hidden text-center w-full mb-1">
+            <p className="font-bold text-md md:text-xl">SAME QR. NEW WEBSITE. EVERY DAY.</p>
+            <p className="text-sm md:text-base">Win the auction to choose where it points next!</p>
+        </div>
         <div className="flex flex-col justify-center items-center gap-9">
-          <div className="grid md:grid-cols-2 gap-4 md:gap-8 w-full">
+
+          <div className="grid md:grid-cols-2 gap-2 md:gap-8 w-full">
             <div
               className={clsx(
-                "flex flex-col justify-center px-8 pb-6 pt-6 md:p-8 lg:p-8 h-[270px] md:h-[345px] rounded-lg",
+                "flex flex-col justify-center px-8 pb-6 pt-6 md:p-8 lg:p-8 h-[220px] md:h-[345px] rounded-lg relative",
                 isBaseColors ? "bg-primary" : "bg-white border"
               )}
             >
-              <div className="inline-flex flex-col items-center mt-2">
+              {/* Desktop-only: Heading and Subheading for QR card, overlayed */}
+              <div className="hidden md:block">
+                <div className={styles.desktopHeading}>SAME QR. NEW WEBSITE. EVERY DAY.</div>
+                <div className={styles.desktopSubheading}>Win the auction to choose where it points next!</div>
+              </div>
+              <SafeExternalLink
+                href={`${process.env.NEXT_PUBLIC_HOST_URL}/redirect`}
+                className={`absolute top-3 right-3 p-1.5 rounded-full z-10 ${
+                  isBaseColors 
+                    ? "bg-white/20 hover:bg-white/30" 
+                    : "bg-gray-100 hover:bg-gray-200"
+                } transition-colors`}
+                onBeforeNavigate={() => false}
+                aria-label="Open redirect link"
+              >
+                <ExternalLink className={`h-5 w-5 ${isBaseColors ? "text-white" : "text-black"}`} />
+              </SafeExternalLink>
+              
+              <div className="inline-flex flex-col items-center">
                 <QRPage />
-                <div className="mt-1">
-                  <SafeExternalLink
-                    href={`${process.env.NEXT_PUBLIC_HOST_URL}/redirect`}
-                    className={`relative inline-flex items-center ${
-                      isBaseColors
-                        ? "bg-primary text-foreground"
-                        : "bg-white text-gray-700"
-                    } text-sm font-medium hover:bg-gray-50 transition-colors w-full`}
-                    onBeforeNavigate={() => false}
-                  >
-                    <span className="block w-full text-center">
-                      Visit Website{" "}
-                    </span>
-                    <ExternalLink className="absolute left-full h-3 w-3 ml-1" />
-                  </SafeExternalLink>
-                </div>
               </div>
             </div>
 

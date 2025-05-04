@@ -542,10 +542,10 @@ export function AuctionDetails({
 
   return (
     <div className="space-y-6">
-      <div className="space-y-2.5">
+      <div className="space-y-1 md:space-y-2.5">
         <div className="flex flex-row justify-between items-center w-full">
           <div className="inline-flex justify-start items-center gap-2">
-            <h1 className="text-3xl font-bold">Auction #{id}</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">Auction #{id}</h1>
             <Button
               variant="outline"
               size="icon"
@@ -608,7 +608,7 @@ export function AuctionDetails({
               {!auctionDetail.settled && !isAuction22 ? (
                 <>
                   <div className="flex flex-row justify-between gap-8">
-                    <div className="space-y-1.25 relative">
+                    <div className="md:space-y-1.25 relative">
                       <div className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"}`}>Current bid</div>
                       <div className="flex flex-row items-center gap-1">
                         <div className="text-xl md:text-2xl font-bold">
@@ -626,12 +626,12 @@ export function AuctionDetails({
                           {usdBalance !== 0 && !isV3Auction && `(${formatUsdValue(usdBalance)})`}
                         </div>
                       </div>
-                      <div className="h-4 mt-1 overflow-hidden" style={{ minHeight: "18px" }}>
+                      <div className="h-4 md:mt-1 overflow-hidden" style={{ minHeight: "18px" }}>
                         <TypingIndicator />
                       </div>
                     </div>
                     {!isComplete && (
-                      <div className="space-y-1">
+                      <div className="space-y-0">
                         <div className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"} text-right`}>
                           Time left
                         </div>

@@ -21,7 +21,7 @@ export function Header() {
   };
 
   return (
-    <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mt-20 md:mt-8 lg:mt-20 lg:mb-8 px-4 md:px-0">
+    <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mt-18 md:mt-8 lg:mt-20 lg:mb-8 px-4 md:px-0">
       <QRContextMenu className="inline-block" isHeaderLogo>
         <h1
           onClick={handleLogoClick}
@@ -34,10 +34,17 @@ export function Header() {
         <Link href="/about">
           <Button
             variant="outline"
-            className={"h-10 w-10 md:w-auto md:px-3 md:text-sm md:font-medium"}
+            size="icon"
+            className={
+              isBaseColors
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
+                : "h-8 w-8 md:h-10 md:w-10"
+            }
           >
-            <span className="md:hidden text-lg">?</span>
-            <span className="hidden md:inline text-lg mx-0.5">?</span>
+            <div className="h-5 w-5 md:h-10 md:w-10 flex items-center justify-center">
+              <span className="md:hidden text-lg">?</span>
+              <span className="hidden md:inline text-lg mx-0.5">?</span>
+            </div>
           </Button>
         </Link>
         
@@ -47,11 +54,11 @@ export function Header() {
             size="icon"
             className={
               isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-                : "h-10 w-10"
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
+                : "h-8 w-8 md:h-10 md:w-10"
             }
           >
-            <div className="h-5 w-5 flex items-center justify-center">
+            <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
               🏆
             </div>
           </Button>
@@ -62,8 +69,8 @@ export function Header() {
           size="icon"
           className={
             isBaseColors
-              ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10"
-              : "h-10 w-10"
+              ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
+              : "h-8 w-8 md:h-10 md:w-10"
           }
           onClick={() => setThemeDialogOpen(true)}
         >

@@ -35,6 +35,8 @@ import { TypingIndicator } from "./TypingIndicator";
 import { useWhitelistStatus } from "@/hooks/useWhitelistStatus";
 import { Address } from "viem";
 import { frameSdk } from "@/lib/frame-sdk";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../types/database";
 
 interface AuctionDetailsProps {
   id: number;
@@ -56,6 +58,12 @@ type NameInfo = {
   basename: string | null;
   pfpUrl: string | null;
 };
+
+// Initialize Supabase client once, outside the component
+const supabase = createClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export function AuctionDetails({
   id,
@@ -266,6 +274,49 @@ export function AuctionDetails({
         loading: "Executing Transaction...",
         success: async (data: any) => {
           console.log(`[DEBUG] Transaction successful, receipt:`, data);
+          
+          // Add winner to database
+          try {
+            // Only proceed in production environment
+            const isDev = process.env.NODE_ENV === 'development' || process.env.VERCEL_ENV === 'preview';
+            
+            if (isDev) {
+              console.log('[DEV MODE] Skipping database insert in development/preview environment');
+            } else if (auctionDetail?.highestBidder && auctionDetail.highestBidder !== '0x0000000000000000000000000000000000000000') {
+              console.log(`[Settle] Adding auction #${id} winner to database`);
+              
+              // Prepare values for database insert
+              const winnerData = {
+                token_id: id.toString(),
+                winner_address: auctionDetail.highestBidder,
+                amount: formatUnits(auctionDetail.highestBid, isV3Auction ? 6 : 18),
+                url: auctionDetail.qrMetadata?.urlString || null,
+                display_name: bidderNameInfo.displayName || null,
+                farcaster_username: bidderNameInfo.farcasterUsername || null,
+                basename: bidderNameInfo.basename || null,
+                pfp_url: bidderNameInfo.pfpUrl || null,
+                usd_value: isV3Auction 
+                  ? Number(formatUnits(auctionDetail.highestBid, 6)) // USDC is already in USD
+                  : qrPrice ? Number(formatEther(auctionDetail.highestBid)) * qrPrice : null,
+                is_v1_auction: isLegacyAuction,
+                ens_name: auctionDetail.highestBidderName || null
+              };
+              
+              // Insert into Supabase winners table
+              const { error } = await supabase
+                .from('winners')
+                .upsert(winnerData, { onConflict: 'token_id' });
+              
+              if (error) {
+                console.error('[Settle] Error inserting winner to database:', error);
+              } else {
+                console.log('[Settle] Successfully added winner to database');
+              }
+            }
+          } catch (dbError) {
+            console.error('[Settle] Database error:', dbError);
+          }
+          
           // After successful transaction, send notifications
           try {
             // Skip notifications in development environment

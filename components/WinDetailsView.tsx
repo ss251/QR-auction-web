@@ -16,7 +16,15 @@ import { WarpcastLogo } from "@/components/WarpcastLogo";
 import { getFarcasterUser } from "@/utils/farcaster";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import useEthPrice from "@/hooks/useEthPrice";
-import { getAuctionPriceData, getAuctionVersion } from "@/utils/auctionPriceData";
+import { getAuctionVersion } from "@/utils/auctionPriceData";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../types/database";
+
+// Initialize Supabase client
+const supabase = createClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 type AuctionType = {
   tokenId: bigint;
@@ -33,23 +41,53 @@ export function WinDetailsView(winnerdata: AuctionType) {
   const [nameInfo, setNameInfo] = useState<{ pfpUrl?: string; displayName: string; farcasterUsername?: string }>({
     displayName: `${winnerdata.winner.slice(0, 4)}...${winnerdata.winner.slice(-4)}`,
   });
-
-  // Get historical price data and auction version
-  const histData = useMemo(() => getAuctionPriceData(winnerdata.tokenId), [winnerdata.tokenId]);
+  const [winnerDbData, setWinnerDbData] = useState<{ usd_value: number | null, is_v1_auction: boolean | null } | null>(null);
+  
+  // Determine auction version
   const auctionVersion = useMemo(() => getAuctionVersion(winnerdata.tokenId), [winnerdata.tokenId]);
   
-  // Fallback to current prices if historical data isn't available
+  // Fallback to current prices if database data isn't available
   const { priceUsd: qrPrice } = useTokenPrice();
   const { ethPrice } = useEthPrice();
 
   // Determine auction version
   const isV1Auction = auctionVersion === "v1";
   const isV2Auction = auctionVersion === "v2";
+  const isV3Auction = auctionVersion === "v3";
   
   // Calculate token amount from blockchain data
   const tokenAmount = useMemo(() => {
-    return Number(formatEther(winnerdata.amount));
-  }, [winnerdata.amount]);
+    if (isV3Auction) {
+      return Number(formatUnits(winnerdata.amount, 6)); // USDC has 6 decimals
+    }
+    return Number(formatEther(winnerdata.amount)); // ETH and QR have 18 decimals
+  }, [winnerdata.amount, isV3Auction]);
+
+  // Fetch winner data from database
+  useEffect(() => {
+    const fetchWinnerData = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('winners')
+          .select('usd_value, is_v1_auction')
+          .eq('token_id', winnerdata.tokenId.toString())
+          .single();
+        
+        if (error) {
+          console.error('Error fetching winner data:', error);
+          return;
+        }
+        
+        if (data) {
+          setWinnerDbData(data);
+        }
+      } catch (error) {
+        console.error('Error in database query:', error);
+      }
+    };
+    
+    fetchWinnerData();
+  }, [winnerdata.tokenId]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -138,22 +176,27 @@ export function WinDetailsView(winnerdata: AuctionType) {
 
   // Helper function to format bid amount based on auction type
   const formatBidAmount = () => {
-    if (isV1Auction) {
-      return `${formatQRAmount(tokenAmount)} ETH`;
-    } else if (isV2Auction) {
-      return `${formatQRAmount(tokenAmount)} $QR`;
-    } else {
-      // Default to USDC if version not determined
+    if (isV3Auction) {
+      // For V3, show USDC format
       return `$${tokenAmount.toFixed(2)}`;
+    } else if (isV1Auction) {
+      return `${formatQRAmount(tokenAmount)} ETH`;
+    } else {
+      return `${formatQRAmount(tokenAmount)} $QR`;
     }
   };
 
   // Helper function to format value in USD
   const formatUsdValueDisplay = (): string => {
-    // If we have historical data, use it instead of calculating
-    if (histData) {
-      return `($${histData.spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
+    // If we have database value, use it
+    if (winnerDbData?.usd_value) {
+      return `($${winnerDbData.usd_value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})`;
     } 
+    
+    // Don't show USD value for V3 since amount is already in USD
+    if (isV3Auction) {
+      return '';
+    }
     
     // Fallback to calculating with current prices
     if (isV1Auction && ethPrice?.ethereum?.usd) {

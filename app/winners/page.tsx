@@ -2,16 +2,9 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useFetchSettledAuc } from "@/hooks/useFetchSettledAuc";
-import { formatEther } from "viem";
 import { useBaseColors } from "@/hooks/useBaseColors";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getFarcasterUsersBulk } from "@/utils/farcaster";
-import useEthPrice from "@/hooks/useEthPrice";
-import { useTokenPrice } from "@/hooks/useTokenPrice";
 import { Copy, Check, ArrowUp, ArrowDown } from "lucide-react";
-import { getName } from "@coinbase/onchainkit/identity";
-import { base } from "viem/chains";
 import { RandomColorAvatar } from "@/components/RandomAvatar";
 import { XLogo } from "@/components/XLogo";
 import { DexscreenerLogo } from "@/components/DexScannerLogo";
@@ -19,257 +12,198 @@ import { UniswapLogo } from "@/components/UniswapLogo";
 import clsx from "clsx";
 import { toast } from "sonner";
 import { WarpcastLogo } from "@/components/WarpcastLogo";
-import { getAuctionPriceData } from "@/utils/auctionPriceData";
+import { createClient } from "@supabase/supabase-js";
+import type { Database } from "../../types/database";
+import { getFarcasterProfilePicture } from "@/utils/farcaster";
 
-// Type definition for winner data
+// Initialize Supabase client once, outside the component
+const supabase = createClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+// Type definition for winner data from Supabase
 type WinnerData = {
-  tokenId: bigint;
-  winner: string;
-  amount: bigint;
-  url: string;
-  displayName: string;
-  farcasterUsername: string | null;
+  id: number;
+  token_id: string;
+  winner_address: string;
+  amount: string;
+  url: string | null;
+  display_name: string | null;
+  farcaster_username: string | null;
   basename: string | null;
-  pfpUrl: string | null;
-  usdValue: number;
-  isV1Auction: boolean;
-  ensName?: string | null;
+  usd_value: number | null;
+  is_v1_auction: boolean | null;
+  ens_name: string | null;
+  pfp_url: string | null;
+  created_at: string | null;
 };
 
 // Sort types
 type SortColumn = 'auction' | 'winner' | 'bid' | 'link';
 type SortDirection = 'asc' | 'desc';
 
-// Global cache
-let globalCachedWinners: WinnerData[] | null = null;
+// Cache winners data between renders to prevent flickering
+let cachedWinners: WinnerData[] | null = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 60000; // 1 minute
+
+// Cache for profile pictures
+let cachedProfilePics: Record<string, string | null> = {};
+
+// Try to load cached profile pictures from localStorage
+if (typeof window !== 'undefined') {
+  try {
+    const storedPics = localStorage.getItem('qrcoin_profile_pics');
+    if (storedPics) {
+      cachedProfilePics = JSON.parse(storedPics);
+    }
+  } catch (e) {
+    console.error('Error loading cached profile pics:', e);
+  }
+}
 
 export default function WinnersPage() {
-  const [winners, setWinners] = useState<WinnerData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [dataInitialized, setDataInitialized] = useState(false);
+  const [winners, setWinners] = useState<WinnerData[]>(cachedWinners || []);
+  const [isLoading, setIsLoading] = useState(!cachedWinners);
   const [copied, setCopied] = useState(false);
+  const [profilePictures, setProfilePictures] = useState<Record<string, string | null>>(cachedProfilePics || {});
   
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>('auction');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   
-  // Explicitly pass a v1 tokenId to ensure it uses the v1 contract
-  const { fetchHistoricalAuctions: fetchV1Auctions } = useFetchSettledAuc(1n);
-  const { fetchHistoricalAuctions: fetchV2Auctions } = useFetchSettledAuc(23n);
-  
   const isBaseColors = useBaseColors();
-  
-  // Price data
-  const { ethPrice: ethPriceData, isLoading: ethPriceLoading } = useEthPrice();
-  const { priceUsd: tokenPriceUsd, isLoading: tokenPriceLoading } = useTokenPrice();
 
-  // Calculate actual ETH price from data
-  const ethPrice = useMemo(() => {
-    return ethPriceData?.ethereum?.usd || 0;
-  }, [ethPriceData]);
-  
-  // Check if all required data is available
-  const pricesLoaded = useMemo(() => {
-    return ethPrice > 0 && tokenPriceUsd !== null;
-  }, [ethPrice, tokenPriceUsd]);
-
-  // Fetch all settled auctions
+  // Fetch winners from Supabase
   const fetchWinners = useCallback(async () => {
-    // If we have cached data, use it
-    if (globalCachedWinners && globalCachedWinners.length > 0) {
-      console.log("Using cached winners data");
-      setWinners(globalCachedWinners);
-      setDataInitialized(true);
+    // Use cached data if it's recent enough
+    const now = Date.now();
+    if (cachedWinners && now - lastFetchTime < CACHE_DURATION) {
+      setWinners(cachedWinners);
       setIsLoading(false);
       return;
     }
     
-    // Only proceed if prices are loaded
-    if (!pricesLoaded) return;
-    
     try {
       setIsLoading(true);
       
-      // Fetch v1 auctions (1-22) and v2 auctions (23+)
-      const v1Auctions = await fetchV1Auctions();
-      const v2Auctions = await fetchV2Auctions();
+      // Fetch all winners from Supabase
+      const { data, error } = await supabase
+        .from('winners')
+        .select('*')
+        .order('token_id', { ascending: false });
       
-      // Create a set to track unique token IDs to avoid duplicates
-      const tokenIdSet = new Set<string>();
-      const uniqueAuctions: WinnerData[] = [];
-      
-      // Process V1 auctions (1-22)
-      if (v1Auctions && v1Auctions.length > 0) {
-        const v1Addresses = v1Auctions
-          .filter(auction => Number(auction.tokenId) <= 22)
-          .map(auction => auction.winner.toLowerCase());
-          
-        const farcasterInfoMapV1 = await getFarcasterUsersBulk(v1Addresses);
-        
-        // Get ENS names for v1 auctions
-        const ensPromises = v1Addresses.map(async (address) => {
-          try {
-            const result = await getName({
-              address: address as `0x${string}`,
-              chain: base,
-            });
-            return { address, name: result || null };
-          } catch (error) {
-            console.error(`Error fetching ENS name for ${address}:`, error);
-            return { address, name: null };
-          }
-        });
-        
-        const ensResults = await Promise.all(ensPromises);
-        const ensMap = new Map<string, string | null>();
-        ensResults.forEach(({ address, name }) => {
-          ensMap.set(address, name);
-        });
-        
-        for (const auction of v1Auctions) {
-          const tokenIdStr = auction.tokenId.toString();
-          const auctionIdNum = Number(auction.tokenId);
-          
-          // Skip if already processed or not in v1 range
-          if (tokenIdSet.has(tokenIdStr) || auctionIdNum > 22) continue;
-          
-          tokenIdSet.add(tokenIdStr);
-          
-          // Get user info
-          const address = auction.winner.toLowerCase();
-          const farcasterInfo = farcasterInfoMapV1.get(address);
-          const ensName = ensMap.get(address);
-          
-          // Get the historical price data
-          const histData = getAuctionPriceData(auction.tokenId);
-          
-          // Calculate USD value using historical spot price if available, otherwise use current ETH price
-          const ethAmount = parseFloat(formatEther(auction.amount));
-          const usdValue = histData 
-            ? histData.spotPrice 
-            : ethAmount * ethPrice;
-          
-          uniqueAuctions.push({
-            ...auction,
-            displayName: farcasterInfo?.displayName || ensName || auction.winner.slice(0, 6) + '...' + auction.winner.slice(-4),
-            farcasterUsername: farcasterInfo?.username || null,
-            basename: null, 
-            pfpUrl: farcasterInfo?.pfpUrl || null,
-            usdValue,
-            isV1Auction: true,
-            ensName,
-          });
-        }
+      if (error) {
+        throw error;
       }
       
-      // Process V2 auctions (23+)
-      if (v2Auctions && v2Auctions.length > 0) {
-        const v2Addresses = v2Auctions
-          .filter(auction => Number(auction.tokenId) >= 23)
-          .map(auction => auction.winner.toLowerCase());
-          
-        const farcasterInfoMapV2 = await getFarcasterUsersBulk(v2Addresses);
-        
-        // Get ENS names for v2 auctions
-        const ensPromises = v2Addresses.map(async (address) => {
-          try {
-            const result = await getName({
-              address: address as `0x${string}`,
-              chain: base,
-            });
-            return { address, name: result || null };
-          } catch (error) {
-            console.error(`Error fetching ENS name for ${address}:`, error);
-            return { address, name: null };
-          }
-        });
-        
-        const ensResults = await Promise.all(ensPromises);
-        const ensMap = new Map<string, string | null>();
-        ensResults.forEach(({ address, name }) => {
-          ensMap.set(address, name);
-        });
-        
-        for (const auction of v2Auctions) {
-          const tokenIdStr = auction.tokenId.toString();
-          const auctionIdNum = Number(auction.tokenId);
-          
-          // Skip if already processed or not in v2 range
-          if (tokenIdSet.has(tokenIdStr) || auctionIdNum < 23) continue;
-          
-          tokenIdSet.add(tokenIdStr);
-          
-          // Get user info
-          const address = auction.winner.toLowerCase();
-          const farcasterInfo = farcasterInfoMapV2.get(address);
-          const ensName = ensMap.get(address);
-          
-          // Get the historical price data
-          const histData = getAuctionPriceData(auction.tokenId);
-          
-          // Calculate USD value using historical spot price if available, otherwise use current token price
-          const qrTokenAmount = parseFloat(formatEther(auction.amount));
-          const usdValue = histData 
-            ? histData.spotPrice 
-            : qrTokenAmount * (tokenPriceUsd || 0);
-          
-          uniqueAuctions.push({
-            ...auction,
-            displayName: farcasterInfo?.displayName || ensName || auction.winner.slice(0, 6) + '...' + auction.winner.slice(-4),
-            farcasterUsername: farcasterInfo?.username || null,
-            basename: null,
-            pfpUrl: farcasterInfo?.pfpUrl || null,
-            usdValue,
-            isV1Auction: false,
-            ensName,
-          });
-        }
+      if (data) {
+        // Update cache
+        cachedWinners = data;
+        lastFetchTime = now;
+        setWinners(data);
       }
-      
-      // Sort by tokenId in descending order initially
-      uniqueAuctions.sort((a, b) => (Number(b.tokenId) - Number(a.tokenId)));
-      
-      // Update global cache
-      globalCachedWinners = uniqueAuctions;
-      
-      setWinners(uniqueAuctions);
-      setDataInitialized(true);
     } catch (error) {
-      console.error("Error fetching winners:", error);
+      console.error("Error fetching winners from Supabase:", error);
+      // If we have cached data, fall back to it on error
+      if (cachedWinners) {
+        setWinners(cachedWinners);
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [fetchV1Auctions, fetchV2Auctions, ethPrice, tokenPriceUsd, pricesLoaded]);
+  }, []);
   
-  // Effect to fetch winners once prices are loaded
+  // Effect to fetch winners on page load
   useEffect(() => {
-    if (pricesLoaded && !dataInitialized) {
+    fetchWinners();
+    
+    // Optionally set up a refresh interval
+    const interval = setInterval(() => {
       fetchWinners();
-    }
-  }, [pricesLoaded, fetchWinners, dataInitialized]);
+    }, CACHE_DURATION);
+    
+    return () => clearInterval(interval);
+  }, [fetchWinners]);
   
-  // Display loading state based on combined conditions
-  const showLoading = isLoading || ethPriceLoading || tokenPriceLoading || !pricesLoaded || !dataInitialized;
+  // Effect to fetch profile pictures for winners without them
+  useEffect(() => {
+    // Only look for winners that don't have profile pics in our cache
+    const winnersNeedingPfps = winners.filter(
+      w => w.farcaster_username && 
+           !profilePictures[w.token_id] && 
+           (!w.pfp_url || w.pfp_url === "null")
+    );
+    
+    if (winnersNeedingPfps.length === 0) return;
+    
+    // Fetch profile pictures
+    const fetchPfps = async () => {
+      const newPictures: Record<string, string | null> = {};
+      
+      await Promise.all(
+        winnersNeedingPfps.map(async (winner) => {
+          if (!winner.farcaster_username) return;
+          
+          try {
+            const pfpUrl = await getFarcasterProfilePicture(winner.farcaster_username);
+            if (pfpUrl) {
+              newPictures[winner.token_id] = pfpUrl;
+              
+              // Also update the database if we found a profile picture
+              await supabase
+                .from('winners')
+                .update({ pfp_url: pfpUrl })
+                .eq('token_id', winner.token_id);
+            }
+          } catch (error) {
+            console.error(`Error fetching pfp for ${winner.farcaster_username}:`, error);
+          }
+        })
+      );
+      
+      if (Object.keys(newPictures).length > 0) {
+        // Update state with new pictures
+        const updatedPics = { ...profilePictures, ...newPictures };
+        setProfilePictures(updatedPics);
+        
+        // Update module-level cache
+        cachedProfilePics = { ...cachedProfilePics, ...newPictures };
+        
+        // Save to localStorage
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('qrcoin_profile_pics', JSON.stringify(cachedProfilePics));
+          } catch (e) {
+            console.error('Error saving profile pics to localStorage:', e);
+          }
+        }
+      }
+    };
+    
+    fetchPfps();
+  }, [winners, profilePictures]);
   
   // Get display name based on priority: basename > farcaster username > ens name > truncated address
   const getDisplayName = (winner: WinnerData) => {
     if (winner.basename) {
       return winner.basename;
-    } else if (winner.farcasterUsername) {
-      return `@${winner.farcasterUsername}`;
-    } else if (winner.ensName) {
-      return winner.ensName;
+    } else if (winner.farcaster_username) {
+      return `@${winner.farcaster_username}`;
+    } else if (winner.ens_name) {
+      return winner.ens_name;
     } else {
       // Properly truncate Ethereum address for clean display
-      return `${winner.winner.slice(0, 4)}...${winner.winner.slice(-4)}`;
+      return `${winner.winner_address.slice(0, 4)}...${winner.winner_address.slice(-4)}`;
     }
   };
 
   // Function to handle user name click - open Warpcast profile if it exists
   const handleNameClick = (winner: WinnerData) => {
-    if (winner.farcasterUsername) {
+    if (winner.farcaster_username) {
       // Open Warpcast profile in new tab
-      let username = winner.farcasterUsername;
+      let username = winner.farcaster_username;
       
       // Quick temp fix - replace !217978 with softwarecurator (copied from WarpcastLogo component)
       username = username === "!217978" ? "softwarecurator" : username;
@@ -316,24 +250,29 @@ export default function WinnersPage() {
       
       switch (sortColumn) {
         case 'auction':
-          return sortMultiplier * (Number(a.tokenId) - Number(b.tokenId));
+          return sortMultiplier * (Number(a.token_id) - Number(b.token_id));
           
         case 'winner':
           const nameA = getDisplayName(a).toLowerCase();
           const nameB = getDisplayName(b).toLowerCase();
           
           // Sort by whether they have Farcaster first
-          if (a.farcasterUsername && !b.farcasterUsername) return -1 * sortMultiplier;
-          if (!a.farcasterUsername && b.farcasterUsername) return 1 * sortMultiplier;
+          if (a.farcaster_username && !b.farcaster_username) return -1 * sortMultiplier;
+          if (!a.farcaster_username && b.farcaster_username) return 1 * sortMultiplier;
           
           // Then alphabetically
           return sortMultiplier * nameA.localeCompare(nameB);
           
         case 'bid':
-          return sortMultiplier * (a.usdValue - b.usdValue);
+          const aValue = a.usd_value || 0;
+          const bValue = b.usd_value || 0;
+          return sortMultiplier * (aValue - bValue);
           
         case 'link':
-          return sortMultiplier * (a.url ?? '').localeCompare(b.url ?? '');
+          // Handle null URLs in sort
+          const urlA = a.url || '';
+          const urlB = b.url || '';
+          return sortMultiplier * urlA.localeCompare(urlB);
           
         default:
           return 0;
@@ -349,6 +288,37 @@ export default function WinnersPage() {
       ? <ArrowUp className="inline-block w-4 h-4 ml-1" /> 
       : <ArrowDown className="inline-block w-4 h-4 ml-1" />;
   };
+
+  // Get profile picture for a winner - prioritize our cached versions
+  const getProfilePicture = (winner: WinnerData) => {
+    // First check our local state/cache for fetched pictures
+    if (profilePictures[winner.token_id]) {
+      return profilePictures[winner.token_id];
+    }
+    // Then use the one from database if available
+    if (winner.pfp_url && winner.pfp_url !== "null") {
+      // Add to our cache for future use
+      const newPics = { ...profilePictures };
+      newPics[winner.token_id] = winner.pfp_url;
+      setProfilePictures(newPics);
+      
+      // Update module cache too
+      cachedProfilePics[winner.token_id] = winner.pfp_url;
+      
+      return winner.pfp_url;
+    }
+    return null;
+  };
+  
+  // Preload profile images
+  useEffect(() => {
+    const picUrls = Object.values(profilePictures).filter(Boolean) as string[];
+    
+    picUrls.forEach(url => {
+      const img = new Image();
+      img.src = url;
+    });
+  }, [profilePictures]);
 
   return (
     <main className="min-h-screen p-4 md:p-8">
@@ -399,7 +369,7 @@ export default function WinnersPage() {
                 </tr>
               </thead>
               <tbody className="bg-white dark:bg-[#131313] divide-y divide-gray-200 dark:divide-gray-700">
-                {showLoading ? (
+                {isLoading ? (
                   Array.from({ length: 10 }).map((_, i) => (
                     <tr key={`skeleton-${i}`} className="border-b border-gray-200 dark:border-gray-700">
                       <td className="px-1 md:px-6 py-1 md:py-4 whitespace-nowrap">
@@ -421,17 +391,17 @@ export default function WinnersPage() {
                   ))
                 ) : (
                   sortedWinners.map((winner) => (
-                    <tr key={winner.tokenId.toString()} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <tr key={winner.token_id.toString()} className="hover:bg-gray-50 dark:hover:bg-gray-700">
                       <td className="px-1 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm font-medium text-center">
-                        <Link href={`/auction/${winner.tokenId}`} className="hover:underline">
-                          #{winner.tokenId.toString()}
+                        <Link href={`/auction/${winner.token_id}`} className="hover:underline">
+                          #{winner.token_id.toString()}
                         </Link>
                       </td>
                       <td className="px-1 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm">
                         <div className="flex items-center">
-                          {winner.pfpUrl ? (
+                          {getProfilePicture(winner) ? (
                             <img 
-                              src={winner.pfpUrl} 
+                              src={getProfilePicture(winner)!} 
                               alt="Profile" 
                               className="w-7 h-7 md:w-8 md:h-8 rounded-full object-cover mr-1 md:mr-2 flex-shrink-0"
                             />
@@ -442,16 +412,16 @@ export default function WinnersPage() {
                           )}
                           <div className="flex items-center truncate max-w-[110px] md:max-w-full">
                             <span 
-                              className={`truncate ${winner.farcasterUsername ? 'hover:underline cursor-pointer' : ''}`}
+                              className={`truncate ${winner.farcaster_username ? 'hover:underline cursor-pointer' : ''}`}
                               onClick={() => handleNameClick(winner)}
                             >
                               {getDisplayName(winner)}
                             </span>
-                            {winner.farcasterUsername && (
+                            {winner.farcaster_username && (
                               <div className="hidden md:block flex-shrink-0 mt-1">
                                 <WarpcastLogo 
                                   size="sm" 
-                                  username={winner.farcasterUsername} 
+                                  username={winner.farcaster_username} 
                                   className="ml-1 opacity-80 hover:opacity-100"
                                 />
                               </div>
@@ -461,7 +431,7 @@ export default function WinnersPage() {
                       </td>
                       <td className="px-0 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm">
                         <div className="font-mono">
-                          ${Math.floor(winner.usdValue)}
+                          ${Math.floor(winner.usd_value || 0)}
                         </div>
                       </td>
                       <td className="px-0 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm">

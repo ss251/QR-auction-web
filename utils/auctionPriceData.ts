@@ -27,7 +27,7 @@ export const auctionPriceData: Record<string, AuctionPriceData> = {
   "16": { spotPrice: 190.31, version: "v1" },
   "17": { spotPrice: 150.21, version: "v1" },
   "18": { spotPrice: 100.25, version: "v1" },
-  "19": { spotPrice: 1325.15, version: "v1" },
+  "19": { spotPrice: 137.15, version: "v1" },
   "20": { spotPrice: 103.35, version: "v1" },
   "21": { spotPrice: 48.59, version: "v1" },
   "22": { spotPrice: 110.11, version: "v1" },
@@ -68,7 +68,7 @@ export const auctionPriceData: Record<string, AuctionPriceData> = {
   "55": { spotPrice: 46.01, version: "v2" },
   "56": { spotPrice: 66.40, version: "v2" },
   "57": { spotPrice: 68.40, version: "v2" },
-  "58": { spotPrice: 0, version: "v2" } // No data for auction 58 yet
+  "58": { spotPrice: 48.00, version: "v2" } // No data for auction 58 yet
 };
 
 // Helper function to get price data for a specific auction

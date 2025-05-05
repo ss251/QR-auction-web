@@ -30,6 +30,28 @@ import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
 import styles from "./AuctionPageDesktopText.module.css";
+
+// Key for storing the latest auction ID in localStorage
+const LATEST_AUCTION_KEY = 'qrcoin_latest_auction_id';
+
+// Helper function to safely access localStorage
+const safeLocalStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      console.warn('Error accessing localStorage:', e);
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.warn('Error setting localStorage:', e);
+    }
+  }
+};
 import { frameSdk } from "@/lib/frame-sdk";
 
 interface SettingsResponse {
@@ -102,28 +124,19 @@ export default function AuctionPage() {
     }
   };
 
-  const handleLogoClick = () => {
-    if (auctions && auctions.length > 0) {
-      const lastAuction = auctions[auctions.length - 1];
-      const latestId = Number(lastAuction.tokenId);
-      if (latestId > 0) {
-        router.push(`/`);
-      } else {
-        router.push('/');
-      }
-    } else {
-      router.push('/');
-    }
-  };
-
-
+  // Update the cached latest auction ID whenever we have auctions data
   useEffect(() => {
     if (auctions && auctions.length > 0) {
       const lastAuction = auctions[auctions.length - 1];
-      const lastId = Number(lastAuction.tokenId);
-      setLatestAuctionId(lastId);
-      setIsLatestAuction(currentAuctionId === lastId);
+      const latestId = Number(lastAuction.tokenId);
+      setLatestAuctionId(latestId);
+      setIsLatestAuction(currentAuctionId === latestId);
       setIsLoading(false);
+      
+      // Update the cached latest auction ID if this is indeed the latest
+      if (latestId > 0) {
+        safeLocalStorage.setItem(LATEST_AUCTION_KEY, latestId.toString());
+      }
     } else if (auctions) {
       setIsLoading(false);
     }
@@ -198,6 +211,10 @@ export default function AuctionPage() {
     onAuctionCreated: (tokenId) => {
       forceRefetchAuctions().then(() => {
         const newLatestId = Number(tokenId);
+        
+        // Update the cached latest auction ID when a new auction is created
+        safeLocalStorage.setItem(LATEST_AUCTION_KEY, newLatestId.toString());
+        
         if (isLatestAuction || currentAuctionId === newLatestId - 1) {
           router.push(`/auction/${newLatestId}`);
         }

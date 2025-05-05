@@ -356,14 +356,20 @@ export function CustomWallet() {
   useEffect(() => {
     if (!ready) return;
     
-    // Check for inconsistent state: authenticated but no wallet connected
-    const isInconsistentState = authenticated && !eoaAddress && !finalSmartWalletAddress;
+    // Only run this check after a delay to allow wagmi connections to initialize
+    const timeoutId = setTimeout(() => {
+      // Check for inconsistent state: authenticated but no wallet connected
+      const isInconsistentState = authenticated && !eoaAddress && !finalSmartWalletAddress;
+      
+      if (isInconsistentState) {
+        console.log("Detected inconsistent authentication state on mount, cleaning up...");
+        // Auto-reset bad state
+        logout().catch((e: Error) => console.error("Auto-logout failed:", e));
+      }
+    }, 1500); // Give wagmi time to initialize connections
     
-    if (isInconsistentState) {
-      console.log("Detected inconsistent authentication state on mount, cleaning up...");
-      // Auto-reset bad state
-      logout().catch((e: Error) => console.error("Auto-logout failed:", e));
-    }
+    // Clean up timeout on unmount
+    return () => clearTimeout(timeoutId);
   }, [ready, authenticated, eoaAddress, finalSmartWalletAddress, logout]);
 
   // Handle connect wallet properly in drawer for frames

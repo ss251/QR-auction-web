@@ -257,7 +257,7 @@ export function BidForm({
   
   // Create a properly rounded display value with the required precision
   const decimalFactor = Math.pow(10, minDecimalPlaces);
-  const safeMinimumBid = Math.floor(rawDisplayMinimumBid * decimalFactor) / decimalFactor;
+  const safeMinimumBid = Math.ceil(rawDisplayMinimumBid * decimalFactor) / decimalFactor;
   
   // Format with the required decimal places but trim trailing zeros
   const formattedMinBid = safeMinimumBid.toFixed(minDecimalPlaces).replace(/\.?0+$/, '');
@@ -858,7 +858,7 @@ export function BidForm({
         <div className="relative flex-1">
           <Input
             type="text"
-            placeholder={isV3Auction ? `$${Number(formattedMinBid).toFixed(2)} or more` : `${formattedMinBid} or more`}
+            placeholder={isV3Auction ? `$${safeMinimumBid.toFixed(2)} or more` : `${formattedMinBid} or more`}
             className="pr-16 border p-2 w-full"
             value={displayValue}
             onChange={handleBidInput}

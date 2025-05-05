@@ -2,6 +2,8 @@
 import { baseSepolia, base } from "wagmi/chains";
 import { addRpcUrlOverrideToChain } from "@privy-io/chains";
 
+// Base Mainnet ID constant
+const BASE_MAINNET_ID = 8453;
 
 // Check if testnets are enabled
 const useTestnets = (process.env.NEXT_PUBLIC_ENABLE_TESTNETS as string) === "true";
@@ -134,5 +136,16 @@ export const getPrivyConfig = () => {
       createOnLogin: isFrame ? false : "users-without-wallets" as const,
     },
     loginMethods,
+    // Special configuration for external wallets, focusing on safe options for Rainbow
+    externalWallets: {
+      // Fix Rainbow wallet connection issue with specific settings
+      rainbow: {
+        connectionOptions: 'eoaOnly',
+        chains: [{ id: BASE_MAINNET_ID }]  // Explicitly limit to Base only for Rainbow
+      },
+      coinbaseWallet: {
+        connectionOptions: 'eoaOnly'
+      },
+    },
   };
 };

@@ -30,6 +30,7 @@ import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
 import styles from "./AuctionPageDesktopText.module.css";
+import { frameSdk } from "@/lib/frame-sdk";
 
 // Key for storing the latest auction ID in localStorage
 const LATEST_AUCTION_KEY = 'qrcoin_latest_auction_id';
@@ -52,7 +53,6 @@ const safeLocalStorage = {
     }
   }
 };
-import { frameSdk } from "@/lib/frame-sdk";
 
 interface SettingsResponse {
   data: Array<{
@@ -311,21 +311,6 @@ export default function AuctionPage() {
               
               <div className="inline-flex flex-col items-center">
                 <QRPage />
-                <div className="mt-1">
-                  <button
-                    onClick={() => handleFrameOpenUrl(`${process.env.NEXT_PUBLIC_HOST_URL}/redirect`)}
-                    className={`relative inline-flex items-center ${
-                      isBaseColors
-                        ? "bg-primary text-foreground"
-                        : "bg-white text-gray-700"
-                    } text-sm font-medium hover:bg-gray-50 transition-colors w-full`}
-                  >
-                    <span className="block w-full text-center">
-                      Visit Website{" "}
-                    </span>
-                    <ExternalLink className="absolute left-full h-3 w-3 ml-1" />
-                  </button>
-                </div>
               </div>
             </div>
 

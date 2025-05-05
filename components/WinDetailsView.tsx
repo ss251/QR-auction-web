@@ -19,14 +19,13 @@ import useEthPrice from "@/hooks/useEthPrice";
 import { getAuctionVersion } from "@/utils/auctionPriceData";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../types/database";
+import { frameSdk } from "@/lib/frame-sdk";
 
 // Initialize Supabase client
 const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
-import { frameSdk } from "@/lib/frame-sdk";
 
 
 type AuctionType = {

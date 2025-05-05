@@ -5,7 +5,7 @@ import { formatEther, formatUnits } from "viem";
 import { Address } from "viem";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { RandomColorAvatar } from "./RandomAvatar";
 import { SafeExternalLink } from "./SafeExternalLink";
 import { ExternalLink } from "lucide-react";
@@ -26,6 +26,9 @@ const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+import { frameSdk } from "@/lib/frame-sdk";
+
+
 type AuctionType = {
   tokenId: bigint;
   winner: string;
@@ -33,6 +36,7 @@ type AuctionType = {
   url: string;
   openDialog: (url: string) => boolean;
   openBids: () => void;
+  isFrame?: boolean;
 };
 
 export function WinDetailsView(winnerdata: AuctionType) {
@@ -41,12 +45,19 @@ export function WinDetailsView(winnerdata: AuctionType) {
   const [nameInfo, setNameInfo] = useState<{ pfpUrl?: string; displayName: string; farcasterUsername?: string }>({
     displayName: `${winnerdata.winner.slice(0, 4)}...${winnerdata.winner.slice(-4)}`,
   });
+
   const [winnerDbData, setWinnerDbData] = useState<{ usd_value: number | null, is_v1_auction: boolean | null } | null>(null);
   
   // Determine auction version
   const auctionVersion = useMemo(() => getAuctionVersion(winnerdata.tokenId), [winnerdata.tokenId]);
   
   // Fallback to current prices if database data isn't available
+
+  
+  // Initialize isFrame from props or determine via useRef
+  const isFrame = useRef(!!winnerdata.isFrame);
+
+
   const { priceUsd: qrPrice } = useTokenPrice();
   const { ethPrice } = useEthPrice();
 
@@ -88,6 +99,45 @@ export function WinDetailsView(winnerdata: AuctionType) {
     
     fetchWinnerData();
   }, [winnerdata.tokenId]);
+
+  // Check if we're in Farcaster frame context if not passed in props
+  useEffect(() => {
+    if (winnerdata.isFrame !== undefined) {
+      isFrame.current = winnerdata.isFrame;
+      return;
+    }
+    
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check in WinDetailsView:", isFrame.current ? "Running in frame" : "Not in frame");
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, [winnerdata.isFrame]);
+
+  // Handle URL opening, prioritizing Frame SDK when in frame environment
+  const handleOpenUrl = async (url: string) => {
+    // For frame environments, use the Frame SDK
+    if (isFrame.current) {
+      try {
+        await frameSdk.redirectToUrl(url);
+      } catch (error) {
+        console.error("Error opening URL in frame:", error);
+        // Fallback to regular navigation
+        window.open(url, "_blank");
+      }
+      return;
+    }
+    
+    // For non-frame environments, open directly without safety dialog
+    window.open(url, "_blank");
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -141,7 +191,15 @@ export function WinDetailsView(winnerdata: AuctionType) {
           "39": "https://i.postimg.cc/rpxzhzbX/winner39.png",
           "42": "https://i.postimg.cc/bwGJ6JKy/42winner.jpg",
           "43": "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
-          "45": "https://i.postimg.cc/DzRKLWrW/45winner.jpg"
+          "45": "https://i.postimg.cc/DzRKLWrW/45winner.jpg",
+          "46": "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcWNvYms5bXdremd6MjF4aTR0ZW4zYjB0NmlobWk1dzk1aGRlb3VzYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RFEiTqRUBaKHLpO8Lv/giphy.gif",
+          "47": "https://i.postimg.cc/RFDdTkkr/47winner.jpg",
+          "48": "https://i.postimg.cc/zBwNND8N/48winner.jpg",
+          "55": "https://i.postimg.cc/NfXMQDtR/55winner.jpg",
+          "56": "https://i.postimg.cc/NfXMQDtR/55winner.jpg",
+          "57": "https://i.postimg.cc/GhFSqpM7/57winner.jpg",
+          "59": "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExYW1rY216bmtidnAwcDgzcHYwdTNmYTB2dDhnM3BxbW43cDZ5bmV3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZmCWjB3utyyAN61pAj/giphy.gif",
+          "60": "https://i.ibb.co/JWWcQyJ4/60winner.jpg"
         };
 
         // Check if we have a custom image override for this auction
@@ -270,16 +328,15 @@ export function WinDetailsView(winnerdata: AuctionType) {
           <div className="inline-flex flex-row justify-between items-center w-full">
             <div className="text-sm w-full overflow-hidden">
               <span className={`${isBaseColors ? "text-foreground" : "text-gray-600 dark:text-[#696969]"}`}>Winner: </span>
-              <SafeExternalLink
-                href={winnerdata.url}
+              <button
+                onClick={() => handleOpenUrl(winnerdata.url)}
                 className={`${isBaseColors ? "text-foreground" : "text-gray-700 hover:text-gray-900"} transition-colors inline-flex items-center max-w-[calc(100%-65px)]`}
-                onBeforeNavigate={() => false}
               >
                 <span className="truncate inline-block align-middle">
                   {formatURL(winnerdata.url, true, true, 280)}
                 </span>
                 <ExternalLink className="ml-1 h-3 w-3 flex-shrink-0" />
-              </SafeExternalLink>
+              </button>
             </div>
           </div>
           <div className={`${isBaseColors ? "bg-background" : "bg-white"} flex flex-col rounded-md justify-center items-center h-full mt-1 w-full overflow-hidden aspect-[2/1]`}>
@@ -287,10 +344,8 @@ export function WinDetailsView(winnerdata: AuctionType) {
               <img
                 src={ogImage}
                 alt="Open Graph"
-                className="h-auto w-full"
-                onClick={() => {
-                  window.location.href = winnerdata.url;
-                }}
+                className="h-auto w-full cursor-pointer"
+                onClick={() => handleOpenUrl(winnerdata.url)}
               />
             )}
           </div>

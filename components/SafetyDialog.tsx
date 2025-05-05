@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { AlertTriangle, Shield, HelpCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { frameSdk } from "@/lib/frame-sdk";
 
 interface SafetyDialogProps {
   isOpen: boolean;
@@ -21,12 +22,48 @@ export function SafetyDialog({
   onContinue,
 }: SafetyDialogProps) {
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const isFrame = useRef(false);
+  
+  // Check if we're in Farcaster frame context on mount
+  useEffect(() => {
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check in SafetyDialog:", isFrame.current ? "Running in frame" : "Not in frame");
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, []);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     if (dontShowAgain) {
       localStorage.setItem("hideSafetyWarning", "true");
     }
+    
+    // Call the parent's onContinue callback
     onContinue();
+    
+    // Navigate to the target URL using the appropriate method
+    if (targetUrl) {
+      if (isFrame.current) {
+        // In frame environments, use only the Frame SDK
+        try {
+          console.log("Safety Dialog: Opening URL with Frame SDK:", targetUrl);
+          await frameSdk.redirectToUrl(targetUrl);
+        } catch (error) {
+          console.error("Safety Dialog: Error opening URL in frame:", error);
+        }
+      } else {
+        // In non-frame environments, use regular browser navigation
+        console.log("Safety Dialog: Opening URL with window.open:", targetUrl);
+        window.open(targetUrl, "_blank");
+      }
+    }
   };
 
   return (

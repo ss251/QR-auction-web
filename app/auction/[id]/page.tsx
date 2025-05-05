@@ -3,7 +3,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AuctionNavigation } from "@/components/auction-navigation";
 import { QRPage } from "@/components/QRPage";
@@ -30,6 +30,7 @@ import { formatURL } from "@/utils/helperFunctions";
 import BidStats from "@/components/BidStats";
 import { EndorsementsCarousel } from "@/components/EndorsementsCarousel";
 import styles from "./AuctionPageDesktopText.module.css";
+import { frameSdk } from "@/lib/frame-sdk";
 
 interface SettingsResponse {
   data: Array<{
@@ -53,6 +54,7 @@ export default function AuctionPage() {
   const [copied, setCopied] = useState(false);
   const [isLatestAuction, setIsLatestAuction] = useState(false);
   const [latestAuctionId, setLatestAuctionId] = useState(0);
+  const isFrame = useRef(false);
 
   const isBaseColors = useBaseColors();
   const { isOpen, pendingUrl, openDialog, closeDialog, handleContinue } = useSafetyDialog();
@@ -61,8 +63,60 @@ export default function AuctionPage() {
 
   // Check if this is auction #22 from v1 contract
   const isAuction22 = currentAuctionId === 22;
+  
   // Check if this is auction #56 from v2 contract
   const isAuction56 = currentAuctionId === 56;
+
+  // Check if we're in Farcaster frame context on mount
+  useEffect(() => {
+    async function checkFrameContext() {
+      try {
+        const context = await frameSdk.getContext();
+        isFrame.current = !!context?.user;
+        console.log("Frame context check in AuctionPage:", isFrame.current ? "Running in frame" : "Not in frame");
+      } catch (frameError) {
+        console.log("Not in a Farcaster frame context:", frameError);
+        isFrame.current = false;
+      }
+    }
+    
+    checkFrameContext();
+  }, []);
+  
+  // Function to handle URL opening specifically for Frame environments
+  const handleFrameOpenUrl = async (url: string) => {
+    if (isFrame.current) {
+      try {
+        await frameSdk.redirectToUrl(url);
+      } catch (error) {
+        console.error("Error opening URL in frame:", error);
+        // Fallback to regular navigation
+        window.open(url, "_blank");
+      }
+    } else {
+      // For non-frame environments, use the safety dialog or normal navigation
+      if (openDialog(url)) {
+        return; // Safety dialog is handling it
+      }
+      window.open(url, "_blank");
+    }
+  };
+
+  const handleLogoClick = () => {
+    if (auctions && auctions.length > 0) {
+      const lastAuction = auctions[auctions.length - 1];
+      const latestId = Number(lastAuction.tokenId);
+      if (latestId > 0) {
+        router.push(`/`);
+      } else {
+        router.push('/');
+      }
+    } else {
+      router.push('/');
+    }
+  };
+
+
   useEffect(() => {
     if (auctions && auctions.length > 0) {
       const lastAuction = auctions[auctions.length - 1];
@@ -187,7 +241,15 @@ export default function AuctionPage() {
         40: "https://i.postimg.cc/rpxzhzbX/winner39.png",
         43: "https://i.postimg.cc/bwGJ6JKy/42winner.jpg",
         44: "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
-        46: "https://i.postimg.cc/DzRKLWrW/45winner.jpg"
+        46: "https://i.postimg.cc/DzRKLWrW/45winner.jpg",
+        47: "https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExcWNvYms5bXdremd6MjF4aTR0ZW4zYjB0NmlobWk1dzk1aGRlb3VzYSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/RFEiTqRUBaKHLpO8Lv/giphy.gif",
+        48: "https://i.postimg.cc/RFDdTkkr/47winner.jpg",
+        49: "https://i.postimg.cc/zBwNND8N/48winner.jpg",
+        56: "https://i.postimg.cc/NfXMQDtR/55winner.jpg",
+        57: "https://i.postimg.cc/NfXMQDtR/55winner.jpg",
+        58: "https://i.postimg.cc/GhFSqpM7/57winner.jpg",
+        60: "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExYW1rY216bmtidnAwcDgzcHYwdTNmYTB2dDhnM3BxbW43cDZ5bmV3MiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/ZmCWjB3utyyAN61pAj/giphy.gif",
+        61: "https://i.ibb.co/JWWcQyJ4/60winner.jpg"
     }),
     []
   );
@@ -232,6 +294,21 @@ export default function AuctionPage() {
               
               <div className="inline-flex flex-col items-center">
                 <QRPage />
+                <div className="mt-1">
+                  <button
+                    onClick={() => handleFrameOpenUrl(`${process.env.NEXT_PUBLIC_HOST_URL}/redirect`)}
+                    className={`relative inline-flex items-center ${
+                      isBaseColors
+                        ? "bg-primary text-foreground"
+                        : "bg-white text-gray-700"
+                    } text-sm font-medium hover:bg-gray-50 transition-colors w-full`}
+                  >
+                    <span className="block w-full text-center">
+                      Visit Website{" "}
+                    </span>
+                    <ExternalLink className="absolute left-full h-3 w-3 ml-1" />
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -270,7 +347,7 @@ export default function AuctionPage() {
                           alt="Open Graph"
                           className="object-cover w-full h-full cursor-pointer"
                           onClick={() => {
-                            if (ogUrl) window.open(ogUrl, '_blank', 'noopener,noreferrer');
+                            if (ogUrl) handleFrameOpenUrl(ogUrl);
                           }}
                         />
                       </div>
@@ -280,10 +357,8 @@ export default function AuctionPage() {
                           The QR now points to:
                         </span>
                         <div className="w-full flex justify-center">
-                          <a
-                            href={ogUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            onClick={() => handleFrameOpenUrl(ogUrl)}
                             className="inline-flex items-center hover:opacity-80 transition-opacity max-w-full"
                             title={ogUrl}
                             aria-label="redirect"
@@ -292,7 +367,7 @@ export default function AuctionPage() {
                               {formatURL(ogUrl, true, true, 280)}
                             </span>
                             <ExternalLink className="ml-1 h-6 w-3.5 flex-shrink-0" />
-                          </a>
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -320,7 +395,7 @@ export default function AuctionPage() {
                         alt="Open Graph"
                         className="object-cover w-full h-full cursor-pointer"
                         onClick={() => {
-                          if (ogUrl) window.open(ogUrl, '_blank', 'noopener,noreferrer');
+                          if (ogUrl) handleFrameOpenUrl(ogUrl);
                         }}
                       />
                     </div>
@@ -330,10 +405,8 @@ export default function AuctionPage() {
                         The QR now points to:
                       </span>
                       <div className="w-full flex justify-center">
-                        <a
-                          href={ogUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          onClick={() => handleFrameOpenUrl(ogUrl)}
                           className="inline-flex items-center hover:opacity-80 transition-opacity max-w-full"
                           title={ogUrl}
                           aria-label="redirect"
@@ -342,7 +415,7 @@ export default function AuctionPage() {
                             {formatURL(ogUrl, true, false, 350)}
                           </span>
                           <ExternalLink className="ml-1 h-6 w-3.5 flex-shrink-0" />
-                        </a>
+                        </button>
                       </div>
                     </div>
                   </div>

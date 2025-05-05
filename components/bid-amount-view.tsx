@@ -256,6 +256,44 @@ export function BidForm({
   // Watch the bid amount for use in the funding flow
   const bidAmount_formValue = watch("bid");
   const urlValue = watch("url");
+  
+  // State to track the displayed input value with $ prefix
+  const [displayValue, setDisplayValue] = useState("");
+  
+  // Handle bid input with $ prefix 
+  const handleBidInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    
+    // If user is trying to delete the $, prevent that
+    if (!value.startsWith("$")) {
+      value = "$" + value.replace("$", "");
+    }
+    
+    // Update display value with $ prefix
+    setDisplayValue(value);
+    
+    // Extract numeric value for form validation (remove $ and any non-numeric characters except decimal)
+    const numericValue = value.replace("$", "").replace(/[^\d.]/g, '');
+    
+    // Update the form value with the numeric-only value
+    if (numericValue) {
+      setValue('bid', parseFloat(numericValue), { shouldValidate: true });
+    } else {
+      setValue('bid', undefined as any, { shouldValidate: true });
+    }
+    
+    // Trigger typing event
+    handleTypingEvent();
+  };
+  
+  // Initialize display value when bid amount changes
+  useEffect(() => {
+    if (bidAmount_formValue !== undefined) {
+      setDisplayValue(`$${bidAmount_formValue}`);
+    } else {
+      setDisplayValue("");
+    }
+  }, [bidAmount_formValue]);
 
   // Function to cancel funding process and clear up state
   const cancelFunding = () => {
@@ -777,14 +815,12 @@ export function BidForm({
       <div className="flex flex-col gap-2">
         <div className="relative flex-1">
           <Input
-            type="number"
-            min={safeMinimumBid}
-            step={stepSize}
+            type="text"
             placeholder={isV3Auction ? `$${Number(formattedMinBid).toFixed(2)} or more` : `${formattedMinBid} or more`}
-            className="pr-16 border p-2 w-full [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            {...register("bid")}
+            className="pr-16 border p-2 w-full"
+            value={displayValue}
+            onChange={handleBidInput}
             onKeyDown={handleTypingEvent}
-            onInput={handleTypingEvent}
             disabled={isPlacingBid || fundingState !== 'idle'}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>

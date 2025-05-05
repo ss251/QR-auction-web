@@ -321,7 +321,7 @@ export default function WinnersPage() {
   }, [profilePictures]);
 
   return (
-    <main className="min-h-screen p-4 md:p-8">
+    <main className="min-h-screen p-4 md:px-8 md:pb-8">
       <div className="max-w-3xl mx-auto">
         <div className="flex flex-col mb-6 md:mb-8">
           <div className="flex items-center mb-1 md:mb-2">

@@ -25,7 +25,7 @@ export default function AboutPage() {
   };
 
   return (
-    <main className="min-h-screen p-4 md:p-8">
+    <main className="min-h-screen p-4 md:px-8 md:pb-8">
       <div className="max-w-3xl mx-auto">
         <div className="space-y-6">
           <div>

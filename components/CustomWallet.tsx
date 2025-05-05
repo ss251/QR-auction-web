@@ -1062,14 +1062,6 @@ export function CustomWallet() {
                         <>
                             <div className="flex justify-between items-center text-xs sm:text-sm">
                                 <span className="text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="rounded-full sm:w-4 sm:h-4"/> ETH
-                                </span>
-                                {ethLoading ? <Skeleton className="h-4 w-16" /> :
-                                <span className="font-mono">{parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(5)}</span>
-                                }
-                            </div>
-                            <div className="flex justify-between items-center text-xs sm:text-sm">
-                                <span className="text-muted-foreground flex items-center gap-1.5">
                                     <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="sm:w-4 sm:h-4" /> USDC
                                 </span>
                                 {tokensLoading ? <Skeleton className="h-4 w-16" /> :
@@ -1082,6 +1074,14 @@ export function CustomWallet() {
                                 </span>
                                 {tokensLoading ? <Skeleton className="h-4 w-16" /> :
                                 <span className="font-mono">{new Intl.NumberFormat().format(qrBalance)}</span>
+                                }
+                            </div>
+                            <div className="flex justify-between items-center text-xs sm:text-sm">
+                                <span className="text-muted-foreground flex items-center gap-1.5">
+                                    <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="rounded-full sm:w-4 sm:h-4"/> ETH
+                                </span>
+                                {ethLoading ? <Skeleton className="h-4 w-16" /> :
+                                <span className="font-mono">{parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(5)}</span>
                                 }
                             </div>
                         </>

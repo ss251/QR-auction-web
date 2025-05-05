@@ -47,7 +47,6 @@ export function BidForm({
   openDialog: (url: string) => boolean;
 }) {
   // Add ref to track if we're in a Farcaster frame context
-  const isFrame = useRef(false);
   const frameWalletAddress = useRef<string | null>(null);
   
   // Normal component state

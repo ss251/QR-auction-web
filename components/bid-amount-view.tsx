@@ -299,7 +299,21 @@ export function BidForm({
       // Validate against safe minimum value that matches our display format
       .refine(val => val >= safeMinimumBid, 
         `Bid must be at least ${formattedMinBid}`),
-    url: z.string().url("Invalid URL"),
+    url: z.string()
+      // Transform the URL to ensure it has https:// prefix
+      .transform(val => {
+        // Don't modify empty strings
+        if (!val.trim()) return val;
+        
+        // Check if URL already has a protocol
+        if (!val.match(/^https?:\/\//i)) {
+          // If not, prepend https://
+          return `https://${val}`;
+        }
+        
+        return val;
+      })
+      .pipe(z.string().url("Invalid URL")),
   });
 
   type FormSchemaType = z.infer<typeof formSchema>;
@@ -634,8 +648,22 @@ export function BidForm({
               
               // Get the user's most recent bid URL
               if (userBidsForThisAuction.length > 0 && userBidsForThisAuction[0].url) {
-                // Pre-populate the URL field with the user's last bid URL
-                setValue("url", userBidsForThisAuction[0].url);
+                const fullUrl = userBidsForThisAuction[0].url;
+                
+                // Store the full URL in the form value
+                setValue("url", fullUrl);
+                
+                // Create display version for input field by removing protocol
+                const displayUrl = fullUrl.replace(/^https?:\/\//i, '');
+                
+                // Get the input element and set its display value
+                // This doesn't affect the form value managed by react-hook-form
+                setTimeout(() => {
+                  const urlInput = document.querySelector('input[name="url"]') as HTMLInputElement;
+                  if (urlInput) {
+                    urlInput.value = displayUrl;
+                  }
+                }, 0);
               }
             }
           }
@@ -646,7 +674,7 @@ export function BidForm({
       
       fetchPreviousBid();
     }
-  }, [auctionDetail?.tokenId, activeAddress, fetchHistoricalAuctions, setValue]);
+  }, [auctionDetail?.tokenId, activeAddress, fetchHistoricalAuctions, setValue, getValues]);
 
   // Clear URL field when wallet is disconnected
   useEffect(() => {
@@ -659,6 +687,27 @@ export function BidForm({
   const handleTypingEvent = () => {
     console.log('Triggering typing event');
     handleTypingStart();
+  };
+
+  // Add a new function to handle URL input formatting
+  const handleUrlInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Get the raw input value without protocol
+    const inputValue = e.target.value;
+    
+    // Don't modify the displayed input but ensure the form value has https://
+    if (inputValue) {
+      // For the form data, ensure it has https:// prefix
+      if (!inputValue.match(/^https?:\/\//i)) {
+        setValue('url', `https://${inputValue}`, { shouldValidate: true });
+      } else {
+        setValue('url', inputValue, { shouldValidate: true });
+      }
+    } else {
+      setValue('url', '', { shouldValidate: true });
+    }
+    
+    // Trigger typing event
+    handleTypingEvent();
   };
 
   const onSubmit = async (data: FormSchemaType) => {
@@ -899,15 +948,16 @@ export function BidForm({
           <div className="relative flex-1">
             <Input
               type="text"
-              placeholder="https://"
+              placeholder="example.com"
               className="pr-16 border p-2 w-full"
               spellCheck="false"
               autoCapitalize="none"
               autoCorrect="off"
-              {...register("url")}
+              onChange={handleUrlInput}
               onKeyDown={handleTypingEvent}
               onInput={handleTypingEvent}
               disabled={isPlacingBid || fundingState !== 'idle'}
+              name="url"
             />
             <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
               URL

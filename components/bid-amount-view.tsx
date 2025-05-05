@@ -257,7 +257,29 @@ export function BidForm({
   
   // Create a properly rounded display value with the required precision
   const decimalFactor = Math.pow(10, minDecimalPlaces);
-  const safeMinimumBid = Math.ceil(rawDisplayMinimumBid * decimalFactor) / decimalFactor;
+  
+  // Simplified solution for USDC rounding
+  let safeMinimumBid;
+  if (isV3Auction) {
+    // For USDC: convert to string with many decimal places to avoid floating point issues
+    const valueStr = rawDisplayMinimumBid.toFixed(10); 
+    const parts = valueStr.split('.');
+    const decimalPart = parts.length > 1 ? parts[1] : '';
+    
+    // Check if there's any non-zero digit after position 2
+    const hasNonZeroAfterPos2 = decimalPart.length > 2 && 
+                                decimalPart.substring(2).split('').some(d => d !== '0');
+    
+    if (hasNonZeroAfterPos2) {
+      // If there's anything after 2nd decimal place, add a cent
+      safeMinimumBid = Math.floor(rawDisplayMinimumBid * 100) / 100 + 0.01;
+    } else {
+      // Otherwise just use the value rounded to 2 decimal places
+      safeMinimumBid = Math.round(rawDisplayMinimumBid * 100) / 100;
+    }
+  } else {
+    safeMinimumBid = Math.floor(rawDisplayMinimumBid * decimalFactor) / decimalFactor;
+  }
   
   // Format with the required decimal places but trim trailing zeros
   const formattedMinBid = safeMinimumBid.toFixed(minDecimalPlaces).replace(/\.?0+$/, '');

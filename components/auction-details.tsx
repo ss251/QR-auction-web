@@ -457,7 +457,7 @@ export function AuctionDetails({
         const currentBid = Number(formatUnits(auctionDetail?.highestBid || 0n, 6));
         // For whole numbers, don't show decimal places
         const bidText = `$${currentBid.toFixed(2)}`;
-        document.title = `${bidText} - ${bidderNameInfo.displayName}`;
+        document.title = `QR ${bidText} - ${bidderNameInfo.displayName}`;
       } else {
         // For legacy and V2 auctions, use QR format (18 decimals)
         const currentBid = Number(formatEther(auctionDetail.highestBid));

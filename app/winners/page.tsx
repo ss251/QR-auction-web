@@ -431,7 +431,7 @@ export default function WinnersPage() {
                       </td>
                       <td className="px-0 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm">
                         <div className="font-mono">
-                          ${Math.floor(winner.usd_value || 0)}
+                          ${Math.floor(winner.usd_value || 0).toLocaleString()}
                         </div>
                       </td>
                       <td className="px-0 md:px-6 py-1 md:py-4 whitespace-nowrap text-xs md:text-sm">

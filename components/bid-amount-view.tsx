@@ -29,6 +29,7 @@ import { Address, Chain } from "viem";
 import { useFundWallet } from "@privy-io/react-auth";
 import { base } from "viem/chains";
 import { frameSdk } from "@/lib/frame-sdk";
+import { usePrivy } from "@privy-io/react-auth";
 
 // Polling configuration
 const BALANCE_POLL_INTERVAL = 3000; // 3 seconds
@@ -74,6 +75,9 @@ export function BidForm({
   const { handleTypingStart } = useTypingStatus();
   const { fetchHistoricalAuctions } = useFetchBids();
   const isFrame = useRef(false);
+  
+  // Add Privy hooks
+  const { login, authenticated } = usePrivy();
   
   // Check if we're in Farcaster frame context on mount
   useEffect(() => {
@@ -719,8 +723,15 @@ export function BidForm({
     const effectivelyConnected = isConnected || hasFrameWallet;
 
     if (!effectivelyConnected) {
-      toast.error("Connect a wallet");
-      return;
+      // Instead of just showing a toast error, trigger the Privy login flow
+      if (!authenticated && !isConnected && !isFrame.current) {
+        toast.info("Please connect a wallet to place a bid");
+        login();
+        return;
+      } else if (!isFrame.current) {
+        toast.error("Connect a wallet");
+        return;
+      }
     }
 
     // Check if we have a valid address to use

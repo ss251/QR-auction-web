@@ -21,7 +21,7 @@ export function Header() {
   };
 
   return (
-    <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mt-18 md:mt-8 lg:mt-20 lg:mb-8 px-4 md:px-0">
+    <nav className="w-full md:max-w-3xl mx-auto flex justify-between items-center mt-18 md:mt-20 md:mb-8 lg:mt-20 lg:mb-8 px-4 md:px-0">
       <QRContextMenu className="inline-block" isHeaderLogo>
         <h1
           onClick={handleLogoClick}

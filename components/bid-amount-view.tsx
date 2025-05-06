@@ -749,9 +749,36 @@ export function BidForm({
       ? data.bid  // For USDC, use the actual value without multiplying
       : data.bid * 1_000_000; // For QR, multiply by 1M
     
-    // Skip balance checks for frame wallets - they're handled by the useWriteActions hook
+    // Check balance for frame wallets before allowing transaction
     if (hasFrameWallet) {
-      console.log("[BidForm] Frame wallet detected, skipping balance checks");
+      console.log("[BidForm] Frame wallet detected, checking balance before proceeding");
+      
+      // For Frame wallet users, check balance before proceeding
+      if (isV3Auction) {
+        try {
+          // Use our existing USDC balance fetch function
+          const freshBalanceResult = await refetchUsdcBalance();
+          const currentUsdcBalance = freshBalanceResult.data;
+          
+          // Format current balance for comparison
+          const formattedBalance = currentUsdcBalance 
+            ? Number(formatUnits(currentUsdcBalance.value, 6)) 
+            : 0;
+          
+          console.log(`[Frame] Current USDC balance: ${formattedBalance}, Required: ${fullBidAmount}`);
+          
+          if (formattedBalance < fullBidAmount) {
+            toast.error(`You don't have enough USDC tokens for this bid`);
+            setIsPlacingBid(false);
+            return;
+          }
+        } catch (error) {
+          console.error("[Frame] Error checking balance:", error);
+          toast.error("Unable to check wallet balance");
+          setIsPlacingBid(false);
+          return;
+        }
+      }
     } 
     // For smart wallet users, always fetch fresh balance first
     else if (hasSmartWallet && isV3Auction) {

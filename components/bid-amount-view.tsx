@@ -184,10 +184,10 @@ export function BidForm({
     checkFrameContext();
   }, []);
 
-  // Check if it's a legacy auction (1-22), v2 auction (23-35), or v3 auction (36+)
+  // Check if it's a legacy auction (1-22), v2 auction (23-61), or v3 auction (62+)
   const isLegacyAuction = auctionDetail?.tokenId <= 22n;
-  const isV2Auction = auctionDetail?.tokenId >= 23n && auctionDetail?.tokenId <= 35n;
-  const isV3Auction = auctionDetail?.tokenId >= 36n;
+  const isV2Auction = auctionDetail?.tokenId >= 23n && auctionDetail?.tokenId <= 61n;
+  const isV3Auction = auctionDetail?.tokenId >= 62n;
   
   // Set token addresses based on auction type
   const qrTokenAddress = "0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF"; // QR token address
@@ -224,7 +224,7 @@ export function BidForm({
   
   // Calculate full token value based on auction type
   const fullMinimumBid = lastHighestBid === 0n 
-    ? (isV3Auction ? 1 : MIN_QR_BID) // For V3, we use 1 USDC flat minimum
+    ? (isV3Auction ? 11.11 : MIN_QR_BID) // For V3, we use 11.11 USDC flat minimum
     : isV3Auction 
       ? Number(formatUnits(lastHighestBid + increment, 6)) // USDC has 6 decimals
       : Number(formatEther(lastHighestBid + increment)); // ETH/QR have 18 decimals

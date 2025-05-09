@@ -1,18 +1,18 @@
 {
   "accountAssociation": {
-    "header": "eyJmaWQiOjEwNDE1ODUsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHg3NkZBNkVGQzJlNjlmZjYwYjc1OGVERThGZGFGOTU3OTU5NEUyMDVBIn0",
-    "payload": "eyJkb21haW4iOiJxcmNvaW4uZnVuIn0",
-    "signature": "MHhhYzZjNjkwMzAyZmIzNWEyNGQ3MjZhMTZkOTk2OTUxYWVkZWFmYjk0ZmQ0ZjUzMTA4MzQ1ZmU4YjBiOTk1YWQ5NTEzNzRkNTRjNjcwNDI3YzgxMTZhM2I4MzIxYTEzYjY0YmNkYzkxMGIwNjFmYTU2N2I4YzVkNzc5MzZjYjhiMjFj"
+    "header": "eyJmaWQiOjY1NzM3MCwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweGMzNzNDRjY4ZjNDYWIwODFiZTg2QzFmMEZjN2I2NWFDYTAzNTg3ZDEifQ",
+    "payload": "eyJkb21haW4iOiJ0aGVzY29oby5uZ3Jvay5hcHAifQ",
+    "signature": "MHhmOWIzZDQ0MzFjMDFkMjEzMzFhODMxYjRjN2YxZjNmZGI4NDFkMzRmYTE2NjI3MTJiNzRlNThjMTFkZGM5MTgwMWUyZWMyOWMzZTM2Mjg3MTU1MjFkN2RhZmY2MTg1YTUwNjg0MGIzYzExMzQ5OTA0MTVmNzdlN2M5MmJjZTNhNDFi"
   },
   "frame": {
     "version": "1",
-    "name": "$QR",
-    "iconUrl": "https://qrcoin.fun/qrLogo.png",
-    "homeUrl": "https://qrcoin.fun",
-    "imageUrl": "https://qrcoin.fun/opgIMage.png",
+    "name": "$QR Test",
+    "iconUrl": "https://thescoho.ngrok.app/qrLogo.png",
+    "homeUrl": "https://thescoho.ngrok.app",
+    "imageUrl": "https://thescoho.ngrok.app/opgIMage.png",
     "buttonTitle": "Launch App",
-    "splashImageUrl": "https://qrcoin.fun/qrLogo.png",
+    "splashImageUrl": "https://thescoho.ngrok.app/qrLogo.png",
     "splashBackgroundColor": "#FFFFFF",
-    "webhookUrl": "https://api.neynar.com/f/app/6bd400af-5bfb-4bb0-b848-1f0ddd68dd1f/event"
+    "webhookUrl": "https://thescoho.ngrok.app/api/webhook"
   }
 }

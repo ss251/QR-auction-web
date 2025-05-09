@@ -32,6 +32,7 @@ export const useAirdrop = () => useContext(AirdropContext);
 export function AirdropProvider({ children }: { children: React.ReactNode }) {
   const [showAirdropPopup, setShowAirdropPopup] = useState(false);
   const [hasCheckedEligibility, setHasCheckedEligibility] = useState(false);
+  
   const { 
     isEligible, 
     isLoading, 
@@ -39,12 +40,23 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
     walletAddress, 
     hasAddedFrame,
     hasNotifications,
-    frameContext 
+    frameContext
   } = useAirdropEligibility();
+  
   const { claimAirdrop } = useClaimAirdrop();
   
   // Check if current user is the test user
   const isTestUser = frameContext?.user?.username === TEST_USERNAME;
+  
+  // Reset eligibility check when hasAddedFrame or hasNotifications changes
+  // This ensures we re-check when eligibility changes due to polling
+  useEffect(() => {
+    console.log('Frame status changed: hasAddedFrame or hasNotifications updated');
+    if (hasAddedFrame && hasNotifications && !hasClaimed) {
+      console.log('Resetting eligibility check due to frame status update');
+      setHasCheckedEligibility(false);
+    }
+  }, [hasAddedFrame, hasNotifications, hasClaimed]);
   
   // Reset eligibility check when isEligible changes
   // This ensures we re-check when eligibility is finally determined
@@ -126,7 +138,7 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
         isEligible,
         isLoading,
         hasClaimed,
-        isTestUser,
+        isTestUser
       }}
     >
       {children}

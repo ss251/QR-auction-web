@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { frameSdk } from '@/lib/frame-sdk';
 import type { Context } from '@farcaster/frame-sdk';
@@ -7,9 +7,6 @@ import type { Context } from '@farcaster/frame-sdk';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
-// For testing purposes
-const TEST_USERNAME = "thescoho.eth";
 
 export function useAirdropEligibility() {
   const [isEligible, setIsEligible] = useState<boolean | null>(null);
@@ -30,19 +27,18 @@ export function useAirdropEligibility() {
     console.log("hasNotifications:", !!frameContext?.client?.notificationDetails);
   }, [isEligible, isLoading, hasClaimed, walletAddress, frameContext]);
   
-  // Get frame context and wallet
-  useEffect(() => {
-    const getFrameContext = async () => {
-      try {
-        // Get frame context
-        const context = await frameSdk.getContext();
-        console.log("FRAME CONTEXT OBTAINED:", context);
-        console.log("Username:", context.user?.username);
-        console.log("Frame added:", context.client?.added);
-        console.log("Notifications:", !!context.client?.notificationDetails);
-        setFrameContext(context);
-        
-        // Check if wallet is connected (no need to connect - FarcasterLogin does this)
+  // Function to refresh frame context (can be called repeatedly to check for changes)
+  const checkFrameContext = useCallback(async () => {
+    try {
+      // Request latest frame context
+      const context = await frameSdk.getContext();
+      console.log("Frame context updated:", context);
+      
+      // Update context state
+      setFrameContext(context);
+      
+      // If we don't have a wallet address yet, try to get it
+      if (!walletAddress) {
         const isWalletConnected = await frameSdk.isWalletConnected();
         if (isWalletConnected) {
           const accounts = await frameSdk.connectWallet();
@@ -50,13 +46,34 @@ export function useAirdropEligibility() {
             setWalletAddress(accounts[0]);
           }
         }
-      } catch (error) {
-        console.error('Error getting frame context:', error);
       }
+      
+      // Return the context for convenience
+      return context;
+    } catch (error) {
+      console.error('Error fetching frame context:', error);
+      return null;
+    }
+  }, [walletAddress]);
+  
+  // Get initial frame context and wallet
+  useEffect(() => {
+    const initializeFrameContext = async () => {
+      await checkFrameContext();
     };
     
-    getFrameContext();
-  }, []);
+    initializeFrameContext();
+    
+    // Set up an interval to check for updates - checking more frequently
+    const intervalId = setInterval(() => {
+      checkFrameContext();
+    }, 3000); // Check every 3 seconds for faster response
+    
+    // Clean up interval on unmount
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [checkFrameContext]);
 
   // Check eligibility based on frame context
   useEffect(() => {
@@ -80,8 +97,7 @@ export function useAirdropEligibility() {
         fid,
         username,
         isFrameAdded,
-        hasNotifications,
-        isTestUser: username === TEST_USERNAME
+        hasNotifications
       });
       
       if (!fid) {
@@ -111,17 +127,6 @@ export function useAirdropEligibility() {
           return;
         }
         
-        // For test user, check if they've claimed (in memory only)
-        if (username === TEST_USERNAME) {
-          console.log(`Test username ${TEST_USERNAME} detected - checking eligibility`);
-          
-          // Test users are eligible if they've added the frame and enabled notifications
-          // We've already checked these conditions above
-          setIsEligible(true);
-          setIsLoading(false);
-          return;
-        }
-        
         // Check if the frame has been added to the user's client
         if (!isFrameAdded) {
           console.log('User has not added the frame yet');
@@ -139,7 +144,7 @@ export function useAirdropEligibility() {
         }
           
         // User is eligible (frame added and notifications enabled already checked above)
-        console.log("User is eligible - regular path");
+        console.log("User is eligible");
         setIsEligible(true);
         setIsLoading(false);
       } catch (error) {
@@ -155,15 +160,6 @@ export function useAirdropEligibility() {
   // Function to record claim in database
   const recordClaim = async (txHash?: string): Promise<boolean> => {
     if (!frameContext?.user?.fid || !walletAddress) return false;
-    
-    // Skip database recording for test user
-    if (frameContext.user.username === TEST_USERNAME) {
-      console.log(`Test claim for ${TEST_USERNAME} - skipping database record`);
-      // Update local state still
-      setHasClaimed(true);
-      setIsEligible(false);
-      return true;
-    }
     
     try {
       const { error } = await supabase
@@ -196,6 +192,7 @@ export function useAirdropEligibility() {
     frameContext,
     walletAddress,
     hasAddedFrame: frameContext?.client?.added || false,
-    hasNotifications: !!frameContext?.client?.notificationDetails
+    hasNotifications: !!frameContext?.client?.notificationDetails,
+    checkFrameContext // Expose this so it can be called to refresh status
   };
 } 

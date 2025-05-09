@@ -91,25 +91,26 @@ export function useAirdropEligibility() {
         return;
       }
       
-      // Check if the frame has been added to the user's client
-      if (!isFrameAdded) {
-        console.log('User has not added the frame yet');
-        setIsEligible(false);
-        setIsLoading(false);
-        return;
-      }
-      
-      // Check if notifications are enabled
-      if (!hasNotifications) {
-        console.log('User has not enabled notifications');
-        setIsEligible(false);
-        setIsLoading(false);
-        return;
-      }
-
       setIsLoading(true);
       
       try {
+        // First check if user has already claimed - do this check first
+        console.log("Checking database for previous claims");
+        const { data: claimData } = await supabase
+          .from('airdrop_claims')
+          .select('*')
+          .eq('fid', fid)
+          .single();
+          
+        if (claimData) {
+          // User has already claimed
+          console.log("User has already claimed - not eligible");
+          setHasClaimed(true);
+          setIsEligible(false);
+          setIsLoading(false);
+          return;
+        }
+        
         // For test user, check if they've claimed (in memory only)
         if (username === TEST_USERNAME) {
           console.log(`Test username ${TEST_USERNAME} detected - checking eligibility`);
@@ -121,18 +122,17 @@ export function useAirdropEligibility() {
           return;
         }
         
-        // For regular users, check the database for previous claims
-        console.log("Checking database for previous claims");
-        const { data: claimData } = await supabase
-          .from('airdrop_claims')
-          .select('*')
-          .eq('fid', fid)
-          .single();
-          
-        if (claimData) {
-          // User has already claimed
-          console.log("User has already claimed");
-          setHasClaimed(true);
+        // Check if the frame has been added to the user's client
+        if (!isFrameAdded) {
+          console.log('User has not added the frame yet');
+          setIsEligible(false);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Check if notifications are enabled
+        if (!hasNotifications) {
+          console.log('User has not enabled notifications');
           setIsEligible(false);
           setIsLoading(false);
           return;

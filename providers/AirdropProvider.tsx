@@ -89,7 +89,7 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
       isTestUser
     });
     
-    // Show popup if user is eligible, hasn't claimed, has frame and notifications
+    // Only show popup if user is eligible, hasn't claimed already, has frame and notifications
     if (isEligible === true && !hasClaimed && hasAddedFrame && hasNotifications) {
       console.log('SHOWING POPUP - User is eligible for airdrop with all conditions met');
       
@@ -110,7 +110,7 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
   // Handle claim action
   const handleClaim = async () => {
     // Wallet should already be connected by FarcasterLogin component
-    await claimAirdrop();
+    return await claimAirdrop();
   };
   
   // Close popup
@@ -136,7 +136,6 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
         onClose={handleClose}
         onClaim={handleClaim}
         isEligible={isEligible === true && !hasClaimed && hasAddedFrame && hasNotifications}
-        isTestUser={isTestUser}
       />
     </AirdropContext.Provider>
   );

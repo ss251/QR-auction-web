@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "functions": {
+    "app/api/airdrop/worker/route.ts": {
+      "maxDuration": 60
+    }
+  }
+} 

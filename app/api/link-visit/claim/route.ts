@@ -10,8 +10,8 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Contract details
 const QR_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN || '';
-const AIRDROP_CONTRACT_ADDRESS = process.env.AIRDROP_CONTRACT_ADDRESS || '';
-const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY || '';
+const AIRDROP_CONTRACT_ADDRESS = process.env.AIRDROP_CONTRACT_ADDRESS2 || '';
+const ADMIN_PRIVATE_KEY = process.env.ADMIN_PRIVATE_KEY2 || '';
 
 // Alchemy RPC URL for Base
 const ALCHEMY_RPC_URL = 'https://base-mainnet.g.alchemy.com/v2/';

@@ -353,7 +353,8 @@ export default function AuctionPage() {
         64: "https://i.postimg.cc/KzBYyrMy/63winner.jpg",
         65: "https://i.postimg.cc/kMyLJhFj/64winner.jpg",
         66: "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
-        68: "https://i.postimg.cc/3Jmz8MzD/67winner.jpg"
+        68: "https://i.postimg.cc/3Jmz8MzD/67winner.jpg",
+        70: "https://i.postimg.cc/YjKJy1Ry/69winner.png"
     }),
     []
   );

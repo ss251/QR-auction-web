@@ -219,9 +219,18 @@ export function LinkVisitClaimPopup({
   
   // Handle share to Warpcast
   const handleShare = async () => {
-    const shareText = encodeURIComponent(`I just earned 5,000 $QR tokens for checking out today's QR winner! Check out this daily auction: ${winningUrl}`);
+    const shareText = encodeURIComponent(`I just got paid 5,000 $QR to discover something new`);
     const embedUrl = encodeURIComponent(`https://qrcoin.fun/auction/${auctionId}`);
-    const shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
+    
+    // Add the main auction URL embed
+    let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
+    
+    // Add a quote cast as an additional embed (hardcoded example for now)
+    // Can replace this with an actual quote cast URL when needed
+    const quoteCastUrl = ""; // Empty for now, add a real URL when needed
+    if (quoteCastUrl) {
+      shareUrl += `&embeds[]=${encodeURIComponent(quoteCastUrl)}`;
+    }
     
     if (isFrameRef.current) {
       try {

@@ -143,7 +143,7 @@ export function AirdropClaimPopup({ isOpen, onClose, onClaim, isEligible }: Aird
     setClaimState('success');
     
     // Show success toast with black styling
-    toast.success('10,000 $QR has been sent to your wallet.', {
+    toast.success('2,000 $QR has been sent to your wallet.', {
       style: {
         background: 'var(--primary)',
         color: 'var(--primary-foreground)',
@@ -169,7 +169,7 @@ export function AirdropClaimPopup({ isOpen, onClose, onClaim, isEligible }: Aird
   const handleShare = async () => {
     // Create Warpcast URL with the share text and embed the website URL
     const shareText = encodeURIComponent("free money $QR");
-    const embedUrl = encodeURIComponent("https://warpcast.com/jake/0x942606e2");
+    const embedUrl = encodeURIComponent("https://warpcast.com/qrcoindotfun/0xcc76438e");
     const shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
     
     if (isFrameRef.current) {
@@ -217,7 +217,7 @@ export function AirdropClaimPopup({ isOpen, onClose, onClaim, isEligible }: Aird
               ? 'You have already claimed' 
               : claimState === 'success' 
                 ? 'Claim Successful!' 
-                : 'Claim 10,000 $QR'}
+                : 'Claim 2,000 $QR'}
           </motion.h2>
 
           <motion.p
@@ -229,7 +229,7 @@ export function AirdropClaimPopup({ isOpen, onClose, onClaim, isEligible }: Aird
             {!isEligible 
               ? 'Thank you for your support!' 
               : claimState === 'success' 
-                ? '10,000 $QR sent to your wallet.' 
+                ? '2,000 $QR sent to your wallet.' 
                 : 'Thank you for adding our mini app!'}
           </motion.p>
 

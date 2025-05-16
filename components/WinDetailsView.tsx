@@ -171,7 +171,9 @@ export function WinDetailsView(winnerdata: AuctionType) {
           "64": "https://i.postimg.cc/kMyLJhFj/64winner.jpg",
           "65": "https://i.postimg.cc/wTDHNwnp/43winner.jpg",
           "67": "https://i.postimg.cc/3Jmz8MzD/67winner.jpg",
-          "69": "https://i.postimg.cc/YjKJy1Ry/69winner.png"
+          "69": "https://i.postimg.cc/02dgY6j9/69winner.jpg",
+          "70": "https://i.postimg.cc/0Nh72ypw/70winner.jpg",
+          "71": "https://i.postimg.cc/KYY81XWF/71winner.jpg"
         };
 
         // Check if we have a custom image override for this auction
@@ -319,12 +321,12 @@ export function WinDetailsView(winnerdata: AuctionType) {
               </button>
             </div>
           </div>
-          <div className={`${isBaseColors ? "bg-background" : "bg-white"} flex flex-col rounded-md justify-center items-center h-full mt-1 w-full overflow-hidden aspect-[2/1]`}>
+          <div className={`${isBaseColors ? "bg-background" : "bg-white"} flex rounded-md h-full mt-1 w-full overflow-hidden aspect-[2/1]`}>
             {ogImage && (
               <img
                 src={ogImage}
                 alt="Open Graph"
-                className="h-auto w-full cursor-pointer"
+                className="h-full w-full object-cover cursor-pointer" 
                 onClick={() => handleOpenUrl(winnerdata.url)}
               />
             )}

@@ -53,8 +53,61 @@ const ERC20_ABI = [
   }
 ];
 
+// Define request data interface
+interface LinkVisitRequestData {
+  fid: number;
+  address: string;
+  auction_id: string;
+  username?: string;
+  winning_url?: string;
+  [key: string]: unknown; // Allow other properties
+}
+
 // Simple delay function
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Function to log errors to the database
+async function logFailedTransaction(params: {
+  fid: number | string;
+  eth_address: string;
+  auction_id: string;
+  username?: string | null;
+  winning_url?: string | null;
+  error_message: string;
+  error_code?: string;
+  tx_hash?: string;
+  request_data?: Record<string, unknown>;
+  gas_price?: string;
+  gas_limit?: number;
+  network_status?: string;
+  retry_count?: number;
+}) {
+  try {
+    const { error } = await supabase
+      .from('link_visit_claim_failures')
+      .insert({
+        fid: params.fid,
+        eth_address: params.eth_address,
+        auction_id: params.auction_id,
+        username: params.username || null,
+        winning_url: params.winning_url || null,
+        error_message: params.error_message,
+        error_code: params.error_code || null,
+        tx_hash: params.tx_hash || null,
+        request_data: params.request_data ? JSON.stringify(params.request_data) : null,
+        gas_price: params.gas_price || null,
+        gas_limit: params.gas_limit || null,
+        network_status: params.network_status || null,
+        retry_count: params.retry_count || 0
+      });
+
+    if (error) {
+      console.error('Failed to log error to database:', error);
+    }
+  } catch (logError) {
+    console.error('Error while logging to failure table:', logError);
+  }
+}
 
 // Function to retry transactions with exponential backoff
 async function executeWithRetry<T>(
@@ -100,12 +153,28 @@ async function executeWithRetry<T>(
 }
 
 export async function POST(request: NextRequest) {
+  let requestData: Partial<LinkVisitRequestData> = {};
+  
   try {
     // Parse request body
-    const { fid, address, auction_id, username, winning_url } = await request.json();
+    requestData = await request.json() as LinkVisitRequestData;
+    const { fid, address, auction_id, username, winning_url } = requestData;
     
     if (!fid || !address || !auction_id) {
-      return NextResponse.json({ success: false, error: 'Missing required parameters' }, { status: 400 });
+      const errorMessage = 'Missing required parameters';
+      
+      // Log validation error
+      await logFailedTransaction({
+        fid: fid || 0,
+        eth_address: address || 'unknown',
+        auction_id: auction_id || 'unknown',
+        username,
+        error_message: errorMessage,
+        error_code: 'VALIDATION_ERROR',
+        request_data: requestData as Record<string, unknown>
+      });
+      
+      return NextResponse.json({ success: false, error: errorMessage }, { status: 400 });
     }
     
     // Default winning URL if not provided
@@ -123,6 +192,19 @@ export async function POST(request: NextRequest) {
     
     if (selectError) {
       console.error('Error checking claim status:', selectError);
+      
+      // Log database error
+      await logFailedTransaction({
+        fid,
+        eth_address: address,
+        auction_id,
+        username,
+        error_message: 'Database error when checking claim status',
+        error_code: selectError.code || 'DB_SELECT_ERROR',
+        request_data: requestData as Record<string, unknown>,
+        network_status: 'db_error'
+      });
+      
       return NextResponse.json({
         success: false,
         error: 'Database error when checking claim status'
@@ -134,6 +216,20 @@ export async function POST(request: NextRequest) {
       if (claimData[0].tx_hash) {
         // There's a valid claim with a tx hash - already claimed successfully
         console.log(`User ${fid} has already claimed tokens for auction ${auction_id} at tx ${claimData[0].tx_hash}`);
+        
+        // Log duplicate claim attempt
+        await logFailedTransaction({
+          fid,
+          eth_address: address,
+          auction_id,
+          username,
+          winning_url: winningUrl,
+          error_message: 'User has already claimed tokens for this auction',
+          error_code: 'DUPLICATE_CLAIM',
+          tx_hash: claimData[0].tx_hash,
+          request_data: requestData as Record<string, unknown>
+        });
+        
         return NextResponse.json({ 
           success: false, 
           error: 'User has already claimed tokens for this auction',
@@ -162,10 +258,26 @@ export async function POST(request: NextRequest) {
     console.log(`Admin wallet balance: ${ethers.formatEther(balance)} ETH`);
     
     if (balance < ethers.parseEther("0.001")) {
+      const errorMessage = 'Admin wallet has insufficient ETH for gas. Please contact support.';
       console.error("Admin wallet has insufficient ETH for gas");
+      
+      // Log insufficient funds error
+      await logFailedTransaction({
+        fid,
+        eth_address: address,
+        auction_id,
+        username,
+        winning_url: winningUrl,
+        error_message: errorMessage,
+        error_code: 'INSUFFICIENT_GAS',
+        request_data: requestData as Record<string, unknown>,
+        gas_price: ethers.formatEther(balance),
+        network_status: 'low_funds'
+      });
+      
       return NextResponse.json({ 
         success: false, 
-        error: 'Admin wallet has insufficient ETH for gas. Please contact support.' 
+        error: errorMessage
       }, { status: 500 });
     }
     
@@ -194,10 +306,25 @@ export async function POST(request: NextRequest) {
       console.log(`Admin QR token balance: ${ethers.formatUnits(tokenBalance, 18)}`);
       
       if (tokenBalance < airdropAmount) {
+        const errorMessage = 'Admin wallet has insufficient QR tokens for airdrop. Please contact support.';
         console.error("Admin wallet has insufficient QR tokens for airdrop");
+        
+        // Log insufficient token error
+        await logFailedTransaction({
+          fid,
+          eth_address: address,
+          auction_id,
+          username,
+          winning_url: winningUrl,
+          error_message: errorMessage,
+          error_code: 'INSUFFICIENT_TOKENS',
+          request_data: requestData as Record<string, unknown>,
+          network_status: 'low_tokens'
+        });
+        
         return NextResponse.json({ 
           success: false, 
-          error: 'Admin wallet has insufficient QR tokens for airdrop. Please contact support.' 
+          error: errorMessage
         }, { status: 500 });
       }
       
@@ -207,20 +334,69 @@ export async function POST(request: NextRequest) {
       if (allowance < airdropAmount) {
         console.log('Approving tokens for transfer...');
         
-        // Approve the airdrop contract to spend the tokens
-        const approveTx = await qrTokenContract.approve(
-          AIRDROP_CONTRACT_ADDRESS,
-          airdropAmount
-        );
-        
-        console.log(`Approval tx submitted: ${approveTx.hash}`);
-        await approveTx.wait();
-        console.log('Approval confirmed');
+        try {
+          // Approve the airdrop contract to spend the tokens
+          const approveTx = await qrTokenContract.approve(
+            AIRDROP_CONTRACT_ADDRESS,
+            airdropAmount
+          );
+          
+          console.log(`Approval tx submitted: ${approveTx.hash}`);
+          await approveTx.wait();
+          console.log('Approval confirmed');
+        } catch (approveError: unknown) {
+          console.error('Error approving tokens:', approveError);
+          
+          const errorMessage = approveError instanceof Error 
+            ? approveError.message 
+            : 'Unknown approval error';
+            
+          const txHash = (approveError as { hash?: string }).hash;
+          
+          // Log token approval error
+          await logFailedTransaction({
+            fid,
+            eth_address: address,
+            auction_id,
+            username,
+            winning_url: winningUrl,
+            error_message: `Token approval failed: ${errorMessage}`,
+            error_code: 'APPROVAL_FAILED',
+            request_data: requestData as Record<string, unknown>,
+            tx_hash: txHash,
+            network_status: 'approval_failed'
+          });
+          
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Failed to approve tokens for transfer. Please try again later.' 
+          }, { status: 500 });
+        }
       } else {
         console.log('Sufficient allowance already exists, skipping approval');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error checking token balance or approving tokens:', error);
+      
+      const errorMessage = error instanceof Error 
+        ? error.message 
+        : 'Unknown error checking token balance';
+      
+      const errorCode = (error as { code?: string }).code;
+      
+      // Log token check error
+      await logFailedTransaction({
+        fid,
+        eth_address: address,
+        auction_id,
+        username,
+        winning_url: winningUrl,
+        error_message: `Failed to check token balance: ${errorMessage}`,
+        error_code: errorCode || 'TOKEN_CHECK_FAILED',
+        request_data: requestData as Record<string, unknown>,
+        network_status: errorCode || 'unknown'
+      });
+      
       return NextResponse.json({ 
         success: false, 
         error: 'Failed to check token balance or approve tokens. Please try again later.' 
@@ -248,22 +424,63 @@ export async function POST(request: NextRequest) {
           feeData.gasPrice ? feeData.gasPrice * BigInt(130 + attempt * 20) / BigInt(100) : undefined
         );
         
-        // Execute the airdrop with explicit nonce and higher gas limit
-        const tx = await airdropContract.airdropERC20(
-          QR_TOKEN_ADDRESS,
-          airdropContent,
-          {
-            nonce,
-            gasLimit: 5000000, // Higher gas limit for safety
-            gasPrice // Increasing gas price with each retry
+        const gasLimit = 5000000; // Higher gas limit for safety
+        
+        try {
+          // Execute the airdrop with explicit nonce and higher gas limit
+          const tx = await airdropContract.airdropERC20(
+            QR_TOKEN_ADDRESS,
+            airdropContent,
+            {
+              nonce,
+              gasLimit,
+              gasPrice // Increasing gas price with each retry
+            }
+          );
+          
+          console.log(`Airdrop tx submitted: ${tx.hash}`);
+          const receipt = await tx.wait();
+          console.log(`Airdrop confirmed in block ${receipt.blockNumber}`);
+          
+          return receipt;
+        } catch (txError: unknown) {
+          // Log transaction error details for each attempt
+          console.error(`Transaction attempt ${attempt} failed:`, txError);
+          
+          const txErrorMessage = txError instanceof Error 
+            ? txError.message 
+            : 'Unknown transaction error';
+          
+          const errorCode = (txError as { code?: string }).code;
+          const txHash = (txError as { hash?: string }).hash;
+          
+          // Only log to database if this is the final attempt or a non-retryable error
+          const isRetryable = txErrorMessage.includes('replacement fee too low') ||
+                            txErrorMessage.includes('nonce has already been used') ||
+                            txErrorMessage.includes('transaction underpriced') ||
+                            txErrorMessage.includes('timeout') ||
+                            txErrorMessage.includes('network error');
+          
+          if (!isRetryable || attempt >= 3) {
+            await logFailedTransaction({
+              fid,
+              eth_address: address,
+              auction_id,
+              username,
+              winning_url: winningUrl,
+              error_message: `Transaction failed: ${txErrorMessage}`,
+              error_code: errorCode || 'TX_ERROR',
+              tx_hash: txHash,
+              request_data: requestData as Record<string, unknown>,
+              gas_price: gasPrice?.toString(),
+              gas_limit: gasLimit,
+              network_status: 'tx_failed',
+              retry_count: attempt
+            });
           }
-        );
-        
-        console.log(`Airdrop tx submitted: ${tx.hash}`);
-        const receipt = await tx.wait();
-        console.log(`Airdrop confirmed in block ${receipt.blockNumber}`);
-        
-        return receipt;
+          
+          throw txError; // Re-throw for retry mechanism
+        }
       });
       
       // Insert a new record, don't upsert over existing record
@@ -303,6 +520,21 @@ export async function POST(request: NextRequest) {
           
         if (updateError) {
           console.error('Error updating claim record:', updateError);
+          
+          // Log database insert/update error, but the airdrop was successful
+          await logFailedTransaction({
+            fid,
+            eth_address: address,
+            auction_id,
+            username,
+            winning_url: winningUrl,
+            error_message: `Failed to record successful claim: ${updateError.message}`,
+            error_code: updateError.code || 'DB_INSERT_ERROR',
+            tx_hash: receipt.hash,
+            request_data: requestData as Record<string, unknown>,
+            network_status: 'tx_success_db_fail'
+          });
+          
           return NextResponse.json({ 
             success: true, 
             warning: 'Airdrop successful but failed to update claim record',
@@ -321,13 +553,36 @@ export async function POST(request: NextRequest) {
       
       // Try to provide more specific error messages for common issues
       let errorMessage = 'Failed to process token claim';
+      let errorCode = 'UNKNOWN_ERROR';
+      
       if (error instanceof Error) {
+        errorMessage = error.message;
+        
         if (error.message.includes('insufficient funds')) {
           errorMessage = 'Insufficient funds in admin wallet for gas';
+          errorCode = 'INSUFFICIENT_FUNDS';
         } else if (error.message.includes('execution reverted')) {
           errorMessage = 'Contract execution reverted: ' + error.message.split('execution reverted:')[1]?.trim() || 'unknown reason';
+          errorCode = 'CONTRACT_REVERT';
+        } else if (error.message.includes('timeout')) {
+          errorCode = 'TIMEOUT';
+        } else if (error.message.includes('rate limit')) {
+          errorCode = 'RATE_LIMIT';
         }
       }
+      
+      // Log the final error after all retries
+      await logFailedTransaction({
+        fid,
+        eth_address: address,
+        auction_id,
+        username,
+        winning_url: winningUrl,
+        error_message: errorMessage,
+        error_code: errorCode,
+        request_data: requestData as Record<string, unknown>,
+        network_status: 'failed'
+      });
       
       return NextResponse.json({ 
         success: false, 
@@ -335,16 +590,50 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
   } catch (error: unknown) {
-    console.error('Token claim error:', error);
+    console.error('Token claim unexpected error:', error);
     
     // Try to provide more specific error messages for common issues
     let errorMessage = 'Failed to process token claim';
+    let errorCode = 'UNEXPECTED_ERROR';
+    
     if (error instanceof Error) {
+      errorMessage = error.message;
+      
       if (error.message.includes('insufficient funds')) {
         errorMessage = 'Insufficient funds in admin wallet for gas';
+        errorCode = 'INSUFFICIENT_FUNDS';
       } else if (error.message.includes('execution reverted')) {
         errorMessage = 'Contract execution reverted: ' + error.message.split('execution reverted:')[1]?.trim() || 'unknown reason';
+        errorCode = 'CONTRACT_REVERT';
+      } else if (error.message.includes('timeout')) {
+        errorCode = 'TIMEOUT';
+      } else if (error.message.includes('rate limit')) {
+        errorCode = 'RATE_LIMIT';
       }
+    }
+    
+    // Extract whatever information we can from the request
+    const fid = typeof requestData.fid === 'number' ? requestData.fid : 0;
+    const address = typeof requestData.address === 'string' ? requestData.address : 'unknown';
+    const auction_id = typeof requestData.auction_id === 'string' ? requestData.auction_id : 'unknown';
+    const username = requestData.username;
+    const winning_url = requestData.winning_url;
+    
+    // Attempt to log error even in case of unexpected errors
+    try {
+      await logFailedTransaction({
+        fid,
+        eth_address: address,
+        auction_id,
+        username: username || null,
+        winning_url: winning_url || null,
+        error_message: errorMessage,
+        error_code: errorCode,
+        request_data: requestData as Record<string, unknown>,
+        network_status: 'unexpected_error'
+      });
+    } catch (logError) {
+      console.error('Failed to log unexpected error:', logError);
     }
     
     return NextResponse.json({ 

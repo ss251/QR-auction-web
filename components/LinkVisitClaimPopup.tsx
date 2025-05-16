@@ -219,7 +219,7 @@ export function LinkVisitClaimPopup({
   
   // Handle share to Warpcast
   const handleShare = async () => {
-    const shareText = encodeURIComponent(`I just got paid 5,000 $QR to discover something new`);
+    const shareText = encodeURIComponent(`I just got paid 5,000 $QR to check out today's winner @qrcoindotfun`);
     const embedUrl = encodeURIComponent(`https://qrcoin.fun/auction/${auctionId}`);
     
     // Add the main auction URL embed
@@ -235,6 +235,8 @@ export function LinkVisitClaimPopup({
     if (isFrameRef.current) {
       try {
         await frameSdk.redirectToUrl(shareUrl);
+        // close the popup
+        onClose();
       } catch (error) {
         console.error("Error opening Warpcast in frame:", error);
       }

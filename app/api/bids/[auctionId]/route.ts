@@ -1,6 +1,5 @@
 import { createPublicClient, http } from 'viem'
 import { base } from 'viem/chains'
-import QRAuctionV3 from '@/abi/QRAuctionV3.json'
 import { NextResponse } from 'next/server'
 
 // TODO: add caching (either on vercel with `use cache` or with upstash redis)

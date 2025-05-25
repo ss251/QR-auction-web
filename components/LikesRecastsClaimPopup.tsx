@@ -3,7 +3,7 @@ import { Dialog, DialogPortal } from './ui/dialog';
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Button } from './ui/button';
 import { motion } from 'framer-motion';
-import { Check, X as XIcon, ExternalLink } from 'lucide-react';
+import { Check, X as XIcon } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import { frameSdk } from '@/lib/frame-sdk';
 import { toast } from "sonner";
@@ -116,11 +116,10 @@ function QRCodeDisplay({ value, testMode = false }: { value: string; testMode?: 
           onClick={() => testMode ? console.log('Test mode: would open', value) : window.open(value, '_blank', "noopener,noreferrer")}
           className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-2 rounded-md flex items-center gap-2"
         >
-          <ExternalLink className="h-4 w-4" />
-          {testMode ? 'Test Approval' : 'Approve Signer'}
+          {testMode ? 'Test Approval' : 'Proceed'}
         </Button>
         <p className="text-xs text-muted-foreground text-center max-w-sm">
-          Tap to approve on Warpcast
+          Tap to review & approve on Farcaster
         </p>
       </div>
     );
@@ -141,7 +140,7 @@ function QRCodeDisplay({ value, testMode = false }: { value: string; testMode?: 
         />
       </div>
       <p className="text-xs text-muted-foreground text-center max-w-sm">
-        Scan QR to approve on Warpcast
+        Scan QR to review & approve on Farcaster
       </p>
       {testMode && (
         <p className="text-xs text-amber-600 dark:text-amber-400 text-center">
@@ -1055,7 +1054,7 @@ export function LikesRecastsClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground text-center"
                 >
-                  Approve Signer
+                  Review Permissions
                 </motion.h2>
 
                 <motion.div

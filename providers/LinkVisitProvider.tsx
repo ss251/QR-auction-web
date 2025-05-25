@@ -5,6 +5,7 @@ import { LinkVisitClaimPopup } from '@/components/LinkVisitClaimPopup';
 import { useAirdrop } from './AirdropProvider';
 import { createClient } from "@supabase/supabase-js";
 import { getAuctionImage } from '@/utils/auctionImageOverrides';
+import { useLikesRecasts } from './LikesRecastsProvider';
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -66,6 +67,9 @@ export function LinkVisitProvider({
   
   // Get access to AirdropProvider context to show the airdrop popup later
   const { setShowAirdropPopup, isEligible, hasClaimed: hasAirdropClaimed } = useAirdrop();
+  
+  // Get access to LikesRecastsProvider context to show likes/recasts popup
+  const { setShowLikesRecastsPopup, isEligible: likesRecastsEligible, hasClaimedEither } = useLikesRecasts();
   
   // Use the latestWonAuctionId for eligibility checks, falling back to current auction
   const eligibilityAuctionId = latestWonAuctionId !== null ? latestWonAuctionId : auctionId;
@@ -311,19 +315,22 @@ export function LinkVisitProvider({
     return result;
   };
   
-  // Close popup and show the airdrop popup if eligible
+  // Close popup and show the appropriate next popup based on eligibility
   const handleClose = () => {
-    console.log('Closing link visit popup, checking if airdrop popup should show...');
+    console.log('Closing link visit popup, checking what popup should show next...');
     setShowClaimPopup(false);
     
-    // Show the airdrop popup after a short delay
+    // Show the appropriate popup after a short delay
     setTimeout(() => {
-      // Only show the airdrop popup if user is eligible and hasn't claimed yet
+      // Check airdrop eligibility first
       if (isEligible === true && !hasAirdropClaimed) {
         console.log('User is eligible for airdrop, triggering airdrop popup...');
         setShowAirdropPopup(true);
+      } else if (likesRecastsEligible === true && !hasClaimedEither) {
+        console.log('User not eligible for airdrop but eligible for likes/recasts, triggering likes/recasts popup...');
+        setShowLikesRecastsPopup(true);
       } else {
-        console.log('User is not eligible for airdrop or has already claimed, not showing airdrop popup');
+        console.log('User is not eligible for either airdrop or likes/recasts, not showing any popup');
       }
     }, 500);
   };

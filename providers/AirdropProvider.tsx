@@ -2,6 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useAirdropEligibility } from '@/hooks/useAirdropEligibility';
 import { useClaimAirdrop } from '@/hooks/useClaimAirdrop';
 import { AirdropClaimPopup } from '@/components/AirdropClaimPopup';
+import { useLikesRecasts } from './LikesRecastsProvider';
 
 // For testing purposes
 const TEST_USERNAME = "thescoho.eth";
@@ -45,6 +46,9 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
   } = useAirdropEligibility();
   
   const { claimAirdrop } = useClaimAirdrop();
+  
+  // Get access to LikesRecasts context to trigger it when airdrop closes
+  const { setShowLikesRecastsPopup, isEligible: likesRecastsEligible, hasClaimedEither } = useLikesRecasts();
   
   // Check if current user is the test user
   const isTestUser = frameContext?.user?.username === TEST_USERNAME;
@@ -144,7 +148,18 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
   
   // Close popup
   const handleClose = () => {
+    console.log('Closing airdrop popup, checking if likes/recasts popup should show...');
     setShowAirdropPopup(false);
+    
+    // Show the likes/recasts popup after a short delay if user is eligible
+    setTimeout(() => {
+      if (likesRecastsEligible === true && !hasClaimedEither) {
+        console.log('User is eligible for likes/recasts, triggering likes/recasts popup...');
+        setShowLikesRecastsPopup(true);
+      } else {
+        console.log('User is not eligible for likes/recasts or has already claimed, not showing likes/recasts popup');
+      }
+    }, 500);
   };
   
   return (

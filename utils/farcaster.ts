@@ -38,7 +38,7 @@ export async function getFarcasterUser(address: string): Promise<FarcasterUser |
     const formattedAddress = normalizedAddress;
     
     // Fetch from Neynar API
-    const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY;
+    const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY2;
     if (!apiKey) {
       console.error("Missing Neynar API key");
       return null;
@@ -133,7 +133,7 @@ export async function getFarcasterUsersBulk(addresses: string[]): Promise<Map<st
     
     // Process each chunk with the API
     await Promise.all(addressChunks.map(async (chunk) => {
-      const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY;
+      const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY2;
       if (!apiKey) {
         console.error("Missing Neynar API key");
         return;
@@ -211,7 +211,7 @@ export async function getFarcasterProfilePicture(username: string): Promise<stri
   }
   
   try {
-    const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY;
+    const apiKey = process.env.NEXT_PUBLIC_NEYNAR_API_KEY2;
     if (!apiKey) {
       console.error("Missing Neynar API key");
       return null;

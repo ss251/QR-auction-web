@@ -25,7 +25,7 @@ const TEST_MODE_CONFIG = {
 };
 
 // Hardcoded test mode flag - change this to enable/disable test mode
-const ENABLE_TEST_MODE = true;
+const ENABLE_TEST_MODE = false;
 
 // Check if test mode should be enabled
 function getTestModeEnabled(): boolean {
@@ -871,7 +871,7 @@ export function LikesRecastsClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Support $QR, Earn $QR!
+                  Support QR to earn $QR!
                 </motion.h2>
 
                 <motion.p
@@ -880,7 +880,7 @@ export function LikesRecastsClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground text-sm px-2"
                 >
-                  Opt-in to automatically like/recast our daily winner announcements to help build the onchain attention machine @qrcoindotfun
+                  Opt-in to auto-like/recast our daily winner announcements & other important casts
                 </motion.p>
 
                 <motion.div
@@ -901,13 +901,13 @@ export function LikesRecastsClaimPopup({
                         onClick={() => setLikesEnabled(!likesEnabled)}
                         className={cn(
                           "relative inline-flex h-6 w-11 items-center rounded-full transition-colors mb-2",
-                          likesEnabled ? "bg-primary" : "bg-gray-300 dark:bg-gray-600"
+                          likesEnabled ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
                         )}
                       >
                         <span
                           className={cn(
                             "inline-block h-4 w-4 transform rounded-full transition-transform flex items-center justify-center",
-                            likesEnabled ? "translate-x-6 bg-primary-foreground" : "translate-x-1 bg-white dark:bg-gray-100"
+                            likesEnabled ? "translate-x-6 bg-white" : "translate-x-1 bg-white dark:bg-gray-100"
                           )}
                         >
                           {likesEnabled ? (
@@ -918,7 +918,7 @@ export function LikesRecastsClaimPopup({
                         </span>
                       </button>
                       <div className={cn(
-                        "text-xs font-semibold transition-all",
+                        "text-xs transition-all",
                         likesEnabled ? "text-primary" : "text-muted-foreground line-through"
                       )}>
                         +2,000 $QR
@@ -935,13 +935,13 @@ export function LikesRecastsClaimPopup({
                         onClick={() => setRecastsEnabled(!recastsEnabled)}
                         className={cn(
                           "relative inline-flex h-6 w-11 items-center rounded-full transition-colors mb-2",
-                          recastsEnabled ? "bg-primary" : "bg-gray-300 dark:bg-gray-600"
+                          recastsEnabled ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
                         )}
                       >
                         <span
                           className={cn(
                             "inline-block h-4 w-4 transform rounded-full transition-transform flex items-center justify-center",
-                            recastsEnabled ? "translate-x-6 bg-primary-foreground" : "translate-x-1 bg-white dark:bg-gray-100"
+                            recastsEnabled ? "translate-x-6 bg-white" : "translate-x-1 bg-white dark:bg-gray-100"
                           )}
                         >
                           {recastsEnabled ? (
@@ -952,7 +952,7 @@ export function LikesRecastsClaimPopup({
                         </span>
                       </button>
                       <div className={cn(
-                        "text-xs font-semibold transition-all",
+                        "text-xs transition-all",
                         recastsEnabled ? "text-primary" : "text-muted-foreground line-through"
                       )}>
                         +8,000 $QR

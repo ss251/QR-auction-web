@@ -113,7 +113,7 @@ function QRCodeDisplay({ value, testMode = false }: { value: string; testMode?: 
     return (
       <div className="flex flex-col items-center space-y-4">
         <Button 
-          onClick={() => testMode ? console.log('Test mode: would open', value) : window.open(value, '_blank', "noopener,noreferrer")}
+          onClick={() => testMode ? console.log('Test mode: would open', value) : frameSdk.redirectToUrl(value)}
           className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-2 rounded-md flex items-center gap-2"
         >
           {testMode ? 'Test Approval' : 'Proceed'}
@@ -686,19 +686,20 @@ export function LikesRecastsClaimPopup({
   
   // Handle share to Warpcast
   const handleShare = async () => {
-    const getShareText = () => {
-      const permissions = getSelectedPermissions();
-      if (permissions.length === 1) {
-        return permissions[0] === 'like' ? 'likes' : 'recasts';
-      } else if (permissions.length === 2) {
-        return 'likes/recasts';
-      }
-      return 'engagement';
-    };
+    // const getShareText = () => {
+    //   const permissions = getSelectedPermissions();
+    //   if (permissions.length === 1) {
+    //     return permissions[0] === 'like' ? 'likes' : 'recasts';
+    //   } else if (permissions.length === 2) {
+    //     return 'likes/recasts';
+    //   }
+    //   return 'engagement';
+    // };
     
-    const shareText = encodeURIComponent(`i just got paid ${claimAmount.toLocaleString()} $QR for opting in for ${getShareText()}`);
-    const embedUrl = encodeURIComponent("https://farcaster.xyz/qrcoindotfun/0x35571ec7"); // Update with actual cast URL
-    const shareUrl = `https://farcaster.xyz/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
+    const shareText = encodeURIComponent(`i just got paid ${claimAmount.toLocaleString()} $QR for pledging my support for @qrcoindotfun!`);
+    const embedUrl = encodeURIComponent("https://qrcoin.fun/"); // Update with actual cast URL
+    const quoteUrl = "";
+    const shareUrl = `https://farcaster.xyz/~/compose?text=${shareText}&embeds[]=${embedUrl}&embeds[]=${quoteUrl}`;
     
     if (testMode) {
       toast.success('🧪 Test Mode: Would share to Warpcast');
@@ -1089,18 +1090,17 @@ export function LikesRecastsClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Signer Approved!
+                  Approved!
                 </motion.h2>
 
-                {/* Invisible spacer to maintain popup height */}
-                <motion.div
+                <motion.p
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.3 }}
-                  className="text-muted-foreground text-sm"
+                  className="text-muted-foreground text-sm mb-5"
                 >
-                  <div className="h-5"></div>
-                </motion.div>
+                  Thank you for supporting @qrcoindotfun
+                </motion.p>
 
                 <motion.div
                   initial={{ y: 10, opacity: 0 }}
@@ -1126,7 +1126,7 @@ export function LikesRecastsClaimPopup({
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ type: "spring", duration: 0.5 }}
-                className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
+                className="w-28 h-28 rounded-full flex items-center justify-center bg-green-500/20 mt-6"
               >
                 <Check className="h-16 w-16 text-green-500" />
               </motion.div>
@@ -1145,9 +1145,9 @@ export function LikesRecastsClaimPopup({
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.3 }}
-                  className="text-muted-foreground text-sm"
+                  className="text-muted-foreground text-sm mb-4"
                 >
-                  {claimAmount.toLocaleString()} $QR sent to your wallet.
+                  {claimAmount.toLocaleString()} $QR has been sent to your wallet.
                 </motion.p>
 
                 <motion.div

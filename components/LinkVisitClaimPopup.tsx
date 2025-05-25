@@ -9,7 +9,7 @@ import confetti from 'canvas-confetti';
 import { frameSdk } from '@/lib/frame-sdk';
 import { toast } from "sonner";
 import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
-import { isVideoUrl } from '@/utils/auctionImageOverrides';
+import { useAuctionImage } from '@/hooks/useAuctionImage';
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -78,13 +78,16 @@ export function LinkVisitClaimPopup({
   // Use the claim hook for link click handling
   const { isClaimLoading } = useLinkVisitClaim(auctionId);
   
+  // Use the auction image hook to check if it's a video
+  const { data: auctionImageData } = useAuctionImage(auctionId);
+  
   // Three states: visit (initial), claim (after visiting), success (after claiming)
   const [claimState, setClaimState] = useState<'visit' | 'claim' | 'success'>('visit');
   const isFrameRef = useRef(false);
   const isClaimingRef = useRef(false); // Additional ref to prevent double claims
   
-  // Check if the winning image is a video
-  const isVideo = winningImage ? isVideoUrl(winningImage) : false;
+  // Check if the winning image is a video - use auction data if available, otherwise assume false
+  const isVideo = auctionImageData?.isVideo || false;
   
   // Reset state when dialog opens based on hasClicked
   useEffect(() => {
@@ -243,7 +246,7 @@ export function LinkVisitClaimPopup({
     
     // Add a quote cast as an additional embed (hardcoded example for now)
     // Can replace this with an actual quote cast URL when needed
-    const quoteCastUrl = ""; // Empty for now, add a real URL when needed
+    const quoteCastUrl = "https://farcaster.xyz/qrcoindotfun/0x8e34870b"; // Empty for now, add a real URL when needed
     if (quoteCastUrl) {
       shareUrl += `&embeds[]=${encodeURIComponent(quoteCastUrl)}`;
     }

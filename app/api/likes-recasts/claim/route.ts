@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSignedKey } from '@/utils/getSignedKey';
 import { getNeynarClient } from '@/lib/neynar';
 import { queueFailedClaim } from '@/lib/queue/failedClaims';
+import { validateMiniAppUser } from '@/utils/miniapp-validation';
 
 // Setup Supabase clients
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -54,8 +55,19 @@ async function logFailedTransaction(params: {
       return;
     }
     
-    // Queue for retry if eligible (skip duplicates and non-retryable errors)
-    if (!['DUPLICATE_CLAIM', 'SIGNER_ALREADY_EXISTS'].includes(params.error_code || '')) {
+    // Queue for retry if eligible (skip duplicates and validation errors)
+    const nonRetryableErrors = [
+      'DUPLICATE_CLAIM',
+      'DUPLICATE_CLAIM_FID', 
+      'DUPLICATE_CLAIM_ADDRESS',
+      'DUPLICATE_CLAIM_SPECIFIC',
+      'SIGNER_ALREADY_EXISTS',
+      'INVALID_USER',
+      'VALIDATION_ERROR',
+      'ADDRESS_NOT_VERIFIED'
+    ];
+    
+    if (!nonRetryableErrors.includes(params.error_code || '')) {
       await queueFailedClaim({
         id: data.id,
         fid: params.fid as number,
@@ -87,6 +99,18 @@ export async function POST(request: NextRequest) {
     const airdropAmount = optionType === 'likes' ? 2000 : optionType === 'recasts' ? 8000 : 10000;
     
     console.log(`Likes/recasts claim request: FID=${fid}, address=${address}, username=${username || 'unknown'}, option=${optionType}`);
+    
+    // Validate Mini App user and verify wallet address
+    const userValidation = await validateMiniAppUser(fid, username, address);
+    if (!userValidation.isValid) {
+      console.log(`User validation failed for FID ${fid}: ${userValidation.error}`);
+      
+      // Don't queue failed transactions for validation errors - just return error
+      return NextResponse.json({ 
+        success: false, 
+        error: userValidation.error || 'Invalid user or spoofed request' 
+      }, { status: 400 });
+    }
     
     // COMPREHENSIVE DUPLICATE CLAIM CHECKING
     // Check 1: Has this address already claimed ANY option type?
@@ -266,7 +290,7 @@ export async function POST(request: NextRequest) {
       } catch (logError) {
         console.error('Failed to log duplicate claim attempt:', logError);
       }
-      
+    
       return NextResponse.json({ 
         success: false, 
         error: `User has already claimed ${optionType} option`,

@@ -2,10 +2,9 @@ import React, { createContext, useState, useContext, useEffect, useCallback } fr
 import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { LinkVisitClaimPopup } from '@/components/LinkVisitClaimPopup';
-import { useAirdrop } from './AirdropProvider';
+import { usePopupCoordinator } from './PopupCoordinator';
 import { createClient } from "@supabase/supabase-js";
 import { getAuctionImage } from '@/utils/auctionImageOverrides';
-import { useLikesRecasts } from './LikesRecastsProvider';
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -65,11 +64,16 @@ export function LinkVisitProvider({
   const [manualHasClaimedLatest, setManualHasClaimedLatest] = useState<boolean | null>(null);
   const [explicitlyCheckedClaim, setExplicitlyCheckedClaim] = useState(false);
   
-  // Get access to AirdropProvider context to show the airdrop popup later
-  const { setShowAirdropPopup, isEligible, hasClaimed: hasAirdropClaimed } = useAirdrop();
-  
-  // Get access to LikesRecastsProvider context to show likes/recasts popup
-  const { setShowLikesRecastsPopup, isEligible: likesRecastsEligible, hasClaimedEither } = useLikesRecasts();
+  // Get popup coordinator to manage popup display
+  const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
+
+  // Sync local state with coordinator state
+  useEffect(() => {
+    const isActive = isPopupActive('linkVisit');
+    if (isActive !== showClaimPopup) {
+      setShowClaimPopup(isActive);
+    }
+  }, [isPopupActive, showClaimPopup]);
   
   // Use the latestWonAuctionId for eligibility checks, falling back to current auction
   const eligibilityAuctionId = latestWonAuctionId !== null ? latestWonAuctionId : auctionId;
@@ -244,15 +248,19 @@ export function LinkVisitProvider({
     console.log('frameContext?.user?.fid:', frameContext?.user?.fid);
     console.log('isLatestWonAuction:', isLatestWonAuction);
     console.log('isCheckingLatestAuction:', isCheckingLatestAuction);
-    console.log('airdrop isEligible:', isEligible);
-    console.log('airdrop hasClaimed:', hasAirdropClaimed);
+    console.log('isPopupActive:', isPopupActive('linkVisit'));
   }, [auctionId, claimAuctionId, latestWonAuctionId, latestWinningUrl, latestWinningImage, 
       hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, 
       hasCheckedEligibility, walletAddress, showClaimPopup, frameContext, isLatestWonAuction, 
-      isCheckingLatestAuction, isEligible, hasAirdropClaimed]);
+      isCheckingLatestAuction, isPopupActive]);
   
-  // Show popup when user can interact with it
+  // No need for event listeners - coordinator handles popup sequencing
+  
+  // Show popup when user can interact with it (ENABLED - shows independently if eligible)
   useEffect(() => {
+    // LinkVisit popup can now auto-show if user is eligible
+    console.log('LinkVisit auto-show is enabled - checking eligibility independently');
+    
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
       console.log('Not showing popup - explicit claim check not completed yet');
@@ -285,8 +293,11 @@ export function LinkVisitProvider({
       
       // Short delay to show popup after page loads
       const timer = setTimeout(() => {
-        console.log('Setting showClaimPopup to TRUE');
-        setShowClaimPopup(true);
+        console.log('Requesting linkVisit popup from coordinator');
+        const granted = requestPopup('linkVisit');
+        if (granted) {
+          setShowClaimPopup(true);
+        }
         setHasCheckedEligibility(true);
       }, 1500);
       
@@ -315,24 +326,11 @@ export function LinkVisitProvider({
     return result;
   };
   
-  // Close popup and show the appropriate next popup based on eligibility
+  // Close popup
   const handleClose = () => {
-    console.log('Closing link visit popup, checking what popup should show next...');
+    console.log('Closing link visit popup');
     setShowClaimPopup(false);
-    
-    // Show the appropriate popup after a short delay
-    setTimeout(() => {
-      // Check airdrop eligibility first
-      if (isEligible === true && !hasAirdropClaimed) {
-        console.log('User is eligible for airdrop, triggering airdrop popup...');
-        setShowAirdropPopup(true);
-      } else if (likesRecastsEligible === true && !hasClaimedEither) {
-        console.log('User not eligible for airdrop but eligible for likes/recasts, triggering likes/recasts popup...');
-        setShowLikesRecastsPopup(true);
-      } else {
-        console.log('User is not eligible for either airdrop or likes/recasts, not showing any popup');
-      }
-    }, 500);
+    releasePopup('linkVisit');
   };
   
   return (

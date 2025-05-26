@@ -733,58 +733,19 @@ export function LikesRecastsClaimPopup({
     };
   }, []);
 
+  // Cleanup signer polling when popup closes
+  useEffect(() => {
+    // When popup closes, clear the approval state to stop polling
+    if (!isOpen && !testMode) {
+      console.log('Popup closed, clearing approval state to stop polling');
+      clearApprovalState();
+    }
+  }, [isOpen, testMode, clearApprovalState]);
+
   // Determine if user has actually claimed based on database check
   const hasActuallyClaimedSomething = testMode ? hasAlreadyClaimed : actualClaimStatus.hasClaimedAny;
-  const isCheckingClaimStatus = !testMode && actualClaimStatus.isLoading;
 
-  // Show loading while checking claim status
-  if (isCheckingClaimStatus) {
-    return (
-      <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()} modal={true}>
-        <CustomDialogContent className="p-0 overflow-hidden">
-          <div className="flex flex-col items-center justify-center text-center">
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ type: "spring", duration: 0.5 }}
-              className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
-            >
-              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-primary"></div>
-            </motion.div>
 
-            <div className="p-6 pt-4 space-y-4 w-full">
-              <motion.h2 
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="text-xl font-bold text-foreground"
-              >
-                Checking Status...
-              </motion.h2>
-
-              <motion.p
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                className="text-muted-foreground text-sm"
-              >
-                Verifying claim eligibility
-              </motion.p>
-
-              <motion.div
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.4 }}
-                className="w-full flex justify-center"
-              >
-                <div className="h-9"></div>
-              </motion.div>
-            </div>
-          </div>
-        </CustomDialogContent>
-      </Dialog>
-    );
-  }
 
   if (hasActuallyClaimedSomething) {
     return (
@@ -1033,18 +994,18 @@ export function LikesRecastsClaimPopup({
                 
                 return isMobile ? (
                   // Mobile: Show QR logo in circle container
-                  <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ type: "spring", duration: 0.5 }}
-                    className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
-                  >
-                    <img 
-                      src="/qrLogo.png" 
-                      alt="QR Logo" 
-                      className="w-28 h-28"
-                    />
-                  </motion.div>
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", duration: 0.5 }}
+                className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
+              >
+                <img 
+                  src="/qrLogo.png" 
+                  alt="QR Logo" 
+                  className="w-28 h-28"
+                />
+              </motion.div>
                 ) : null; // Desktop: No top spacing or icon area
               })()}
 

@@ -6,6 +6,7 @@ import { FarcasterFrameProvider } from "./FrameProvider";
 import { SupabaseProvider } from "./SupabaseProvider";
 import { AirdropProvider } from "./AirdropProvider";
 import { LikesRecastsProvider } from "./LikesRecastsProvider";
+import { PopupCoordinator } from "./PopupCoordinator";
 import { useTheme } from "next-themes";
 import { useState, useEffect, useMemo } from "react"; // Import useMemo
 
@@ -70,9 +71,11 @@ export function Provider(props: { children: ReactNode }) {
           <QueryClientProvider client={queryClient}>
             <WagmiProvider config={wagmiConfig}>
               <SupabaseProvider>
-                <LikesRecastsProvider>
-                  <AirdropProvider>{props.children}</AirdropProvider>
-                </LikesRecastsProvider>
+                <PopupCoordinator>
+                  <LikesRecastsProvider>
+                    <AirdropProvider>{props.children}</AirdropProvider>
+                  </LikesRecastsProvider>
+                </PopupCoordinator>
               </SupabaseProvider>
             </WagmiProvider>
           </QueryClientProvider>

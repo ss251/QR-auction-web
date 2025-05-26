@@ -2,7 +2,7 @@ import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useAirdropEligibility } from '@/hooks/useAirdropEligibility';
 import { useClaimAirdrop } from '@/hooks/useClaimAirdrop';
 import { AirdropClaimPopup } from '@/components/AirdropClaimPopup';
-import { useLikesRecasts } from './LikesRecastsProvider';
+import { usePopupCoordinator } from './PopupCoordinator';
 
 // For testing purposes
 const TEST_USERNAME = "thescoho.eth";
@@ -33,7 +33,6 @@ export const useAirdrop = () => useContext(AirdropContext);
 export function AirdropProvider({ children }: { children: React.ReactNode }) {
   const [showAirdropPopup, setShowAirdropPopup] = useState(false);
   const [hasCheckedEligibility, setHasCheckedEligibility] = useState(false);
-  const [autoShowDisabled, setAutoShowDisabled] = useState(true); // Default to true - disable auto-showing
   
   const { 
     isEligible, 
@@ -47,8 +46,8 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
   
   const { claimAirdrop } = useClaimAirdrop();
   
-  // Get access to LikesRecasts context to trigger it when airdrop closes
-  const { setShowLikesRecastsPopup, isEligible: likesRecastsEligible, hasClaimedEither } = useLikesRecasts();
+  // Get popup coordinator to manage popup display
+  const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
   
   // Check if current user is the test user
   const isTestUser = frameContext?.user?.username === TEST_USERNAME;
@@ -72,14 +71,13 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isEligible]);
 
-  // When setShowAirdropPopup is called directly (e.g., from LinkVisitProvider),
-  // we want to update our state accordingly
+  // Sync local state with coordinator state
   useEffect(() => {
-    if (showAirdropPopup) {
-      console.log('Airdrop popup is showing, auto-show will remain disabled');
-      setAutoShowDisabled(true);
+    const isActive = isPopupActive('airdrop');
+    if (isActive !== showAirdropPopup) {
+      setShowAirdropPopup(isActive);
     }
-  }, [showAirdropPopup]);
+  }, [isPopupActive, showAirdropPopup]);
   
   // Debug logs
   useEffect(() => {
@@ -93,17 +91,11 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
     console.log('hasCheckedEligibility:', hasCheckedEligibility);
     console.log('walletAddress:', walletAddress);
     console.log('showAirdropPopup:', showAirdropPopup);
-    console.log('autoShowDisabled:', autoShowDisabled);
-  }, [isTestUser, isEligible, isLoading, hasClaimed, hasAddedFrame, hasNotifications, hasCheckedEligibility, walletAddress, showAirdropPopup, autoShowDisabled]);
+    console.log('isPopupActive:', isPopupActive('airdrop'));
+  }, [isTestUser, isEligible, isLoading, hasClaimed, hasAddedFrame, hasNotifications, hasCheckedEligibility, walletAddress, showAirdropPopup, isPopupActive]);
   
   // Show popup when user is eligible and has not claimed yet
   useEffect(() => {
-    // Skip if auto-showing is disabled
-    if (autoShowDisabled) {
-      console.log('Auto-showing disabled, airdrop popup will only show when triggered explicitly');
-      return;
-    }
-    
     // Only check once and when user has wallet connected
     if (hasCheckedEligibility || isLoading || !walletAddress) {
       console.log('Early return from popup check:', { 
@@ -128,8 +120,11 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
       
       // Short delay to show popup after page loads
       const timer = setTimeout(() => {
-        console.log('Setting showAirdropPopup to TRUE');
-        setShowAirdropPopup(true);
+        console.log('Requesting airdrop popup from coordinator');
+        const granted = requestPopup('airdrop');
+        if (granted) {
+          setShowAirdropPopup(true);
+        }
         setHasCheckedEligibility(true);
       }, 1500);
       
@@ -138,7 +133,7 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
       console.log('NOT showing popup - One or more conditions failed');
       setHasCheckedEligibility(true);
     }
-  }, [isEligible, isLoading, hasClaimed, hasCheckedEligibility, walletAddress, hasAddedFrame, hasNotifications, isTestUser, autoShowDisabled]);
+  }, [isEligible, isLoading, hasClaimed, hasCheckedEligibility, walletAddress, hasAddedFrame, hasNotifications, isTestUser, requestPopup]);
   
   // Handle claim action
   const handleClaim = async () => {
@@ -148,18 +143,9 @@ export function AirdropProvider({ children }: { children: React.ReactNode }) {
   
   // Close popup
   const handleClose = () => {
-    console.log('Closing airdrop popup, checking if likes/recasts popup should show...');
+    console.log('Closing airdrop popup');
     setShowAirdropPopup(false);
-    
-    // Show the likes/recasts popup after a short delay if user is eligible
-    setTimeout(() => {
-      if (likesRecastsEligible === true && !hasClaimedEither) {
-        console.log('User is eligible for likes/recasts, triggering likes/recasts popup...');
-        setShowLikesRecastsPopup(true);
-      } else {
-        console.log('User is not eligible for likes/recasts or has already claimed, not showing likes/recasts popup');
-      }
-    }, 500);
+    releasePopup('airdrop');
   };
   
   return (

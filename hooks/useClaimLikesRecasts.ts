@@ -145,8 +145,9 @@ export function useClaimLikesRecasts() {
     }
   }, [frameContext, walletAddress, claimTokens]);
 
-  const checkSignerStatus = useCallback(async (signerUuid: string): Promise<SignerStatus> => {
-    const response = await fetch(`/api/likes-recasts/signer-status?signer_uuid=${signerUuid}`);
+  const checkSignerStatus = useCallback(async (signerUuid: string, isPolling = false): Promise<SignerStatus> => {
+    const url = `/api/likes-recasts/signer-status?signer_uuid=${signerUuid}${isPolling ? '&polling=true' : ''}`;
+    const response = await fetch(url);
     if (!response.ok) {
       throw new Error('Failed to check signer status');
     }
@@ -197,7 +198,7 @@ export function useClaimLikesRecasts() {
 
     const checkApprovalStatus = async () => {
       try {
-        const signer = await checkSignerStatus(signerUuid);
+        const signer = await checkSignerStatus(signerUuid, true);
         if (signer.status === 'approved') {
           // Signer is approved - stop polling immediately
           clearInterval(intervalId);

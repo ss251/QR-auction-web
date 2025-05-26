@@ -1,6 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { useLikesRecastsEligibility } from '@/hooks/useLikesRecastsEligibility';
 import { LikesRecastsClaimPopup } from '@/components/LikesRecastsClaimPopup';
+import { usePopupCoordinator } from './PopupCoordinator';
 
 // Define context type
 interface LikesRecastsContextType {
@@ -40,6 +41,17 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
     walletAddress
   } = useLikesRecastsEligibility();
   
+  // Get popup coordinator to manage popup display
+  const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
+  
+  // Sync local state with coordinator state
+  useEffect(() => {
+    const isActive = isPopupActive('likesRecasts');
+    if (isActive !== showLikesRecastsPopup) {
+      setShowLikesRecastsPopup(isActive);
+    }
+  }, [isPopupActive, showLikesRecastsPopup]);
+
   // Debug logs
   useEffect(() => {
     console.log('===== LIKES/RECASTS PROVIDER DEBUG =====');
@@ -50,7 +62,8 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
     console.log('hasCheckedEligibility:', hasCheckedEligibility);
     console.log('walletAddress:', walletAddress);
     console.log('showLikesRecastsPopup:', showLikesRecastsPopup);
-  }, [isEligible, isLoading, hasClaimedEither, hasSignerApproval, hasCheckedEligibility, walletAddress, showLikesRecastsPopup]);
+    console.log('isPopupActive:', isPopupActive('likesRecasts'));
+  }, [isEligible, isLoading, hasClaimedEither, hasSignerApproval, hasCheckedEligibility, walletAddress, showLikesRecastsPopup, isPopupActive]);
   
   // Reset eligibility check when wallet address changes or eligibility is being recalculated
   useEffect(() => {
@@ -59,9 +72,12 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
       setHasCheckedEligibility(false);
     }
   }, [walletAddress, isLoading]);
+
+  // No need for auto-show disabling logic - coordinator handles this
   
   // Auto-show popup when user is eligible
   useEffect(() => {
+
     console.log('===== LIKES/RECASTS AUTO-SHOW CHECK =====', {
       hasCheckedEligibility,
       isLoading,
@@ -109,18 +125,13 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
       console.log('Has signer approval:', hasSignerApproval);
       
       const timer = setTimeout(() => {
-        console.log('Timer fired - setting popup to show');
-        // Double-check popup isn't already showing before setting it
-        setShowLikesRecastsPopup(prev => {
-          if (prev) {
-            console.log('Popup already showing, not changing');
-            return prev;
-          }
-          console.log('Setting popup to show!');
-          return true;
-        });
+        console.log('Timer fired - requesting popup from coordinator');
+        const granted = requestPopup('likesRecasts');
+        if (granted) {
+          setShowLikesRecastsPopup(true);
+        }
         setHasCheckedEligibility(true);
-      }, 1500); // Show after 1.5 seconds
+      }, 1000); // Show after 1 second
       
       return () => {
         console.log('Cleaning up timer');
@@ -136,7 +147,7 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
     } else {
       console.log('❓ Unknown condition preventing popup');
     }
-  }, [isEligible, isLoading, hasClaimedEither, hasSignerApproval, hasCheckedEligibility, walletAddress, showLikesRecastsPopup]);
+  }, [isEligible, isLoading, hasClaimedEither, hasSignerApproval, hasCheckedEligibility, walletAddress, showLikesRecastsPopup, requestPopup]);
   
   // This provider will be triggered by the main AirdropProvider
   // It won't auto-show the popup, but will wait to be told when to show
@@ -156,7 +167,9 @@ export function LikesRecastsProvider({ children, onPopupComplete }: LikesRecasts
   
   // Close popup
   const handleClose = () => {
+    console.log('Closing likes/recasts popup');
     setShowLikesRecastsPopup(false);
+    releasePopup('likesRecasts');
   };
   
   return (

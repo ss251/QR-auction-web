@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import AirdropABI from '@/abi/Airdrop.json';
+import { validateMiniAppUser } from '@/utils/miniapp-validation';
+import { getClientIP } from '@/lib/ip-utils';
+import { isRateLimited } from '@/lib/simple-rate-limit';
 
 // Setup Supabase clients
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -119,7 +122,7 @@ async function logFailedTransaction(params: {
     }
     
     // Now also queue for retry (if eligible for retry)
-    if (!['DUPLICATE_CLAIM', 'NOTIFICATIONS_DISABLED'].includes(params.error_code || '')) {
+    if (!['DUPLICATE_CLAIM', 'DUPLICATE_CLAIM_FID', 'DUPLICATE_CLAIM_ADDRESS', 'DUPLICATE_CLAIM_DB_CONSTRAINT', 'NOTIFICATIONS_DISABLED', 'INVALID_USER', 'VALIDATION_ERROR'].includes(params.error_code || '')) {
       await queueFailedClaim({
         id: data.id,
         fid: params.fid as number,
@@ -184,38 +187,56 @@ export async function POST(request: NextRequest) {
   let username: string | undefined;
   let hasNotifications: boolean | undefined;
 
+  // Get client IP for logging
+  const clientIP = getClientIP(request);
+
+  // Rate limiting FIRST: 5 requests per minute per IP (before any processing)
+  if (isRateLimited(clientIP, 5, 60000)) {
+    console.log(`🚫 RATE LIMITED: IP=${clientIP} (too many airdrop requests)`);
+    return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
+  }
+
   try {
     // Validate API key first
     const apiKey = request.headers.get('x-api-key');
     const validApiKey = process.env.LINK_CLICK_API_KEY;
     
     if (!apiKey || !validApiKey || apiKey !== validApiKey) {
-      console.error('Unauthorized API access attempt');
+      console.error(`🚨 UNAUTHORIZED ACCESS from IP: ${clientIP}`);
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
     
-    // Parse request body
+    // Parse request body early for rate limiting
     requestData = await request.json() as AirdropRequestData;
     ({ fid, address, hasNotifications, username } = requestData);
     
     if (!fid || !address) {
-      const errorMessage = 'Missing fid or address';
+      console.log('Validation error: Missing fid or address');
       
-      // Log validation error
-      await logFailedTransaction({
-        fid: fid !== undefined ? fid : 0,
-        eth_address: address !== undefined ? address : 'unknown',
-        username,
-        error_message: errorMessage,
-        error_code: 'VALIDATION_ERROR',
-        request_data: requestData as Record<string, unknown>
-      });
-      
-      return NextResponse.json({ success: false, error: errorMessage }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Missing fid or address' }, { status: 400 });
     }
     
-    // Log request for debugging
-    console.log(`Airdrop claim request: FID=${fid}, address=${address}, username=${username || 'unknown'}, hasNotifications=${hasNotifications}`);
+    // Log request for debugging with IP
+    console.log(`🎯 AIRDROP CLAIM: IP=${clientIP}, FID=${fid}, address=${address}, username=${username || 'unknown'}, hasNotifications=${hasNotifications}`);
+    
+    // IMMEDIATE BLOCK for known abuser
+    if (fid === 521172 || username === 'nancheng' || address === '0x52d24FEcCb7C546ABaE9e89629c9b417e48FaBD2') {
+      console.log(`🚫 BLOCKED ABUSER: IP=${clientIP}, FID=${fid}, username=${username}, address=${address}`);
+      return NextResponse.json({ success: false, error: 'Access Denied' }, { status: 403 });
+    }
+    
+
+    
+    // Validate Mini App user
+    const userValidation = await validateMiniAppUser(fid, username);
+    if (!userValidation.isValid) {
+      console.log(`User validation failed for FID ${fid}: ${userValidation.error}`);
+      
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Invalid user or spoofed request' 
+      }, { status: 400 });
+    }
     
     // Special logging for test user, but proceed with normal flow
     if (username === TEST_USERNAME) {

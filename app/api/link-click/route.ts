@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { getClientIP } from '@/lib/ip-utils';
+import { isRateLimited } from '@/lib/simple-rate-limit';
 
 // Setup Supabase clients
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -15,9 +17,29 @@ if (!supabaseServiceKey) {
 }
 
 export async function POST(request: NextRequest) {
+  // Get client IP for logging
+  const clientIP = getClientIP(request);
+  
+  // Rate limiting FIRST: 10 requests per minute per IP (before any processing)
+  if (isRateLimited(clientIP, 10, 60000)) {
+    console.log(`🚫 RATE LIMITED: IP=${clientIP} (too many link click requests)`);
+    return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
+  }
+  
   try {
     // Get request parameters
     const { fid, auctionId, winningUrl, address, username } = await request.json();
+    
+    // Log all link click attempts with IP
+    console.log(`🔗 LINK CLICK: IP=${clientIP}, FID=${fid || 'none'}, auction=${auctionId}, address=${address || 'none'}, username=${username || 'none'}`);
+    
+    // IMMEDIATE BLOCK for known abuser
+    if (fid === 521172 || username === 'nancheng' || address === '0x52d24FEcCb7C546ABaE9e89629c9b417e48FaBD2') {
+      console.log(`🚫 BLOCKED ABUSER: IP=${clientIP}, FID=${fid}, username=${username}, address=${address}`);
+      return NextResponse.json({ success: false, error: 'Access Denied' }, { status: 403 });
+    }
+    
+
     
     if (!auctionId || !winningUrl) {
       return NextResponse.json({ 
@@ -173,7 +195,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
     
-    console.log(`Recorded click for user ${username || fid || 'anonymous'} on auction ${auctionId}` + (address ? ` with address ${address}` : ''));
+    console.log(`✅ RECORDED CLICK: IP=${clientIP}, user=${username || fid || 'anonymous'}, auction=${auctionId}` + (address ? `, address=${address}` : ''));
     
     return NextResponse.json({ 
       success: true, 

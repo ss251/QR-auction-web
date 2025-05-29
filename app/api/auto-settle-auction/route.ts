@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     }
 
     // Get environment variables
-    const QR_AUCTION_V3_ADDRESS = process.env.NEXT_PUBLIC_QRAuctionV3;
+    const QR_AUCTION_V3_ADDRESS = process.env.SETTLER_CONTRACT_ADDRESS;
     const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY;
     const SETTLER_PRIVATE_KEY = process.env.SETTLER_PRIVATE_KEY; // Private key of whitelisted settler
 

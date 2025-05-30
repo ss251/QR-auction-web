@@ -24,13 +24,21 @@ if (!supabaseServiceKey) {
 // Contract details
 const QR_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN || '';
 
-// Use same contracts for both web and mini-app (testing)
-const getContractAddresses = () => {
-  // For testing, use the same addresses for both web and mini-app
-  return {
-    AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS2 || '',
-    ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY2 || ''
-  };
+// Use different contracts based on claim source
+const getContractAddresses = (claimSource: string = 'mini_app') => {
+  if (claimSource === 'web') {
+    // Web context: use contract 4
+    return {
+      AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS4 || '',
+      ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY4 || ''
+    };
+  } else {
+    // Mini-app context: use contract 2 (existing)
+    return {
+      AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS2 || '',
+      ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY2 || ''
+    };
+  }
 };
 
 // Alchemy RPC URL for Base
@@ -451,7 +459,7 @@ export async function POST(request: NextRequest) {
     
     // Initialize ethers provider and wallet
     const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const adminWallet = new ethers.Wallet(getContractAddresses().ADMIN_PRIVATE_KEY, provider);
+    const adminWallet = new ethers.Wallet(getContractAddresses(claim_source).ADMIN_PRIVATE_KEY, provider);
     
     // Check wallet balance before proceeding
     const balance = await provider.getBalance(adminWallet.address);
@@ -490,7 +498,7 @@ export async function POST(request: NextRequest) {
     
     // Create contract instances
     const airdropContract = new ethers.Contract(
-      getContractAddresses().AIRDROP_CONTRACT_ADDRESS,
+      getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS,
       AirdropABI.abi,
       adminWallet
     );
@@ -530,7 +538,7 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
       
-      const allowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses().AIRDROP_CONTRACT_ADDRESS);
+      const allowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS);
       console.log(`Current allowance: ${ethers.formatUnits(allowance, 18)}`);
       
       if (allowance < airdropAmount) {
@@ -539,7 +547,7 @@ export async function POST(request: NextRequest) {
         try {
           // Approve the airdrop contract to spend the tokens
           const approveTx = await qrTokenContract.approve(
-            getContractAddresses().AIRDROP_CONTRACT_ADDRESS,
+            getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS,
             airdropAmount
           );
           
@@ -566,7 +574,7 @@ export async function POST(request: NextRequest) {
           if (errorMessage.includes('timeout') && txHash) {
             console.log('Approval timed out, checking if it actually succeeded on-chain...');
             try {
-              const currentAllowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses().AIRDROP_CONTRACT_ADDRESS);
+              const currentAllowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS);
               if (currentAllowance >= airdropAmount) {
                 console.log('Approval actually succeeded on-chain despite timeout, continuing...');
                 // Continue with the airdrop - don't return error

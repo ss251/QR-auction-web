@@ -8,6 +8,7 @@ import { getAuctionImage } from '@/utils/auctionImageOverrides';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { getFarcasterUser } from '@/utils/farcaster';
+import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -79,8 +80,17 @@ export function LinkVisitProvider({
   const [isWebContext, setIsWebContext] = useState(false);
   
   // Web-specific state
-  const { authenticated } = usePrivy();
+  const { authenticated, user } = usePrivy();
   const { address: walletAddress } = useAccount();
+  const { client: smartWalletClient } = useSmartWallets();
+  
+  // Get smart wallet address from user's linked accounts (more reliable)
+  const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
+  
+  // Use appropriate wallet address based on context - prioritize smart wallet for web users
+  const effectiveWalletAddress = isWebContext 
+    ? (smartWalletAddress || smartWalletClient?.account?.address || walletAddress)
+    : walletAddress;
   
   // Add state to track when wallet connection status is determined
   const [walletStatusDetermined, setWalletStatusDetermined] = useState(false);
@@ -139,7 +149,7 @@ export function LinkVisitProvider({
           setWalletStatusDetermined(true);
           console.log('Wallet status determined - authenticated user:', {
             authenticated,
-            hasWalletAddress: !!walletAddress
+            hasWalletAddress: !!effectiveWalletAddress
           });
         }, 2000); // Wait 2 seconds for wallet address to resolve
         
@@ -153,7 +163,7 @@ export function LinkVisitProvider({
       // For mini-app context, wallet status depends on frameContext
       setWalletStatusDetermined(true);
     }
-  }, [authCheckComplete, isWebContext, authenticated, walletAddress]);
+  }, [authCheckComplete, isWebContext, authenticated, effectiveWalletAddress]);
   
   // Sync local state with coordinator state
   useEffect(() => {
@@ -185,7 +195,7 @@ export function LinkVisitProvider({
     
     // For web context, use wallet address; for mini-app, use FID
     if (isWebContext) {
-      if (!walletAddress || !latestWonAuctionId) {
+      if (!effectiveWalletAddress || !latestWonAuctionId) {
         console.log('Cannot check claim status: missing wallet address or auctionId');
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
@@ -194,13 +204,13 @@ export function LinkVisitProvider({
       }
       
       try {
-        console.log(`Checking web claim status for wallet=${walletAddress}, auctionId=${latestWonAuctionId}`);
+        console.log(`Checking web claim status for wallet=${effectiveWalletAddress}, auctionId=${latestWonAuctionId}`);
         
         // Get Farcaster username associated with this address
         let farcasterUsername: string | null = null;
         try {
-          console.log('🔍 Getting Farcaster username for address:', walletAddress);
-          const farcasterUser = await getFarcasterUser(walletAddress);
+          console.log('🔍 Getting Farcaster username for address:', effectiveWalletAddress);
+          const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
           farcasterUsername = farcasterUser?.username || null;
           console.log('🔍 Associated Farcaster username:', farcasterUsername);
         } catch (error) {
@@ -211,7 +221,7 @@ export function LinkVisitProvider({
         const { data: allClaims, error } = await supabase
           .from('link_visit_claims')
           .select('*')
-          .eq('eth_address', walletAddress)
+          .eq('eth_address', effectiveWalletAddress)
           .eq('auction_id', latestWonAuctionId);
         
         // Also check for claims by the Farcaster username if we found one
@@ -238,7 +248,7 @@ export function LinkVisitProvider({
         
         console.log('🔍 DATABASE QUERY DETAILS:');
         console.log('  - Table: link_visit_claims');
-        console.log('  - eth_address:', walletAddress);
+        console.log('  - eth_address:', effectiveWalletAddress);
         console.log('  - farcaster_username:', farcasterUsername);
         console.log('  - auction_id:', latestWonAuctionId);
         console.log('  - Query error:', error);
@@ -290,7 +300,7 @@ export function LinkVisitProvider({
       }
     } else {
       // Mini-app logic (existing)
-      if (!walletAddress || !frameContext?.user?.fid || !latestWonAuctionId) {
+      if (!effectiveWalletAddress || !frameContext?.user?.fid || !latestWonAuctionId) {
         console.log('Cannot check claim status: missing wallet, fid, or auctionId');
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
@@ -309,7 +319,7 @@ export function LinkVisitProvider({
         const { data: allClaims, error } = await supabase
           .from('link_visit_claims')
           .select('*')
-          .eq('eth_address', walletAddress)
+          .eq('eth_address', effectiveWalletAddress)
           .eq('auction_id', latestWonAuctionId);
         
         // Also check for claims by the Farcaster username
@@ -335,7 +345,7 @@ export function LinkVisitProvider({
         );
         
         console.log('🔍 MINI-APP CROSS-CONTEXT CHECK:', {
-          wallet: walletAddress,
+          wallet: effectiveWalletAddress,
           fid: frameContext.user.fid,
           farcaster_username: farcasterUsername,
           auction: latestWonAuctionId,
@@ -374,7 +384,7 @@ export function LinkVisitProvider({
         return false;
       }
     }
-  }, [latestWonAuctionId, walletAddress, frameContext, isWebContext]);
+  }, [latestWonAuctionId, effectiveWalletAddress, frameContext, isWebContext]);
   
   // Check if this auction is the latest won auction using Supabase
   useEffect(() => {
@@ -453,7 +463,7 @@ export function LinkVisitProvider({
     if (isWebContext) {
       // Web context: check when wallet status is determined
       if (latestWonAuctionId && !explicitlyCheckedClaim && walletStatusDetermined) {
-        if (walletAddress) {
+        if (effectiveWalletAddress) {
           console.log('Triggering explicit claim check for latest auction (web - authenticated)');
           checkClaimStatusForLatestAuction();
         } else {
@@ -472,7 +482,7 @@ export function LinkVisitProvider({
         checkClaimStatusForLatestAuction();
       }
     }
-  }, [latestWonAuctionId, walletAddress, frameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
+  }, [latestWonAuctionId, effectiveWalletAddress, frameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
   
   // Reset eligibility check when hasClicked or hasClaimed or manualHasClaimedLatest changes
   useEffect(() => {
@@ -502,7 +512,7 @@ export function LinkVisitProvider({
     console.log('explicitlyCheckedClaim:', explicitlyCheckedClaim); 
     console.log('isLoading:', isLoading);
     console.log('hasCheckedEligibility:', hasCheckedEligibility);
-    console.log('walletAddress:', walletAddress);
+    console.log('effectiveWalletAddress:', effectiveWalletAddress);
     console.log('showClaimPopup:', showClaimPopup);
     console.log('frameContext?.user?.fid:', frameContext?.user?.fid);
     console.log('isLatestWonAuction:', isLatestWonAuction);
@@ -516,7 +526,7 @@ export function LinkVisitProvider({
     console.log('isCheckingDatabase:', isCheckingDatabase);
   }, [auctionId, claimAuctionId, latestWonAuctionId, latestWinningUrl, latestWinningImage, 
       hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, 
-      hasCheckedEligibility, walletAddress, showClaimPopup, frameContext, isLatestWonAuction, 
+      hasCheckedEligibility, effectiveWalletAddress, showClaimPopup, frameContext, isLatestWonAuction, 
       isCheckingLatestAuction, isPopupActive, isWebContext, needsWalletConnection, authenticated, authCheckComplete, walletStatusDetermined, isCheckingDatabase]);
   
   // Listen for trigger from other popups closing
@@ -553,7 +563,7 @@ export function LinkVisitProvider({
         const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
         
         // Check if user is eligible (hasn't claimed for latest won auction)
-        if (!combinedHasClaimed && latestWonAuctionId && walletAddress && !isLoading) {
+        if (!combinedHasClaimed && latestWonAuctionId && effectiveWalletAddress && !isLoading) {
           console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
           const granted = requestPopup('linkVisit');
           if (granted) {
@@ -579,7 +589,7 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, walletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed]);
   
   // Show popup when user can interact with it (ENABLED - shows independently if eligible)
   useEffect(() => {
@@ -623,7 +633,7 @@ export function LinkVisitProvider({
         auctionId,
         latestWonAuctionId,
         authenticated,
-        walletAddress: !!walletAddress,
+        effectiveWalletAddress: !!effectiveWalletAddress,
         walletStatusDetermined,
         explicitlyCheckedClaim
       });
@@ -689,7 +699,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, walletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase]);
   
   // Handle claim action
   const handleClaim = async () => {

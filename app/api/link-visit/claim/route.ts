@@ -165,7 +165,7 @@ async function logFailedTransaction(params: {
     if (!nonRetryableErrors.includes(params.error_code || '')) {
       await queueFailedClaim({
         id: data.id,
-        fid: params.fid as number,
+        fid: typeof params.fid === 'number' ? params.fid : 0, // Use 0 for string FIDs (web users)
         eth_address: params.eth_address,
         auction_id: params.auction_id,
         username: params.username as string | null,
@@ -265,9 +265,13 @@ export async function POST(request: NextRequest) {
       // Web users need address and auction_id
       if (!address || !auction_id) {
         console.log(`🚫 WEB VALIDATION ERROR: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
+
+        const addressHash = address?.slice(2).toLowerCase(); // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
+        effectiveFid = -(hashNumber % 1000000000);
         
         await logFailedTransaction({
-          fid: -1, // Placeholder for web users
+          fid: effectiveFid, // Use -1 for web validation errors
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
           username: null,
@@ -280,7 +284,10 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
       }
-      effectiveFid = -1; // Use -1 for web users
+      // Create a unique negative FID from wallet address hash for web users
+      const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
+      const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
+      effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
       effectiveUsername = 'qrcoinweb'; // Use specific username for web users
     } else {
       // Mini-app users need fid, address, auction_id, and username
@@ -375,11 +382,20 @@ export async function POST(request: NextRequest) {
     }
     
     // Check if user has already claimed tokens for this auction (check both FID and address)
-    const { data: claimDataByFid, error: selectErrorByFid } = await supabase
-      .from('link_visit_claims')
-      .select('*')
-      .eq('fid', fid)
-      .eq('auction_id', auction_id);
+    let claimDataByFid = null;
+    let selectErrorByFid = null;
+    
+    // Only check FID for mini-app users (skip for web users since they all use FID -1)
+    if (claim_source !== 'web') {
+      const fidCheck = await supabase
+        .from('link_visit_claims')
+        .select('*')
+        .eq('fid', fid)
+        .eq('auction_id', auction_id);
+      
+      claimDataByFid = fidCheck.data;
+      selectErrorByFid = fidCheck.error;
+    }
     
     const { data: claimDataByAddress, error: selectErrorByAddress } = await supabase
       .from('link_visit_claims')
@@ -409,8 +425,8 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
     
-    // Check if this FID has already claimed
-    if (claimDataByFid && claimDataByFid.length > 0 && claimDataByFid[0].claimed_at) {
+    // Check if this FID has already claimed (only for mini-app users)
+    if (claim_source !== 'web' && claimDataByFid && claimDataByFid.length > 0 && claimDataByFid[0].claimed_at) {
       if (claimDataByFid[0].tx_hash) {
         console.log(`User ${fid} has already claimed tokens for auction ${auction_id} at tx ${claimDataByFid[0].tx_hash}`);
         

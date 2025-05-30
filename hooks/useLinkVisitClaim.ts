@@ -3,6 +3,7 @@ import { useLinkVisitEligibility } from './useLinkVisitEligibility';
 import { frameSdk } from '@/lib/frame-sdk';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
+import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 
 export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = false) {
   const [isClaimLoading, setIsClaimLoading] = useState(false);
@@ -10,11 +11,17 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
 
   // Web-specific hooks
-  const { authenticated } = usePrivy();
+  const { authenticated, user } = usePrivy();
   const { address } = useAccount();
+  const { client: smartWalletClient } = useSmartWallets();
   
-  // Use appropriate wallet address based on context
-  const effectiveWalletAddress = isWebContext ? address : walletAddress;
+  // Get smart wallet address from user's linked accounts (more reliable)
+  const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
+  
+  // Use appropriate wallet address based on context - prioritize smart wallet for web users
+  const effectiveWalletAddress = isWebContext 
+    ? (smartWalletAddress || smartWalletClient?.account?.address || address)
+    : walletAddress;
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {
@@ -28,6 +35,10 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
       try {
         console.log('Handling web link click for URL:', winningUrl);
         setLastVisitedUrl(winningUrl);
+
+        const addressHash = effectiveWalletAddress?.slice(2).toLowerCase(); // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
+        const effectiveFid = -(hashNumber % 1000000000);
         
         // Record the click in the database
         const response = await fetch('/api/link-click', {
@@ -36,7 +47,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            fid: -1, // Placeholder for web users
+            fid: effectiveFid, // Placeholder for web users
             auctionId: auctionId,
             winningUrl: winningUrl,
             address: effectiveWalletAddress,
@@ -150,6 +161,15 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         console.log('Cannot claim tokens: Missing wallet address or not authenticated');
         return {};
       }
+      
+      // Add debug logging to show which address we're using
+      console.log('🔍 Web context address selection:', {
+        smartWalletAddress: smartWalletAddress,
+        smartWalletClientAddress: smartWalletClient?.account?.address,
+        eoaAddress: address,
+        effectiveAddress: effectiveWalletAddress,
+        isUsingSmartWallet: Boolean(smartWalletAddress || smartWalletClient?.account?.address)
+      });
     } else {
       // Mini-app context: validate FID and wallet
       if (!frameContext?.user?.fid || !effectiveWalletAddress) {
@@ -162,6 +182,9 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
 
     try {
       console.log('Claiming tokens for auction', auctionId, 'context:', isWebContext ? 'web' : 'mini-app');
+      
+      // Add final confirmation of the address being used for airdrop
+      console.log('💰 AIRDROP TARGET ADDRESS:', effectiveWalletAddress, isWebContext ? '(web - should be smart wallet if available)' : '(mini-app)');
       
       // Call backend API to execute the token transfer
       const response = await fetch('/api/link-visit/claim', {

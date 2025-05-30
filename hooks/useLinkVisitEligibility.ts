@@ -5,6 +5,7 @@ import type { Context } from '@farcaster/frame-sdk';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { getFarcasterUser } from '@/utils/farcaster';
+import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 
 // Setup Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -19,11 +20,17 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   
   // Web-specific hooks
-  const { authenticated } = usePrivy();
+  const { authenticated, user } = usePrivy();
   const { address } = useAccount();
+  const { client: smartWalletClient } = useSmartWallets();
   
-  // Use appropriate wallet address based on context
-  const effectiveWalletAddress = isWebContext ? address : walletAddress;
+  // Get smart wallet address from user's linked accounts (more reliable)
+  const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
+  
+  // Use appropriate wallet address based on context - prioritize smart wallet for web users
+  const effectiveWalletAddress = isWebContext 
+    ? (smartWalletAddress || smartWalletClient?.account?.address || address)
+    : walletAddress;
   
   // Log state changes
   useEffect(() => {
@@ -266,11 +273,15 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           auction_id: auctionId,
           txHash
         });
+
+        const addressHash = effectiveWalletAddress?.slice(2).toLowerCase(); // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
+        const effectiveFid = -(hashNumber % 1000000000);
         
         const { error } = await supabase
           .from('link_visit_claims')
           .upsert({
-            fid: -1, // Placeholder for web users
+            fid: effectiveFid, // Placeholder for web users
             auction_id: auctionId,
             eth_address: effectiveWalletAddress,
             claimed_at: new Date().toISOString(),
@@ -351,12 +362,16 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         
         // Update local state immediately for UI responsiveness
         setHasClicked(true);
+
+        const addressHash = effectiveWalletAddress?.slice(2).toLowerCase(); // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
+        const effectiveFid = -(hashNumber % 1000000000);
         
         // Record in database
         const { error } = await supabase
           .from('link_visit_claims')
           .upsert({
-            fid: -1, // Placeholder for web users
+            fid: effectiveFid, // Placeholder for web users
             auction_id: auctionId,
             link_visited_at: new Date().toISOString(),
             eth_address: effectiveWalletAddress,

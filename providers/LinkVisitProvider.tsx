@@ -28,6 +28,9 @@ interface LinkVisitContextType {
   latestWonAuctionId: number | null;
   isWebContext: boolean;
   needsWalletConnection: boolean;
+  walletStatusDetermined: boolean;
+  authCheckComplete: boolean;
+  isCheckingDatabase: boolean;
 }
 
 // Create context with default values
@@ -43,7 +46,10 @@ const LinkVisitContext = createContext<LinkVisitContextType>({
   isLatestWonAuction: false,
   latestWonAuctionId: null,
   isWebContext: false,
-  needsWalletConnection: false
+  needsWalletConnection: false,
+  walletStatusDetermined: false,
+  authCheckComplete: false,
+  isCheckingDatabase: false
 });
 
 // Hook to use the link visit context
@@ -75,6 +81,11 @@ export function LinkVisitProvider({
   const { authenticated } = usePrivy();
   const { address: walletAddress } = useAccount();
   
+  // Add state to track when wallet connection status is determined
+  const [walletStatusDetermined, setWalletStatusDetermined] = useState(false);
+  const [authCheckComplete, setAuthCheckComplete] = useState(false);
+  const [isCheckingDatabase, setIsCheckingDatabase] = useState(false);
+  
   // Get popup coordinator to manage popup display
   const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
 
@@ -98,6 +109,50 @@ export function LinkVisitProvider({
 
   // For web context, we need to check if wallet is connected
   const needsWalletConnection = isWebContext && !authenticated;
+  
+  // Track when authentication status is determined (either true or false, but resolved)
+  useEffect(() => {
+    if (isWebContext) {
+      // For web context, we need to wait for Privy to finish initialization
+      // After a reasonable delay, consider auth status as determined
+      const timer = setTimeout(() => {
+        setAuthCheckComplete(true);
+        console.log('Auth check complete, authenticated:', authenticated);
+      }, 3000); // Give Privy 3 seconds to initialize
+      
+      return () => clearTimeout(timer);
+    } else {
+      // For mini-app context, we don't rely on Privy auth
+      setAuthCheckComplete(true);
+    }
+  }, [isWebContext, authenticated]);
+  
+  // Track when wallet connection status is determined
+  useEffect(() => {
+    if (!authCheckComplete) return;
+    
+    if (isWebContext) {
+      if (authenticated) {
+        // If authenticated, wait for wallet address or determine it's not available
+        const timer = setTimeout(() => {
+          setWalletStatusDetermined(true);
+          console.log('Wallet status determined - authenticated user:', {
+            authenticated,
+            hasWalletAddress: !!walletAddress
+          });
+        }, 2000); // Wait 2 seconds for wallet address to resolve
+        
+        return () => clearTimeout(timer);
+      } else {
+        // If not authenticated, wallet status is immediately known (not connected)
+        setWalletStatusDetermined(true);
+        console.log('Wallet status determined - not authenticated');
+      }
+    } else {
+      // For mini-app context, wallet status depends on frameContext
+      setWalletStatusDetermined(true);
+    }
+  }, [authCheckComplete, isWebContext, authenticated, walletAddress]);
   
   // Sync local state with coordinator state
   useEffect(() => {
@@ -125,6 +180,7 @@ export function LinkVisitProvider({
   // Explicit function to check claim status directly from database
   const checkClaimStatusForLatestAuction = useCallback(async () => {
     console.log('Explicitly checking claim status for latest auction');
+    setIsCheckingDatabase(true);
     
     // For web context, use wallet address; for mini-app, use FID
     if (isWebContext) {
@@ -132,6 +188,7 @@ export function LinkVisitProvider({
         console.log('Cannot check claim status: missing wallet address or auctionId');
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return false;
       }
       
@@ -147,24 +204,78 @@ export function LinkVisitProvider({
           .eq('claim_source', 'web')
           .maybeSingle();
         
+        console.log('🔍 DATABASE QUERY DETAILS:');
+        console.log('  - Table: link_visit_claims');
+        console.log('  - eth_address:', walletAddress);
+        console.log('  - auction_id:', latestWonAuctionId);
+        console.log('  - claim_source: web');
+        console.log('  - Query error:', error);
+        console.log('  - Query result:', data);
+        
+        // Also check for ANY claims by this wallet address for this auction (debug)
+        const { data: allClaims } = await supabase
+          .from('link_visit_claims')
+          .select('*')
+          .eq('eth_address', walletAddress)
+          .eq('auction_id', latestWonAuctionId);
+        
+        console.log('🔍 ALL CLAIMS FOR THIS WALLET/AUCTION:', allClaims);
+        
+        // Check for case sensitivity issues with wallet address (addresses should be case-insensitive)
+        const { data: caseInsensitiveClaims } = await supabase
+          .from('link_visit_claims')
+          .select('*')
+          .ilike('eth_address', walletAddress)
+          .eq('auction_id', latestWonAuctionId);
+        
+        console.log('🔍 CASE-INSENSITIVE WALLET CLAIMS:', caseInsensitiveClaims);
+        
         if (error) {
           console.error('Error checking web claim status:', error);
           setManualHasClaimedLatest(false);
           setExplicitlyCheckedClaim(true);
+          setIsCheckingDatabase(false);
           return false;
         }
         
         // Determine if user has claimed based on claimed_at field
         const hasClaimed = !!(data && data.claimed_at);
-        console.log('Explicit web claim check result:', { hasClaimed, record: data });
+        console.log('🎯 FINAL CLAIM STATUS:', { 
+          hasClaimed, 
+          hasRecord: !!data,
+          hasClaimedAt: !!(data?.claimed_at),
+          record: data 
+        });
+        
+        console.log('📊 SUMMARY OF ALL QUERIES:');
+        console.log('  1. Web-specific query (claim_source=web):', data ? 'FOUND' : 'NOT FOUND');
+        console.log('  2. All claims for wallet/auction:', allClaims?.length || 0, 'records');
+        console.log('  3. Case-insensitive claims:', caseInsensitiveClaims?.length || 0, 'records');
+        
+        // If no web-specific claim but other claims exist, log details
+        if (!data && ((allClaims && allClaims.length > 0) || (caseInsensitiveClaims && caseInsensitiveClaims.length > 0))) {
+          console.log('⚠️ NO WEB CLAIM FOUND BUT OTHER CLAIMS EXIST:');
+          if (allClaims && allClaims.length > 0) {
+            allClaims.forEach((claim, index) => {
+              console.log(`  Claim ${index + 1}:`, {
+                claim_source: claim.claim_source,
+                eth_address: claim.eth_address,
+                claimed_at: claim.claimed_at,
+                tx_hash: claim.tx_hash
+              });
+            });
+          }
+        }
         
         setManualHasClaimedLatest(hasClaimed);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return hasClaimed;
       } catch (error) {
         console.error('Unexpected error checking web claim status:', error);
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return false;
       }
     } else {
@@ -173,6 +284,7 @@ export function LinkVisitProvider({
         console.log('Cannot check claim status: missing wallet, fid, or auctionId');
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return false;
       }
       
@@ -192,6 +304,7 @@ export function LinkVisitProvider({
           console.error('Error checking claim status:', error);
           setManualHasClaimedLatest(false);
           setExplicitlyCheckedClaim(true);
+          setIsCheckingDatabase(false);
           return false;
         }
         
@@ -201,11 +314,13 @@ export function LinkVisitProvider({
         
         setManualHasClaimedLatest(hasClaimed);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return hasClaimed;
       } catch (error) {
         console.error('Unexpected error checking claim status:', error);
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
+        setIsCheckingDatabase(false);
         return false;
       }
     }
@@ -286,19 +401,28 @@ export function LinkVisitProvider({
   useEffect(() => {
     // Only perform check if we have all necessary data and haven't checked yet
     if (isWebContext) {
-      // Web context: check when we have wallet address
-      if (latestWonAuctionId && walletAddress && !explicitlyCheckedClaim) {
-        console.log('Triggering explicit claim check for latest auction (web)');
-        checkClaimStatusForLatestAuction();
+      // Web context: check when wallet status is determined
+      if (latestWonAuctionId && !explicitlyCheckedClaim && walletStatusDetermined) {
+        if (walletAddress) {
+          console.log('Triggering explicit claim check for latest auction (web - authenticated)');
+          checkClaimStatusForLatestAuction();
+        } else {
+          // No wallet address (not authenticated), assume no previous claim
+          console.log('Web user not authenticated, assuming no previous claim');
+          setIsCheckingDatabase(true);
+          setManualHasClaimedLatest(false);
+          setExplicitlyCheckedClaim(true);
+          setIsCheckingDatabase(false);
+        }
       }
     } else {
-      // Mini-app context: check when we have frame context
-      if (latestWonAuctionId && frameContext?.user?.fid && !explicitlyCheckedClaim) {
+      // Mini-app context: check when we have frame context and wallet status is determined
+      if (latestWonAuctionId && frameContext?.user?.fid && !explicitlyCheckedClaim && walletStatusDetermined) {
         console.log('Triggering explicit claim check for latest auction (mini-app)');
         checkClaimStatusForLatestAuction();
       }
     }
-  }, [latestWonAuctionId, walletAddress, frameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext]);
+  }, [latestWonAuctionId, walletAddress, frameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
   
   // Reset eligibility check when hasClicked or hasClaimed or manualHasClaimedLatest changes
   useEffect(() => {
@@ -337,15 +461,36 @@ export function LinkVisitProvider({
     console.log('isWebContext:', isWebContext);
     console.log('needsWalletConnection:', needsWalletConnection);
     console.log('authenticated:', authenticated);
+    console.log('authCheckComplete:', authCheckComplete);
+    console.log('walletStatusDetermined:', walletStatusDetermined);
+    console.log('isCheckingDatabase:', isCheckingDatabase);
   }, [auctionId, claimAuctionId, latestWonAuctionId, latestWinningUrl, latestWinningImage, 
       hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, 
       hasCheckedEligibility, walletAddress, showClaimPopup, frameContext, isLatestWonAuction, 
-      isCheckingLatestAuction, isPopupActive, isWebContext, needsWalletConnection, authenticated]);
+      isCheckingLatestAuction, isPopupActive, isWebContext, needsWalletConnection, authenticated, authCheckComplete, walletStatusDetermined, isCheckingDatabase]);
   
   // Listen for trigger from other popups closing
   useEffect(() => {
     const handleTrigger = () => {
       console.log('===== LINK VISIT TRIGGERED BY OTHER POPUP =====');
+      
+      // Don't show popup if wallet status hasn't been determined yet
+      if (!walletStatusDetermined) {
+        console.log('❌ Triggered but wallet status not determined yet');
+        return;
+      }
+      
+      // Don't show popup if database check hasn't been completed yet
+      if (!explicitlyCheckedClaim) {
+        console.log('❌ Triggered but database claim check not completed yet');
+        return;
+      }
+      
+      // Don't show popup if database check is still in progress
+      if (isCheckingDatabase) {
+        console.log('❌ Triggered but database check still in progress');
+        return;
+      }
       
       // For web context, we need to ensure user is authenticated first
       if (isWebContext) {
@@ -354,19 +499,22 @@ export function LinkVisitProvider({
           return;
         }
         
+        // Use combined claim status (same logic as context value and popup logic)
+        const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+        
         // Check if user is eligible (hasn't claimed for latest won auction)
-        if (manualHasClaimedLatest === false && latestWonAuctionId && walletAddress && !isLoading && explicitlyCheckedClaim) {
+        if (!combinedHasClaimed && latestWonAuctionId && walletAddress && !isLoading) {
           console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
           }
         } else {
-          console.log('❌ Triggered but web user not eligible for link visit');
+          console.log('❌ Triggered but web user not eligible for link visit - combined claim status:', combinedHasClaimed);
         }
       } else {
         // Mini-app logic (existing)
-        if (manualHasClaimedLatest === false && latestWonAuctionId && !isLoading && explicitlyCheckedClaim) {
+        if (manualHasClaimedLatest === false && latestWonAuctionId && !isLoading) {
           console.log('🎉 TRIGGERED - SHOWING MINI-APP LINK VISIT POPUP');
           const granted = requestPopup('linkVisit');
           if (granted) {
@@ -381,7 +529,7 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, walletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, walletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed]);
   
   // Show popup when user can interact with it (ENABLED - shows independently if eligible)
   useEffect(() => {
@@ -391,6 +539,18 @@ export function LinkVisitProvider({
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
       console.log('Not showing popup - explicit claim check not completed yet');
+      return;
+    }
+    
+    // Wait for wallet status to be determined before showing popup
+    if (!walletStatusDetermined) {
+      console.log('Not showing popup - wallet status not determined yet');
+      return;
+    }
+    
+    // Wait for database check to complete before showing popup
+    if (isCheckingDatabase) {
+      console.log('Not showing popup - still checking database for existing claims');
       return;
     }
     
@@ -413,15 +573,20 @@ export function LinkVisitProvider({
         auctionId,
         latestWonAuctionId,
         authenticated,
-        walletAddress: !!walletAddress
+        walletAddress: !!walletAddress,
+        walletStatusDetermined,
+        explicitlyCheckedClaim
       });
       
+      // Use combined claim status (same logic as context value)
+      const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+      
       // Show popup if they haven't claimed for the latest won auction
-      // Even if not authenticated - the popup will handle the connect wallet flow
-      if (manualHasClaimedLatest === false && latestWonAuctionId) {
-        console.log('SHOWING POPUP - Web user eligible (will handle wallet connection in popup)');
+      // Only show after we've determined wallet status and checked database
+      if (!combinedHasClaimed && latestWonAuctionId) {
+        console.log('SHOWING POPUP - Web user eligible (wallet status determined, no existing claim found)');
         
-        // Moderate delay to show popup after other popups
+        // Shorter delay since we've already waited for status determination
         const timer = setTimeout(() => {
           console.log('Requesting linkVisit popup from coordinator (web)');
           const granted = requestPopup('linkVisit');
@@ -429,16 +594,14 @@ export function LinkVisitProvider({
             setShowClaimPopup(true);
           }
           setHasCheckedEligibility(true);
-        }, 2000);
+        }, 2000); // Reduced delay since we already waited for status
         
         return () => clearTimeout(timer);
       } else {
-        if (manualHasClaimedLatest === true) {
-          console.log('NOT showing popup - Web user already claimed (confirmed with DB)');
+        if (combinedHasClaimed) {
+          console.log('NOT showing popup - Web user already claimed (combined status)');
         } else if (!latestWonAuctionId) {
           console.log('NOT showing popup - No latest won auction found');
-        } else if (manualHasClaimedLatest === null) {
-          console.log('NOT showing popup - Still checking claim status');
         }
         setHasCheckedEligibility(true);
       }
@@ -456,7 +619,7 @@ export function LinkVisitProvider({
       if (manualHasClaimedLatest === false && latestWonAuctionId) {
         console.log('SHOWING POPUP - Mini-app user has not claimed tokens for the latest won auction');
         
-        // Moderate delay to show popup after other popups
+        // Shorter delay since we've already waited for status determination
         const timer = setTimeout(() => {
           console.log('Requesting linkVisit popup from coordinator (mini-app)');
           const granted = requestPopup('linkVisit');
@@ -464,7 +627,7 @@ export function LinkVisitProvider({
             setShowClaimPopup(true);
           }
           setHasCheckedEligibility(true);
-        }, 2000);
+        }, 500); // Reduced delay
         
         return () => clearTimeout(timer);
       } else {
@@ -476,7 +639,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, walletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, walletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase]);
   
   // Handle claim action
   const handleClaim = async () => {
@@ -515,7 +678,10 @@ export function LinkVisitProvider({
         isLatestWonAuction,
         latestWonAuctionId,
         isWebContext,
-        needsWalletConnection
+        needsWalletConnection,
+        walletStatusDetermined,
+        authCheckComplete,
+        isCheckingDatabase
       }}
     >
       {children}

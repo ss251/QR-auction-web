@@ -12,7 +12,6 @@ import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
 import { usePrivy, useLogin } from "@privy-io/react-auth";
-import { useAccount } from "wagmi";
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -82,7 +81,6 @@ export function LinkVisitClaimPopup({
   const [isWebContext, setIsWebContext] = useState(false);
   const [persistentToastId, setPersistentToastId] = useState<string | number | null>(null);
   const { authenticated } = usePrivy();
-  const { address } = useAccount();
   const { login } = useLogin({
     onComplete: () => {
       console.log("Login completed, dismissing persistent toast");
@@ -285,33 +283,11 @@ export function LinkVisitClaimPopup({
     
     try {
       if (isWebContext) {
-        // Web context: open in new tab immediately to avoid popup blockers
-        console.log('Opening URL in new tab (web context):', winningUrl);
-        window.open(winningUrl, '_blank', 'noopener,noreferrer');
+        // Web context: use redirect route for consistent tracking
+        const trackedUrl = `${process.env.NEXT_PUBLIC_HOST_URL}/redirect?source=${encodeURIComponent(CLICK_SOURCES.POPUP_IMAGE)}`;
         
-        // Record click synchronously (blocking) to ensure state is updated
-        try {
-          const response = await fetch('/api/link-click', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              fid: -1,
-              auctionId: auctionId,
-              winningUrl: winningUrl,
-              address: address,
-              username: 'qrcoinweb',
-              claimSource: 'web'
-            })
-          });
-          
-          if (response.ok) {
-            console.log('Click recorded successfully');
-          } else {
-            console.error('Failed to record click:', response.status);
-          }
-        } catch (error) {
-          console.error('Error recording click:', error);
-        }
+        console.log('Opening tracked URL in new tab (web context):', trackedUrl);
+        window.open(trackedUrl, '_blank', 'noopener,noreferrer');
         
         // Move to next state based on authentication status
         if (!authenticated) {
@@ -361,18 +337,18 @@ export function LinkVisitClaimPopup({
   // Handle share
   const handleShare = async () => {
     if (isWebContext) {
-      // Web context: Twitter/X share
-      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun :)
-
-are you a crypto chad?`);
-      const shareUrl = `https://twitter.com/intent/tweet?text=${shareText}&url=${encodeURIComponent('https://qrcoin.fun')}`;
+      // Web context: Twitter/X share with quote tweet
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
+      
+      // TODO: Replace this with the actual tweet URL you want to quote
+      const tweetToQuote = "https://twitter.com/qrcoindotfun/status/TWEET_ID_HERE";
+      
+      const shareUrl = `https://twitter.com/intent/tweet?text=${shareText}&url=${encodeURIComponent(tweetToQuote)}`;
       
       window.open(shareUrl, '_blank', 'noopener,noreferrer');
     } else {
       // Mini-app context: Warpcast share (existing logic)
-      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun :)
-
-are you a Farcaster $PRO?`);
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun :)`);
       const embedUrl = encodeURIComponent(`https://qrcoin.fun/84`);
       
       let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
@@ -606,7 +582,11 @@ are you a Farcaster $PRO?`);
                 >
                   <Button 
                     variant="default" 
-                    className="bg-[#472B92] hover:bg-[#3b2277] text-white px-6 py-2 rounded-md flex items-center focus:outline-none focus:ring-0 h-9"
+                    className={`${
+                      isWebContext 
+                        ? "bg-[#1DA1F2] hover:bg-[#0d8bd9]" 
+                        : "bg-[#472B92] hover:bg-[#3b2277]"
+                    } text-white px-6 py-2 rounded-md flex items-center focus:outline-none focus:ring-0 h-9`}
                     onClick={handleShare}
                   >
                     Share

@@ -3,7 +3,7 @@ import { Dialog, DialogPortal } from './ui/dialog';
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Button } from './ui/button';
 import { motion } from 'framer-motion';
-import { Check, X as XIcon } from 'lucide-react';
+import { Check, X as XIcon, Wallet } from 'lucide-react';
 import { cn } from "@/lib/utils";
 import confetti from 'canvas-confetti';
 import { frameSdk } from '@/lib/frame-sdk';
@@ -11,6 +11,8 @@ import { toast } from "sonner";
 import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
+import { usePrivy, useLogin } from "@privy-io/react-auth";
+import { useAccount } from "wagmi";
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -76,34 +78,113 @@ export function LinkVisitClaimPopup({
   auctionId,
   onClaim
 }: LinkVisitClaimPopupProps) {
-  // Use the claim hook for link click handling
-  const { isClaimLoading } = useLinkVisitClaim(auctionId);
+  // Web context detection
+  const [isWebContext, setIsWebContext] = useState(false);
+  const [persistentToastId, setPersistentToastId] = useState<string | number | null>(null);
+  const { authenticated } = usePrivy();
+  const { address } = useAccount();
+  const { login } = useLogin({
+    onComplete: () => {
+      console.log("Login completed, dismissing persistent toast");
+      setIsConnecting(false);
+      if (persistentToastId) {
+        toast.dismiss(persistentToastId);
+        setPersistentToastId(null);
+      }
+      // Don't automatically transition here - let the useEffect handle it
+    },
+    onError: (error: Error) => {
+      console.error("Login error:", error);
+      setIsConnecting(false);
+      if (persistentToastId) {
+        toast.dismiss(persistentToastId);
+        setPersistentToastId(null);
+      }
+      // Reset to visit state on error
+      setClaimState('visit');
+      toast.error("Failed to connect wallet. Please try again.");
+    }
+  });
+  
+  // Detect context on mount
+  useEffect(() => {
+    async function detectContext() {
+      try {
+        const context = await frameSdk.getContext();
+        setIsWebContext(!context?.user?.fid);
+      } catch (error) {
+        console.error("Error detecting context:", error);
+        setIsWebContext(true);
+      }
+    }
+    detectContext();
+  }, []);
+
+  // Three states for both web and mini-app: visit, connecting, claim, success
+  // Web flow: visit -> connecting (Privy modal open) -> claim -> success
+  // Mini-app flow: visit -> claim -> success  
+  const [claimState, setClaimState] = useState<'visit' | 'connecting' | 'claim' | 'success'>('visit');
+  const isFrameRef = useRef(false);
+  const isClaimingRef = useRef(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [hasClickedLocally, setHasClickedLocally] = useState(false); // Track click in this session
+  
+  // Use the claim hook with web context
+  const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
   const { data: auctionImageData } = useAuctionImage(auctionId, winningUrl);
   
-  // Three states: visit (initial), claim (after visiting), success (after claiming)
-  const [claimState, setClaimState] = useState<'visit' | 'claim' | 'success'>('visit');
-  const isFrameRef = useRef(false);
-  const isClaimingRef = useRef(false); // Additional ref to prevent double claims
-  
   // Check if the winning image is a video - use auction data if available, otherwise assume false
   const isVideo = auctionImageData?.isVideo || false;
   
-  // Reset state when dialog opens based on hasClicked
+  // Reset state when dialog opens based on hasClicked and context
   useEffect(() => {
     if (isOpen) {
-      console.log('LinkVisitClaimPopup opened:', { hasClicked });
-      // Set initial state based on whether user has already clicked the link
-      // Only reset state if we're not already in 'success' state
+      console.log('LinkVisitClaimPopup opened:', { hasClicked, hasClickedLocally, isWebContext, authenticated, claimState });
+      
       setClaimState(prevState => {
-        // Don't change state if we're already in success state
+        // Don't reset if we're already in success state
         if (prevState === 'success') return prevState;
-        // Otherwise set based on hasClicked
-        return hasClicked ? 'claim' : 'visit';
+        
+        // Don't reset if we're in connecting state (during authentication flow)
+        if (prevState === 'connecting') return prevState;
+        
+        // Don't reset if we're in claim state and user is authenticated
+        if (prevState === 'claim' && authenticated) return prevState;
+        
+        if (isWebContext) {
+          // Web flow: visit -> (trigger wallet connection) -> claim -> success
+          if (!authenticated) {
+            return 'visit'; // Will trigger wallet connection after visiting
+          } else if (hasClicked || hasClickedLocally) {
+            return 'claim';
+          } else {
+            return 'visit';
+          }
+        } else {
+          // Mini-app flow: visit -> claim -> success (existing)
+          return hasClicked ? 'claim' : 'visit';
+        }
       });
     }
-  }, [isOpen, hasClicked]);
+  }, [isOpen, hasClicked, hasClickedLocally, isWebContext, authenticated, claimState]);
+
+  // Handle automatic state transition when authentication changes
+  useEffect(() => {
+    if (isWebContext && authenticated) {
+      // If user is authenticated and we're in connecting state, move to claim
+      if (claimState === 'connecting' && !isConnecting) {
+        console.log('Authentication completed, transitioning from connecting to claim state');
+        setClaimState('claim');
+      }
+      // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state, move to claim
+      else if (claimState === 'visit' && (hasClicked || hasClickedLocally)) {
+        console.log('User authenticated and has clicked, transitioning to claim state');
+        setClaimState('claim');
+      }
+    }
+  }, [authenticated, hasClicked, hasClickedLocally, claimState, isWebContext, isConnecting]);
 
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
@@ -167,53 +248,15 @@ export function LinkVisitClaimPopup({
     }
   }, [claimState]);
 
-  // Simply visit the link, update UI state to show claim button
-  const onLinkClick = async () => {
-    console.log('Link clicked, handling click for URL:', winningUrl);
-    
-    try {
-      // Create tracked redirect URL for popup image clicks
-      const trackedUrl = `${process.env.NEXT_PUBLIC_HOST_URL}/redirect?source=${encodeURIComponent(CLICK_SOURCES.POPUP_IMAGE)}`;
-      
-      // Open the tracked redirect URL with frameSdk
-      if (trackedUrl) {
-        try {
-          console.log('Redirecting to tracked URL:', trackedUrl);
-          await frameSdk.redirectToUrl(trackedUrl);
-          
-          // After visiting, show claim button
-          console.log('Link visited, showing claim button');
-          setTimeout(() => {
-            setClaimState('claim');
-          }, 1000); // Small delay to make transition feel natural
-          
-        } catch (error) {
-          console.error('Error using frameSdk for redirect, falling back to window.open:', error);
-          window.open(trackedUrl, '_blank', 'noopener,noreferrer');
-          
-          // Still update state after fallback
-          setTimeout(() => {
-            setClaimState('claim');
-          }, 1000);
-        }
-      }
-    } catch (error) {
-      console.error('Error handling link click:', error);
-      toast.error('Failed to open link. Please try again.');
-    }
-  };
-
-  // Handle claim - this is where we'll record the transaction
+  // Handle claim action
   const handleClaimAction = async () => {
-    if (isClaimLoading || isClaimingRef.current) return; // Prevent double-clicks during loading
+    if (isClaimLoading || isClaimingRef.current) return;
     
-    isClaimingRef.current = true; // Set claiming flag immediately
+    isClaimingRef.current = true;
     
     try {
-      // Immediately show success state for better UX
       setClaimState('success');
       
-      // Show success toast
       toast.success('1,000 $QR has been sent to your wallet.', {
         style: {
           background: 'var(--primary)',
@@ -223,57 +266,143 @@ export function LinkVisitClaimPopup({
         duration: 5000,
       });
       
-      // Process claim in background - this creates the database entry
-      try {
-        onClaim().catch(err => {
-          console.error('Background claim error:', err);
-          // We don't show this error since we already showed success UI
-        });
-      } catch (error) {
-        console.error('Claim error (silenced):', error);
-      }
+      onClaim().catch(err => {
+        console.error('Background claim error:', err);
+      });
     } finally {
-      // Reset claiming flag after a delay to prevent immediate re-claims
       setTimeout(() => {
         isClaimingRef.current = false;
       }, 2000);
     }
   };
-  
-  // Handle share to Warpcast
+
+  // Handle link click
+  const onLinkClick = async () => {
+    console.log('Link clicked, handling click for URL:', winningUrl);
+    
+    // Mark as clicked locally immediately
+    setHasClickedLocally(true);
+    
+    try {
+      if (isWebContext) {
+        // Web context: open in new tab immediately to avoid popup blockers
+        console.log('Opening URL in new tab (web context):', winningUrl);
+        window.open(winningUrl, '_blank', 'noopener,noreferrer');
+        
+        // Record click synchronously (blocking) to ensure state is updated
+        try {
+          const response = await fetch('/api/link-click', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              fid: -1,
+              auctionId: auctionId,
+              winningUrl: winningUrl,
+              address: address,
+              username: 'qrcoinweb',
+              claimSource: 'web'
+            })
+          });
+          
+          if (response.ok) {
+            console.log('Click recorded successfully');
+          } else {
+            console.error('Failed to record click:', response.status);
+          }
+        } catch (error) {
+          console.error('Error recording click:', error);
+        }
+        
+        // Move to next state based on authentication status
+        if (!authenticated) {
+          // Trigger wallet connection
+          handleConnectWallet();
+        } else {
+          // Already authenticated, go directly to claim
+          setClaimState('claim');
+        }
+      } else {
+        // Mini-app context: use frameSdk (existing logic)
+        const trackedUrl = `${process.env.NEXT_PUBLIC_HOST_URL}/redirect?source=${encodeURIComponent(CLICK_SOURCES.POPUP_IMAGE)}`;
+        
+        try {
+          await frameSdk.redirectToUrl(trackedUrl);
+          setTimeout(() => setClaimState('claim'), 1000);
+        } catch (error) {
+          console.error("Error redirecting to URL:", error);
+          window.open(trackedUrl, '_blank', 'noopener,noreferrer');
+          setTimeout(() => setClaimState('claim'), 1000);
+        }
+      }
+    } catch (error) {
+      console.error('Error handling link click:', error);
+      toast.error('Failed to open link. Please try again.');
+    }
+  };
+
+  // Handle connect wallet (web only)
+  const handleConnectWallet = () => {
+    console.log('Triggering Privy login modal');
+    
+    // Set connecting state to show appropriate UI
+    setIsConnecting(true);
+    setClaimState('connecting');
+    
+    // Show persistent toast
+    const toastId = toast.info('Connect wallet or enter email to claim 1000 $QR', {
+      duration: Infinity, // Persistent until manually dismissed
+    });
+    setPersistentToastId(toastId);
+    
+    // Trigger Privy login modal
+    login();
+  };
+
+  // Handle share
   const handleShare = async () => {
-    const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today’s winner @qrcoindotfun :)
+    if (isWebContext) {
+      // Web context: Twitter/X share
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun :)
+
+are you a crypto chad?`);
+      const shareUrl = `https://twitter.com/intent/tweet?text=${shareText}&url=${encodeURIComponent('https://qrcoin.fun')}`;
+      
+      window.open(shareUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // Mini-app context: Warpcast share (existing logic)
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun :)
 
 are you a Farcaster $PRO?`);
-    const embedUrl = encodeURIComponent(`https://qrcoin.fun/84`);
-    
-    // Add the main auction URL embed
-    let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
-    
-    // Add a quote cast as an additional embed (hardcoded example for now)
-    // Can replace this with an actual quote cast URL when needed
-    const quoteCastUrl = "https://farcaster.xyz/qrcoindotfun/0xbc04018b"; // Empty for now, add a real URL when needed
-    if (quoteCastUrl) {
-      shareUrl += `&embeds[]=${encodeURIComponent(quoteCastUrl)}`;
-    }
-    
-    if (isFrameRef.current) {
-      try {
-        await frameSdk.redirectToUrl(shareUrl);
-        // close the popup
-        onClose();
-      } catch (error) {
-        console.error("Error opening Warpcast in frame:", error);
+      const embedUrl = encodeURIComponent(`https://qrcoin.fun/84`);
+      
+      let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
+      
+      const quoteCastUrl = "https://farcaster.xyz/qrcoindotfun/0xbc04018b";
+      if (quoteCastUrl) {
+        shareUrl += `&embeds[]=${encodeURIComponent(quoteCastUrl)}`;
       }
-    } else {
-      window.open(shareUrl, '_blank', "noopener,noreferrer");
+      
+      if (isFrameRef.current) {
+        try {
+          await frameSdk.redirectToUrl(shareUrl);
+        } catch (error) {
+          console.error("Error opening Warpcast in frame:", error);
+        }
+      } else {
+        window.open(shareUrl, '_blank', "noopener,noreferrer");
+      }
     }
     
     onClose();
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()} modal={true}>
+    <Dialog open={isOpen && claimState !== 'connecting'} onOpenChange={(open) => {
+      // Allow normal closing when not in connecting state
+      if (!open && claimState !== 'connecting') {
+        onClose();
+      }
+    }} modal={true}>
       <CustomDialogContent className="p-0 overflow-hidden">
         <div className="flex flex-col items-center justify-center text-center">
           {claimState === 'success' ? (
@@ -297,6 +426,15 @@ are you a Farcaster $PRO?`);
                 alt="QR Token" 
                 className="w-28 h-28"
               />
+            </motion.div>
+          ) : claimState === 'connecting' ? (
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
+            >
+              <Wallet className="h-16 w-16 text-primary" />
             </motion.div>
           ) : (
             <>
@@ -343,6 +481,40 @@ are you a Farcaster $PRO?`);
               >
                 Click to claim 1,000 $QR!
               </motion.h2>
+            )}
+            
+            {claimState === 'connecting' && (
+              <>
+                <motion.h2 
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-xl font-bold text-foreground"
+                >
+                  Connect Your Wallet
+                </motion.h2>
+                
+                <motion.p
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-muted-foreground mb-5"
+                >
+                  Connect your wallet or enter your email to claim 1,000 $QR
+                </motion.p>
+                
+                <motion.div
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4 }}
+                  className="w-full flex justify-center mt-2"
+                >
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                    <span className="text-sm">Connecting...</span>
+                  </div>
+                </motion.div>
+              </>
             )}
             
             {claimState === 'claim' && (

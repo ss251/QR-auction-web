@@ -9,6 +9,7 @@ import confetti from 'canvas-confetti';
 import { frameSdk } from '@/lib/frame-sdk';
 import { toast } from "sonner";
 import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
+import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
 import { usePrivy, useLogin } from "@privy-io/react-auth";
@@ -118,17 +119,18 @@ export function LinkVisitClaimPopup({
     detectContext();
   }, []);
 
-  // Three states for both web and mini-app: visit, connecting, claim, success
-  // Web flow: visit -> connecting (Privy modal open) -> claim -> success
-  // Mini-app flow: visit -> claim -> success  
-  const [claimState, setClaimState] = useState<'visit' | 'connecting' | 'claim' | 'success'>('visit');
+  // Three states for both web and mini-app: visit, connecting, claim, success, already_claimed
+  // Web flow: visit -> connecting (Privy modal open) -> claim/already_claimed -> success
+  // Mini-app flow: visit -> claim/already_claimed -> success  
+  const [claimState, setClaimState] = useState<'visit' | 'connecting' | 'claim' | 'success' | 'already_claimed'>('visit');
   const isFrameRef = useRef(false);
   const isClaimingRef = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [hasClickedLocally, setHasClickedLocally] = useState(false); // Track click in this session
   
-  // Use the claim hook with web context
+  // Use the claim hook and eligibility hook
   const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
+  const { hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
   const { data: auctionImageData } = useAuctionImage(auctionId, winningUrl);
@@ -144,6 +146,9 @@ export function LinkVisitClaimPopup({
       setClaimState(prevState => {
         // Don't reset if we're already in success state
         if (prevState === 'success') return prevState;
+        
+        // Don't reset if we're already in already_claimed state
+        if (prevState === 'already_claimed') return prevState;
         
         // Don't reset if we're in connecting state (during authentication flow)
         if (prevState === 'connecting') return prevState;
@@ -170,19 +175,32 @@ export function LinkVisitClaimPopup({
 
   // Handle automatic state transition when authentication changes
   useEffect(() => {
-    if (isWebContext && authenticated) {
+    if (isWebContext && authenticated && !isEligibilityLoading) {
       // If user is authenticated and we're in connecting state, move to claim
       if (claimState === 'connecting' && !isConnecting) {
-        console.log('Authentication completed, transitioning from connecting to claim state');
-        setClaimState('claim');
+        console.log('Authentication completed, checking if user has already claimed...');
+        
+        // Check if user has already claimed - if so, show already_claimed state
+        if (hasClaimed) {
+          console.log('User has already claimed, showing already_claimed state');
+          setClaimState('already_claimed');
+        } else {
+          console.log('User has not claimed, transitioning to claim state');
+          setClaimState('claim');
+        }
       }
-      // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state, move to claim
+      // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state
       else if (claimState === 'visit' && (hasClicked || hasClickedLocally)) {
-        console.log('User authenticated and has clicked, transitioning to claim state');
-        setClaimState('claim');
+        if (hasClaimed) {
+          console.log('User authenticated, has clicked, but already claimed - showing already_claimed state');
+          setClaimState('already_claimed');
+        } else {
+          console.log('User authenticated and has clicked, transitioning to claim state');
+          setClaimState('claim');
+        }
       }
     }
-  }, [authenticated, hasClicked, hasClickedLocally, claimState, isWebContext, isConnecting]);
+  }, [authenticated, hasClicked, hasClickedLocally, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
 
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
@@ -293,9 +311,19 @@ export function LinkVisitClaimPopup({
         if (!authenticated) {
           // Trigger wallet connection
           handleConnectWallet();
+        } else if (isEligibilityLoading) {
+          // Wait for eligibility check to complete
+          console.log('Waiting for eligibility check to complete...');
+          setClaimState('claim'); // Temporary state while loading
         } else {
-          // Already authenticated, go directly to claim
-          setClaimState('claim');
+          // Already authenticated and eligibility check complete, check if they've already claimed
+          if (hasClaimed) {
+            console.log('User is authenticated and has already claimed, showing already_claimed state');
+            setClaimState('already_claimed');
+          } else {
+            console.log('User is authenticated and has not claimed, going to claim state');
+            setClaimState('claim');
+          }
         }
       } else {
         // Mini-app context: use frameSdk (existing logic)
@@ -303,11 +331,25 @@ export function LinkVisitClaimPopup({
         
         try {
           await frameSdk.redirectToUrl(trackedUrl);
-          setTimeout(() => setClaimState('claim'), 1000);
+          setTimeout(() => {
+            if (hasClaimed) {
+              console.log('Mini-app user has already claimed, showing already_claimed state');
+              setClaimState('already_claimed');
+            } else {
+              setClaimState('claim');
+            }
+          }, 1000);
         } catch (error) {
           console.error("Error redirecting to URL:", error);
           window.open(trackedUrl, '_blank', 'noopener,noreferrer');
-          setTimeout(() => setClaimState('claim'), 1000);
+          setTimeout(() => {
+            if (hasClaimed) {
+              console.log('Mini-app user has already claimed (fallback), showing already_claimed state');
+              setClaimState('already_claimed');
+            } else {
+              setClaimState('claim');
+            }
+          }, 1000);
         }
       }
     } catch (error) {
@@ -382,6 +424,15 @@ export function LinkVisitClaimPopup({
       <CustomDialogContent className="p-0 overflow-hidden">
         <div className="flex flex-col items-center justify-center text-center">
           {claimState === 'success' ? (
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="w-28 h-28 rounded-full flex items-center justify-center bg-green-500/20 mt-6"
+            >
+              <Check className="h-16 w-16 text-green-500" />
+            </motion.div>
+          ) : claimState === 'already_claimed' ? (
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -514,6 +565,17 @@ export function LinkVisitClaimPopup({
                 Claim Successful!
               </motion.h2>
             )}
+            
+            {claimState === 'already_claimed' && (
+              <motion.h2 
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.2 }}
+                className="text-xl font-bold text-foreground"
+              >
+                Already Claimed
+              </motion.h2>
+            )}
 
             {claimState === 'visit' && (
               <>
@@ -590,6 +652,34 @@ export function LinkVisitClaimPopup({
                     onClick={handleShare}
                   >
                     Share
+                  </Button>
+                </motion.div>
+              </>
+            )}
+            
+            {claimState === 'already_claimed' && (
+              <>
+                <motion.p
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-muted-foreground mb-5"
+                >
+                  Come back tomorrow for more $QR!
+                </motion.p>
+                
+                <motion.div
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4 }}
+                  className="w-full flex justify-center mt-2"
+                >
+                  <Button 
+                    variant="default" 
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-2 rounded-md focus:outline-none focus:ring-0 h-9"
+                    onClick={onClose}
+                  >
+                    OK
                   </Button>
                 </motion.div>
               </>

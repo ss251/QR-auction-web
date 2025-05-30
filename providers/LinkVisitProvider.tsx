@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getAuctionImage } from '@/utils/auctionImageOverrides';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
+import { getFarcasterUser } from '@/utils/farcaster';
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -195,40 +196,55 @@ export function LinkVisitProvider({
       try {
         console.log(`Checking web claim status for wallet=${walletAddress}, auctionId=${latestWonAuctionId}`);
         
-        // Direct DB query to check if claimed for web users
-        const { data, error } = await supabase
+        // Get Farcaster username associated with this address
+        let farcasterUsername: string | null = null;
+        try {
+          console.log('🔍 Getting Farcaster username for address:', walletAddress);
+          const farcasterUser = await getFarcasterUser(walletAddress);
+          farcasterUsername = farcasterUser?.username || null;
+          console.log('🔍 Associated Farcaster username:', farcasterUsername);
+        } catch (error) {
+          console.warn('Could not fetch Farcaster username for address:', error);
+        }
+        
+        // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
+        const { data: allClaims, error } = await supabase
           .from('link_visit_claims')
           .select('*')
           .eq('eth_address', walletAddress)
-          .eq('auction_id', latestWonAuctionId)
-          .eq('claim_source', 'web')
-          .maybeSingle();
+          .eq('auction_id', latestWonAuctionId);
+        
+        // Also check for claims by the Farcaster username if we found one
+        let usernameClaims: typeof allClaims = [];
+        if (farcasterUsername) {
+          console.log('🔍 Checking for username claims:', farcasterUsername);
+          const { data: usernameClaimsData, error: usernameError } = await supabase
+            .from('link_visit_claims')
+            .select('*')
+            .ilike('username', farcasterUsername)
+            .eq('auction_id', latestWonAuctionId);
+          
+          if (!usernameError && usernameClaimsData) {
+            usernameClaims = usernameClaimsData;
+            console.log('🔍 Username claims found:', usernameClaims.length);
+          }
+        }
+        
+        // Combine both sets of claims and deduplicate by id
+        const allClaimsArray = [...(allClaims || []), ...usernameClaims];
+        const combinedClaims = allClaimsArray.filter((claim, index, self) => 
+          index === self.findIndex(c => c.id === claim.id)
+        );
         
         console.log('🔍 DATABASE QUERY DETAILS:');
         console.log('  - Table: link_visit_claims');
         console.log('  - eth_address:', walletAddress);
+        console.log('  - farcaster_username:', farcasterUsername);
         console.log('  - auction_id:', latestWonAuctionId);
-        console.log('  - claim_source: web');
         console.log('  - Query error:', error);
-        console.log('  - Query result:', data);
-        
-        // Also check for ANY claims by this wallet address for this auction (debug)
-        const { data: allClaims } = await supabase
-          .from('link_visit_claims')
-          .select('*')
-          .eq('eth_address', walletAddress)
-          .eq('auction_id', latestWonAuctionId);
-        
-        console.log('🔍 ALL CLAIMS FOR THIS WALLET/AUCTION:', allClaims);
-        
-        // Check for case sensitivity issues with wallet address (addresses should be case-insensitive)
-        const { data: caseInsensitiveClaims } = await supabase
-          .from('link_visit_claims')
-          .select('*')
-          .ilike('eth_address', walletAddress)
-          .eq('auction_id', latestWonAuctionId);
-        
-        console.log('🔍 CASE-INSENSITIVE WALLET CLAIMS:', caseInsensitiveClaims);
+        console.log('  - Address claims found:', allClaims?.length || 0);
+        console.log('  - Username claims found:', usernameClaims.length);
+        console.log('  - Combined claims (deduplicated):', combinedClaims);
         
         if (error) {
           console.error('Error checking web claim status:', error);
@@ -238,39 +254,33 @@ export function LinkVisitProvider({
           return false;
         }
         
-        // Determine if user has claimed based on claimed_at field
-        const hasClaimed = !!(data && data.claimed_at);
-        console.log('🎯 FINAL CLAIM STATUS:', { 
-          hasClaimed, 
-          hasRecord: !!data,
-          hasClaimedAt: !!(data?.claimed_at),
-          record: data 
+        // Check if ANY claim has claimed_at (regardless of web/mini-app source)
+        const hasClaimedInAnyContext = combinedClaims && combinedClaims.some(claim => claim.claimed_at);
+        
+        console.log('🎯 CROSS-CONTEXT CLAIM CHECK (Address + Username):', { 
+          hasClaimedInAnyContext,
+          totalClaims: combinedClaims?.length || 0,
+          claimsWithClaimedAt: combinedClaims?.filter(c => c.claimed_at).length || 0,
+          farcasterUsername
         });
         
-        console.log('📊 SUMMARY OF ALL QUERIES:');
-        console.log('  1. Web-specific query (claim_source=web):', data ? 'FOUND' : 'NOT FOUND');
-        console.log('  2. All claims for wallet/auction:', allClaims?.length || 0, 'records');
-        console.log('  3. Case-insensitive claims:', caseInsensitiveClaims?.length || 0, 'records');
-        
-        // If no web-specific claim but other claims exist, log details
-        if (!data && ((allClaims && allClaims.length > 0) || (caseInsensitiveClaims && caseInsensitiveClaims.length > 0))) {
-          console.log('⚠️ NO WEB CLAIM FOUND BUT OTHER CLAIMS EXIST:');
-          if (allClaims && allClaims.length > 0) {
-            allClaims.forEach((claim, index) => {
-              console.log(`  Claim ${index + 1}:`, {
-                claim_source: claim.claim_source,
-                eth_address: claim.eth_address,
-                claimed_at: claim.claimed_at,
-                tx_hash: claim.tx_hash
-              });
+        if (hasClaimedInAnyContext && combinedClaims.length > 0) {
+          console.log('📊 CLAIMS BREAKDOWN:');
+          combinedClaims.forEach((claim, index) => {
+            console.log(`  Claim ${index + 1}:`, {
+              claim_source: claim.claim_source,
+              eth_address: claim.eth_address,
+              username: claim.username,
+              claimed_at: claim.claimed_at,
+              tx_hash: claim.tx_hash
             });
-          }
+          });
         }
         
-        setManualHasClaimedLatest(hasClaimed);
+        setManualHasClaimedLatest(hasClaimedInAnyContext);
         setExplicitlyCheckedClaim(true);
         setIsCheckingDatabase(false);
-        return hasClaimed;
+        return hasClaimedInAnyContext;
       } catch (error) {
         console.error('Unexpected error checking web claim status:', error);
         setManualHasClaimedLatest(false);
@@ -291,14 +301,48 @@ export function LinkVisitProvider({
       try {
         console.log(`Checking claim status for FID=${frameContext.user.fid}, auctionId=${latestWonAuctionId}`);
         
-        // Direct DB query to check if claimed
-        const { data, error } = await supabase
+        // Get the Farcaster username from frame context
+        const farcasterUsername = frameContext.user.username;
+        console.log('🔍 Frame username:', farcasterUsername);
+        
+        // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
+        const { data: allClaims, error } = await supabase
           .from('link_visit_claims')
           .select('*')
-          .eq('fid', frameContext.user.fid)
-          .eq('auction_id', latestWonAuctionId)
-          .eq('claim_source', 'mini_app')
-          .maybeSingle();
+          .eq('eth_address', walletAddress)
+          .eq('auction_id', latestWonAuctionId);
+        
+        // Also check for claims by the Farcaster username
+        let usernameClaims: typeof allClaims = [];
+        if (farcasterUsername) {
+          console.log('🔍 Checking for username claims:', farcasterUsername);
+          const { data: usernameClaimsData, error: usernameError } = await supabase
+            .from('link_visit_claims')
+            .select('*')
+            .ilike('username', farcasterUsername)
+            .eq('auction_id', latestWonAuctionId);
+          
+          if (!usernameError && usernameClaimsData) {
+            usernameClaims = usernameClaimsData;
+            console.log('🔍 Username claims found:', usernameClaims.length);
+          }
+        }
+        
+        // Combine both sets of claims and deduplicate by id
+        const allClaimsArray = [...(allClaims || []), ...usernameClaims];
+        const combinedClaims = allClaimsArray.filter((claim, index, self) => 
+          index === self.findIndex(c => c.id === claim.id)
+        );
+        
+        console.log('🔍 MINI-APP CROSS-CONTEXT CHECK:', {
+          wallet: walletAddress,
+          fid: frameContext.user.fid,
+          farcaster_username: farcasterUsername,
+          auction: latestWonAuctionId,
+          address_claims: allClaims?.length || 0,
+          username_claims: usernameClaims.length,
+          combined_claims: combinedClaims
+        });
         
         if (error) {
           console.error('Error checking claim status:', error);
@@ -308,14 +352,20 @@ export function LinkVisitProvider({
           return false;
         }
         
-        // Determine if user has claimed based on claimed_at field
-        const hasClaimed = !!(data && data.claimed_at);
-        console.log('Explicit claim check result:', { hasClaimed, record: data });
+        // Check if ANY claim has claimed_at (regardless of web/mini-app source)
+        const hasClaimedInAnyContext = combinedClaims && combinedClaims.some(claim => claim.claimed_at);
         
-        setManualHasClaimedLatest(hasClaimed);
+        console.log('🎯 MINI-APP CROSS-CONTEXT RESULT (Address + Username):', { 
+          hasClaimedInAnyContext,
+          totalClaims: combinedClaims?.length || 0,
+          claimsWithClaimedAt: combinedClaims?.filter(c => c.claimed_at).length || 0,
+          farcasterUsername
+        });
+        
+        setManualHasClaimedLatest(hasClaimedInAnyContext);
         setExplicitlyCheckedClaim(true);
         setIsCheckingDatabase(false);
-        return hasClaimed;
+        return hasClaimedInAnyContext;
       } catch (error) {
         console.error('Unexpected error checking claim status:', error);
         setManualHasClaimedLatest(false);

@@ -4,6 +4,7 @@ import { frameSdk } from '@/lib/frame-sdk';
 import type { Context } from '@farcaster/frame-sdk';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
+import { getFarcasterUser } from '@/utils/farcaster';
 
 // Setup Supabase client
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -109,7 +110,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       }
 
       if (isWebContext) {
-        // Web context: check by wallet address
+        // Web context: check by wallet address with cross-context support
         if (!effectiveWalletAddress) {
           console.log("No wallet address found for web context");
           setIsLoading(false);
@@ -119,30 +120,69 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         setIsLoading(true);
         
         try {
-          console.log("Checking database for web link visit status");
-          const { data, error } = await supabase
+          console.log("🔍 HOOK: Checking database for web link visit status with cross-context support");
+          
+          // Get Farcaster username associated with this address
+          let farcasterUsername: string | null = null;
+          try {
+            console.log('🔍 HOOK: Getting Farcaster username for address:', effectiveWalletAddress);
+            const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
+            farcasterUsername = farcasterUser?.username || null;
+            console.log('🔍 HOOK: Associated Farcaster username:', farcasterUsername);
+          } catch (error) {
+            console.warn('HOOK: Could not fetch Farcaster username for address:', error);
+          }
+          
+          // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
+          const { data: allClaims, error } = await supabase
             .from('link_visit_claims')
             .select('*')
             .eq('eth_address', effectiveWalletAddress)
-            .eq('auction_id', auctionId)
-            .eq('claim_source', 'web')
-            .maybeSingle();
+            .eq('auction_id', auctionId);
+          
+          // Also check for claims by the Farcaster username if we found one
+          let usernameClaims: typeof allClaims = [];
+          if (farcasterUsername) {
+            console.log('🔍 HOOK: Checking for username claims:', farcasterUsername);
+            const { data: usernameClaimsData, error: usernameError } = await supabase
+              .from('link_visit_claims')
+              .select('*')
+              .ilike('username', farcasterUsername)
+              .eq('auction_id', auctionId);
+            
+            if (!usernameError && usernameClaimsData) {
+              usernameClaims = usernameClaimsData;
+              console.log('🔍 HOOK: Username claims found:', usernameClaims.length);
+            }
+          }
+          
+          // Combine both sets of claims and deduplicate by id
+          const allClaimsArray = [...(allClaims || []), ...usernameClaims];
+          const combinedClaims = allClaimsArray.filter((claim, index, self) => 
+            index === self.findIndex(c => c.id === claim.id)
+          );
         
           if (error && error.code !== 'PGRST116') {
             console.error('Error checking web link visit status:', error);
           }
           
-          if (data) {
-            console.log("Web visit status found:", {
-              hasClicked: !!data.link_visited_at,
-              hasClaimed: !!data.claimed_at,
-              record: data
+          if (combinedClaims.length > 0) {
+            // Find the most relevant claim (prefer the one that matches the current context)
+            const relevantClaim = combinedClaims.find(claim => claim.eth_address === effectiveWalletAddress) || combinedClaims[0];
+            
+            console.log("🔍 HOOK: Cross-context visit status found:", {
+              hasClicked: !!relevantClaim.link_visited_at,
+              hasClaimed: !!relevantClaim.claimed_at,
+              totalClaims: combinedClaims.length,
+              farcasterUsername,
+              record: relevantClaim
             });
-            setHasClicked(!!data.link_visited_at);
-            setHasClaimed(!!data.claimed_at);
+            
+            setHasClicked(!!relevantClaim.link_visited_at);
+            setHasClaimed(!!relevantClaim.claimed_at);
           } else {
             // No record found, reset states
-            console.log("No web visit records found");
+            console.log("🔍 HOOK: No cross-context visit records found");
             setHasClicked(false);
             setHasClaimed(false);
           }
@@ -379,30 +419,59 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   // Manual refresh function
   const refreshStatus = useCallback(async () => {
     if (isWebContext) {
-      // Web context: refresh by wallet address
+      // Web context: refresh by wallet address with cross-context support
       if (effectiveWalletAddress && auctionId) {
-        console.log("Manual refresh for web auction", auctionId);
+        console.log("Manual refresh for web auction with cross-context check", auctionId);
         setIsLoading(true);
         
         try {
-          const { data, error } = await supabase
+          // Get Farcaster username associated with this address
+          let farcasterUsername: string | null = null;
+          try {
+            const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
+            farcasterUsername = farcasterUser?.username || null;
+          } catch (error) {
+            console.warn('Manual refresh: Could not fetch Farcaster username for address:', error);
+          }
+          
+          // Check for ANY claims by this wallet address (regardless of claim_source)
+          const { data: allClaims, error } = await supabase
             .from('link_visit_claims')
             .select('*')
             .eq('eth_address', effectiveWalletAddress)
-            .eq('auction_id', auctionId)
-            .eq('claim_source', 'web')
-            .maybeSingle();
+            .eq('auction_id', auctionId);
+          
+          // Also check for claims by the Farcaster username if we found one
+          let usernameClaims: typeof allClaims = [];
+          if (farcasterUsername) {
+            const { data: usernameClaimsData, error: usernameError } = await supabase
+              .from('link_visit_claims')
+              .select('*')
+              .ilike('username', farcasterUsername)
+              .eq('auction_id', auctionId);
+            
+            if (!usernameError && usernameClaimsData) {
+              usernameClaims = usernameClaimsData;
+            }
+          }
+          
+          // Combine both sets of claims and deduplicate by id
+          const allClaimsArray = [...(allClaims || []), ...usernameClaims];
+          const combinedClaims = allClaimsArray.filter((claim, index, self) => 
+            index === self.findIndex(c => c.id === claim.id)
+          );
           
           if (error && error.code !== 'PGRST116') {
             console.error('Manual web refresh error:', error);
           }
           
-          if (data) {
-            console.log("Manual web refresh found record:", data);
-            setHasClicked(!!data.link_visited_at);
-            setHasClaimed(!!data.claimed_at);
+          if (combinedClaims.length > 0) {
+            const relevantClaim = combinedClaims.find(claim => claim.eth_address === effectiveWalletAddress) || combinedClaims[0];
+            console.log("Manual web refresh found cross-context record:", relevantClaim);
+            setHasClicked(!!relevantClaim.link_visited_at);
+            setHasClaimed(!!relevantClaim.claimed_at);
           } else {
-            console.log("Manual web refresh found no record");
+            console.log("Manual web refresh found no cross-context record");
             setHasClicked(false);
             setHasClaimed(false);
           }
@@ -444,7 +513,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           }
         } catch (error) {
           console.error('Manual mini-app refresh error:', error);
-        } finally {
           setIsLoading(false);
         }
       }

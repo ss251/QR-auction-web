@@ -175,7 +175,7 @@ export function LinkVisitClaimPopup({
           }
         } else {
           // Mini-app flow: visit -> claim -> success (skip captcha)
-          return hasClicked ? 'claim' : 'visit';
+          return (hasClicked || hasClickedLocally) ? 'claim' : 'visit';
         }
       });
     }
@@ -209,6 +209,20 @@ export function LinkVisitClaimPopup({
       }
     }
   }, [authenticated, hasClicked, hasClickedLocally, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
+
+  // Handle mini-app auto-transition when hasClickedLocally changes
+  useEffect(() => {
+    if (!isWebContext && hasClickedLocally && claimState === 'visit') {
+      console.log('Mini-app user clicked locally, auto-transitioning to claim state');
+      if (hasClaimed) {
+        console.log('Mini-app user has already claimed, showing already_claimed state');
+        setClaimState('already_claimed');
+      } else {
+        console.log('Mini-app user has not claimed, going to claim state');
+        setClaimState('claim');
+      }
+    }
+  }, [hasClickedLocally, isWebContext, claimState, hasClaimed]);
 
   // Check if we're running in a Farcaster frame context
   useEffect(() => {

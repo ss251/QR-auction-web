@@ -638,12 +638,12 @@ export function LinkVisitProvider({
   }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase]);
   
   // Handle claim action
-  const handleClaim = async () => {
-    console.log('Handling claim in provider...', { claimAuctionId, isWebContext });
+  const handleClaim = async (captchaToken: string) => {
+    console.log('Handling claim in provider...', { claimAuctionId, isWebContext, captchaToken: captchaToken || 'none' });
     
     // For web context, wallet should already be connected via authentication check
     // For mini-app context, wallet should already be connected as before
-    const result = await claimTokens();
+    const result = await claimTokens(captchaToken || undefined);
     
     // Update our manual tracking state after claim
     if (result.txHash) {

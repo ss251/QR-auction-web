@@ -89,6 +89,7 @@ interface LinkVisitRequestData {
   username?: string;
   winning_url?: string;
   claim_source?: string;
+  captcha_token?: string; // Add captcha token
   [key: string]: unknown; // Allow other properties
 }
 
@@ -97,6 +98,42 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import queue functionality
 import { queueFailedClaim } from '@/lib/queue/failedClaims';
+
+// Function to verify Turnstile captcha token
+async function verifyTurnstileToken(token: string, clientIP: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        secret: process.env.TURNSTILE_SECRET_KEY || '',
+        response: token,
+        remoteip: clientIP,
+      }),
+    });
+
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log('✅ Turnstile verification successful');
+      return { success: true };
+    } else {
+      console.log('❌ Turnstile verification failed:', result['error-codes']);
+      return { 
+        success: false, 
+        error: result['error-codes']?.join(', ') || 'Captcha verification failed' 
+      };
+    }
+  } catch (error) {
+    console.error('Error verifying Turnstile token:', error);
+    return { 
+      success: false, 
+      error: 'Captcha verification service unavailable' 
+    };
+  }
+}
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {
@@ -240,7 +277,7 @@ export async function POST(request: NextRequest) {
     
     // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
-    const { fid, address, auction_id, username, winning_url, claim_source } = requestData;
+    const { fid, address, auction_id, username, winning_url, claim_source, captcha_token } = requestData;
     
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
     const isWebClaim = claim_source === 'web';
@@ -327,6 +364,56 @@ export async function POST(request: NextRequest) {
       }
       
       console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/2, daily: ${ipClaimsDaily?.length || 0}/5)`);
+    }
+    
+    // Captcha verification (for web users only)
+    if (claim_source === 'web') {
+      if (!captcha_token) {
+        console.log(`🚫 CAPTCHA MISSING: IP=${clientIP}, Web claim requires captcha verification`);
+        
+        await logFailedTransaction({
+          fid: -1,
+          eth_address: address || 'unknown',
+          auction_id: auction_id || 'unknown',
+          username: 'qrcoinweb',
+          winning_url: winning_url || null,
+          error_message: 'Captcha token required for web claims',
+          error_code: 'CAPTCHA_REQUIRED',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Captcha verification required' 
+        }, { status: 400 });
+      }
+      
+      console.log(`🧩 CAPTCHA VERIFICATION: Verifying token for IP=${clientIP}`);
+      const captchaResult = await verifyTurnstileToken(captcha_token, clientIP);
+      
+      if (!captchaResult.success) {
+        console.log(`🚫 CAPTCHA FAILED: IP=${clientIP}, Error=${captchaResult.error}`);
+        
+        await logFailedTransaction({
+          fid: -1,
+          eth_address: address || 'unknown',
+          auction_id: auction_id || 'unknown',
+          username: 'qrcoinweb',
+          winning_url: winning_url || null,
+          error_message: `Captcha verification failed: ${captchaResult.error}`,
+          error_code: 'CAPTCHA_VERIFICATION_FAILED',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Captcha verification failed' 
+        }, { status: 400 });
+      }
+      
+      console.log(`✅ CAPTCHA VERIFIED: IP=${clientIP}`);
     }
     
     // IMMEDIATE BLOCK for known abuser (before any validation) - only for mini-app users
@@ -503,7 +590,7 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
     
-    // Check if this FID has already claimed (only for mini-app users)
+    // Check if this FID has already claimed
     if (claim_source !== 'web' && claimDataByFid && claimDataByFid.length > 0 && claimDataByFid[0].claimed_at) {
       if (claimDataByFid[0].tx_hash) {
         console.log(`User ${fid} has already claimed tokens for auction ${auction_id} at tx ${claimDataByFid[0].tx_hash}`);

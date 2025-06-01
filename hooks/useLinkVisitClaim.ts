@@ -154,7 +154,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   };
 
   // Claim the tokens
-  const claimTokens = async (): Promise<{ txHash?: string }> => {
+  const claimTokens = async (captchaToken?: string): Promise<{ txHash?: string }> => {
     if (isWebContext) {
       // Web context: validate wallet connection
       if (!effectiveWalletAddress || !authenticated) {
@@ -199,7 +199,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
           auction_id: auctionId,
           username: isWebContext ? 'qrcoinweb' : frameContext?.user?.username,
           winning_url: lastVisitedUrl || `https://qrcoin.fun/auction/${auctionId}`,
-          claim_source: isWebContext ? 'web' : 'mini_app'
+          claim_source: isWebContext ? 'web' : 'mini_app',
+          captcha_token: captchaToken // Add captcha token
         }),
       });
 

@@ -13,6 +13,7 @@ import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
 import { usePrivy, useLogin } from "@privy-io/react-auth";
+import { Turnstile } from '@marsidev/react-turnstile';
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -21,7 +22,7 @@ interface LinkVisitClaimPopupProps {
   winningUrl: string;
   winningImage: string;
   auctionId: number;
-  onClaim: () => Promise<{ txHash?: string }>;
+  onClaim: (captchaToken: string) => Promise<{ txHash?: string }>;
 }
 
 // Custom dialog overlay with lower z-index (40 instead of 50)
@@ -118,14 +119,18 @@ export function LinkVisitClaimPopup({
     detectContext();
   }, []);
 
-  // Three states for both web and mini-app: visit, connecting, claim, success, already_claimed
-  // Web flow: visit -> connecting (Privy modal open) -> claim/already_claimed -> success
-  // Mini-app flow: visit -> claim/already_claimed -> success  
-  const [claimState, setClaimState] = useState<'visit' | 'connecting' | 'claim' | 'success' | 'already_claimed'>('visit');
+  // Three states for both web and mini-app: visit, connecting, captcha, claim, success, already_claimed
+  // Web flow: visit -> captcha -> claim -> success
+  // Mini-app flow: visit -> claim -> success  
+  const [claimState, setClaimState] = useState<'visit' | 'connecting' | 'captcha' | 'claim' | 'success' | 'already_claimed'>('visit');
   const isFrameRef = useRef(false);
   const isClaimingRef = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [hasClickedLocally, setHasClickedLocally] = useState(false); // Track click in this session
+  
+  // Captcha state
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [showCaptcha, setShowCaptcha] = useState(false);
   
   // Use the claim hook and eligibility hook
   const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
@@ -152,20 +157,24 @@ export function LinkVisitClaimPopup({
         // Don't reset if we're in connecting state (during authentication flow)
         if (prevState === 'connecting') return prevState;
         
-        // Don't reset if we're in claim state and user is authenticated
-        if (prevState === 'claim' && authenticated) return prevState;
+        // Don't reset if we're in captcha or claim state and user is authenticated
+        if ((prevState === 'captcha' || prevState === 'claim') && authenticated) return prevState;
         
         if (isWebContext) {
-          // Web flow: visit -> (trigger wallet connection) -> claim -> success
+          // Web flow: visit -> (trigger wallet connection) -> captcha -> claim -> success
           if (!authenticated) {
             return 'visit'; // Will trigger wallet connection after visiting
           } else if (hasClicked || hasClickedLocally) {
-            return 'claim';
+            if (hasClaimed) {
+              return 'already_claimed';
+            } else {
+              return 'captcha'; // Go to captcha state for web users
+            }
           } else {
             return 'visit';
           }
         } else {
-          // Mini-app flow: visit -> claim -> success (existing)
+          // Mini-app flow: visit -> claim -> success (skip captcha)
           return hasClicked ? 'claim' : 'visit';
         }
       });
@@ -175,7 +184,7 @@ export function LinkVisitClaimPopup({
   // Handle automatic state transition when authentication changes
   useEffect(() => {
     if (isWebContext && authenticated && !isEligibilityLoading) {
-      // If user is authenticated and we're in connecting state, move to claim
+      // If user is authenticated and we're in connecting state, move to captcha
       if (claimState === 'connecting' && !isConnecting) {
         console.log('Authentication completed, checking if user has already claimed...');
         
@@ -184,8 +193,8 @@ export function LinkVisitClaimPopup({
           console.log('User has already claimed, showing already_claimed state');
           setClaimState('already_claimed');
         } else {
-          console.log('User has not claimed, transitioning to claim state');
-          setClaimState('claim');
+          console.log('User has not claimed, transitioning to captcha state');
+          setClaimState('captcha');
         }
       }
       // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state
@@ -194,8 +203,8 @@ export function LinkVisitClaimPopup({
           console.log('User authenticated, has clicked, but already claimed - showing already_claimed state');
           setClaimState('already_claimed');
         } else {
-          console.log('User authenticated and has clicked, transitioning to claim state');
-          setClaimState('claim');
+          console.log('User authenticated and has clicked, transitioning to captcha state');
+          setClaimState('captcha');
         }
       }
     }
@@ -267,6 +276,12 @@ export function LinkVisitClaimPopup({
   const handleClaimAction = async () => {
     if (isClaimLoading || isClaimingRef.current) return;
     
+    // Check if captcha is required and verified (web users only)
+    if (isWebContext && !captchaToken) {
+      toast.error('Please complete the verification first.');
+      return;
+    }
+    
     isClaimingRef.current = true;
     
     try {
@@ -281,7 +296,8 @@ export function LinkVisitClaimPopup({
         duration: 5000,
       });
       
-      onClaim().catch(err => {
+      // Pass captcha token to claim function (null for mini-app users)
+      onClaim(captchaToken || '').catch(err => {
         console.error('Background claim error:', err);
       });
     } finally {
@@ -313,15 +329,15 @@ export function LinkVisitClaimPopup({
         } else if (isEligibilityLoading) {
           // Wait for eligibility check to complete
           console.log('Waiting for eligibility check to complete...');
-          setClaimState('claim'); // Temporary state while loading
+          setClaimState('captcha'); // Go to captcha state for web users
         } else {
           // Already authenticated and eligibility check complete, check if they've already claimed
           if (hasClaimed) {
             console.log('User is authenticated and has already claimed, showing already_claimed state');
             setClaimState('already_claimed');
           } else {
-            console.log('User is authenticated and has not claimed, going to claim state');
-            setClaimState('claim');
+            console.log('User is authenticated and has not claimed, going to captcha state');
+            setClaimState('captcha'); // Go to captcha state for web users
           }
         }
       } else {
@@ -374,6 +390,37 @@ export function LinkVisitClaimPopup({
     // Trigger Privy login modal
     login();
   };
+
+  // Handle captcha verification
+  const handleCaptchaSuccess = (token: string) => {
+    console.log('Captcha verified successfully, advancing to claim state');
+    setCaptchaToken(token);
+    setShowCaptcha(false);
+    // Auto-advance to claim state
+    setClaimState('claim');
+  };
+
+  const handleCaptchaError = () => {
+    console.error('Captcha verification failed');
+    setCaptchaToken(null);
+    setShowCaptcha(false);
+    toast.error('Captcha verification failed. Please try again.');
+  };
+
+  const handleCaptchaExpire = () => {
+    console.log('Captcha expired');
+    setCaptchaToken(null);
+    setShowCaptcha(false);
+    // Reset to captcha state to try again
+    setClaimState('captcha');
+  };
+
+  // Show captcha when entering claim state (web users only)
+  useEffect(() => {
+    if (claimState === 'claim' && isWebContext && !showCaptcha && !captchaToken) {
+      setShowCaptcha(true);
+    }
+  }, [claimState, isWebContext, showCaptcha, captchaToken]);
 
   // Handle share
   const handleShare = async () => {
@@ -462,6 +509,19 @@ export function LinkVisitClaimPopup({
             >
               <Wallet className="h-16 w-16 text-primary" />
             </motion.div>
+          ) : claimState === 'captcha' ? (
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="w-28 h-28 rounded-full flex items-center justify-center bg-secondary mt-6"
+            >
+              <img 
+                src="/qrLogo.png" 
+                alt="QR Token" 
+                className="w-28 h-28"
+              />
+            </motion.div>
           ) : (
             <>
               <motion.div
@@ -544,14 +604,16 @@ export function LinkVisitClaimPopup({
             )}
             
             {claimState === 'claim' && (
-              <motion.h2 
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="text-xl font-bold text-foreground"
-              >
-                Claim 1,000 $QR
-              </motion.h2>
+              <>
+                <motion.h2 
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-xl font-bold text-foreground"
+                >
+                  Claim 1,000 $QR
+                </motion.h2>
+              </>
             )}
             
             {claimState === 'success' && (
@@ -610,7 +672,7 @@ export function LinkVisitClaimPopup({
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
-                  className="w-full flex justify-center mt-2"
+                  className="w-full flex justify-center mt-2 min-h-[65px]"
                 >
                   <Button 
                     variant="default" 
@@ -680,6 +742,48 @@ export function LinkVisitClaimPopup({
                   >
                     OK
                   </Button>
+                </motion.div>
+              </>
+            )}
+
+            {claimState === 'captcha' && (
+              <>
+                <motion.h2 
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.2 }}
+                  className="text-xl font-bold text-foreground"
+                >
+                  Security Check
+                </motion.h2>
+                
+                <motion.p
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.3 }}
+                  className="text-muted-foreground mb-5"
+                >
+                  Please verify you&apos;re human to continue
+                </motion.p>
+                
+                <motion.div
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: 0.4 }}
+                  className="w-full flex justify-center mt-2 min-h-[65px]"
+                >
+                  <div className="flex flex-col items-center gap-3">
+                    <Turnstile
+                      siteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '0x4AAAAAAAiGgT-bNZFUpUYw'}
+                      onSuccess={handleCaptchaSuccess}
+                      onError={handleCaptchaError}
+                      onExpire={handleCaptchaExpire}
+                      options={{
+                        theme: 'auto',
+                        size: 'normal',
+                      }}
+                    />
+                  </div>
                 </motion.div>
               </>
             )}

@@ -305,7 +305,7 @@ export async function POST(request: NextRequest) {
         .not('claimed_at', 'is', null);
       
       if (ipClaimsThisAuction && ipClaimsThisAuction.length >= 3) {
-        console.log(`🚫 IP AUCTION LIMIT EXCEEDED: IP=${clientIP} has ${ipClaimsThisAuction.length} claims for auction ${auction_id} (max: 3)`);
+        console.log(`🚫 IP AUCTION LIMIT EXCEEDED: IP=${clientIP} has ${ipClaimsThisAuction.length} claims for auction ${auction_id} (limit: 3)`);
         
         await logFailedTransaction({
           fid: -1,
@@ -313,7 +313,7 @@ export async function POST(request: NextRequest) {
           auction_id: auction_id || 'unknown',
           username: 'qrcoinweb',
           winning_url: winning_url || null,
-          error_message: `IP has exceeded auction claim limit: ${ipClaimsThisAuction.length}/3`,
+          error_message: `IP ${clientIP} exceeded per-auction limit: ${ipClaimsThisAuction.length}/3 claims`,
           error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
           client_ip: clientIP
@@ -321,7 +321,8 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({ 
           success: false, 
-          error: 'Too many claims from this IP for this auction' 
+          error: 'Rate limit exceeded for this auction',
+          code: 'IP_AUCTION_LIMIT_EXCEEDED'
         }, { status: 429 });
       }
       

@@ -246,16 +246,6 @@ export function LinkVisitProvider({
           index === self.findIndex(c => c.id === claim.id)
         );
         
-        console.log('🔍 DATABASE QUERY DETAILS:');
-        console.log('  - Table: link_visit_claims');
-        console.log('  - eth_address:', effectiveWalletAddress);
-        console.log('  - farcaster_username:', farcasterUsername);
-        console.log('  - auction_id:', latestWonAuctionId);
-        console.log('  - Query error:', error);
-        console.log('  - Address claims found:', allClaims?.length || 0);
-        console.log('  - Username claims found:', usernameClaims.length);
-        console.log('  - Combined claims (deduplicated):', combinedClaims);
-        
         if (error) {
           console.error('Error checking web claim status:', error);
           setManualHasClaimedLatest(false);
@@ -266,26 +256,6 @@ export function LinkVisitProvider({
         
         // Check if ANY claim has claimed_at (regardless of web/mini-app source)
         const hasClaimedInAnyContext = combinedClaims && combinedClaims.some(claim => claim.claimed_at);
-        
-        console.log('🎯 CROSS-CONTEXT CLAIM CHECK (Address + Username):', { 
-          hasClaimedInAnyContext,
-          totalClaims: combinedClaims?.length || 0,
-          claimsWithClaimedAt: combinedClaims?.filter(c => c.claimed_at).length || 0,
-          farcasterUsername
-        });
-        
-        if (hasClaimedInAnyContext && combinedClaims.length > 0) {
-          console.log('📊 CLAIMS BREAKDOWN:');
-          combinedClaims.forEach((claim, index) => {
-            console.log(`  Claim ${index + 1}:`, {
-              claim_source: claim.claim_source,
-              eth_address: claim.eth_address,
-              username: claim.username,
-              claimed_at: claim.claimed_at,
-              tx_hash: claim.tx_hash
-            });
-          });
-        }
         
         setManualHasClaimedLatest(hasClaimedInAnyContext);
         setExplicitlyCheckedClaim(true);
@@ -313,7 +283,6 @@ export function LinkVisitProvider({
         
         // Get the Farcaster username from frame context
         const farcasterUsername = frameContext.user.username;
-        console.log('🔍 Frame username:', farcasterUsername);
         
         // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
         const { data: allClaims, error } = await supabase
@@ -325,7 +294,6 @@ export function LinkVisitProvider({
         // Also check for claims by the Farcaster username
         let usernameClaims: typeof allClaims = [];
         if (farcasterUsername) {
-          console.log('🔍 Checking for username claims:', farcasterUsername);
           const { data: usernameClaimsData, error: usernameError } = await supabase
             .from('link_visit_claims')
             .select('*')
@@ -334,7 +302,6 @@ export function LinkVisitProvider({
           
           if (!usernameError && usernameClaimsData) {
             usernameClaims = usernameClaimsData;
-            console.log('🔍 Username claims found:', usernameClaims.length);
           }
         }
         
@@ -343,16 +310,6 @@ export function LinkVisitProvider({
         const combinedClaims = allClaimsArray.filter((claim, index, self) => 
           index === self.findIndex(c => c.id === claim.id)
         );
-        
-        console.log('🔍 MINI-APP CROSS-CONTEXT CHECK:', {
-          wallet: effectiveWalletAddress,
-          fid: frameContext.user.fid,
-          farcaster_username: farcasterUsername,
-          auction: latestWonAuctionId,
-          address_claims: allClaims?.length || 0,
-          username_claims: usernameClaims.length,
-          combined_claims: combinedClaims
-        });
         
         if (error) {
           console.error('Error checking claim status:', error);
@@ -364,13 +321,6 @@ export function LinkVisitProvider({
         
         // Check if ANY claim has claimed_at (regardless of web/mini-app source)
         const hasClaimedInAnyContext = combinedClaims && combinedClaims.some(claim => claim.claimed_at);
-        
-        console.log('🎯 MINI-APP CROSS-CONTEXT RESULT (Address + Username):', { 
-          hasClaimedInAnyContext,
-          totalClaims: combinedClaims?.length || 0,
-          claimsWithClaimedAt: combinedClaims?.filter(c => c.claimed_at).length || 0,
-          farcasterUsername
-        });
         
         setManualHasClaimedLatest(hasClaimedInAnyContext);
         setExplicitlyCheckedClaim(true);
@@ -498,47 +448,16 @@ export function LinkVisitProvider({
     }
   }, [hasClicked, hasClaimed, manualHasClaimedLatest]);
   
-  // Debug logs
-  useEffect(() => {
-    console.log('===== LINK VISIT PROVIDER DEBUG =====');
-    console.log('auctionId:', auctionId);
-    console.log('claimAuctionId (for recording claims):', claimAuctionId);
-    console.log('latestWonAuctionId:', latestWonAuctionId);
-    console.log('latestWinningUrl:', latestWinningUrl);
-    console.log('latestWinningImage:', latestWinningImage);
-    console.log('hasClicked:', hasClicked);
-    console.log('hasClaimed:', hasClaimed);
-    console.log('manualHasClaimedLatest:', manualHasClaimedLatest);
-    console.log('explicitlyCheckedClaim:', explicitlyCheckedClaim); 
-    console.log('isLoading:', isLoading);
-    console.log('hasCheckedEligibility:', hasCheckedEligibility);
-    console.log('effectiveWalletAddress:', effectiveWalletAddress);
-    console.log('showClaimPopup:', showClaimPopup);
-    console.log('frameContext?.user?.fid:', frameContext?.user?.fid);
-    console.log('isLatestWonAuction:', isLatestWonAuction);
-    console.log('isCheckingLatestAuction:', isCheckingLatestAuction);
-    console.log('isPopupActive:', isPopupActive('linkVisit'));
-    console.log('isWebContext:', isWebContext);
-    console.log('needsWalletConnection:', needsWalletConnection);
-    console.log('authenticated:', authenticated);
-    console.log('authCheckComplete:', authCheckComplete);
-    console.log('walletStatusDetermined:', walletStatusDetermined);
-    console.log('isCheckingDatabase:', isCheckingDatabase);
-  }, [auctionId, claimAuctionId, latestWonAuctionId, latestWinningUrl, latestWinningImage, 
-      hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, 
-      hasCheckedEligibility, effectiveWalletAddress, showClaimPopup, frameContext, isLatestWonAuction, 
-      isCheckingLatestAuction, isPopupActive, isWebContext, needsWalletConnection, authenticated, authCheckComplete, walletStatusDetermined, isCheckingDatabase]);
-  
   // Listen for trigger from other popups closing
   useEffect(() => {
     const handleTrigger = () => {
       console.log('===== LINK VISIT TRIGGERED BY OTHER POPUP =====');
       
       // QUICK DISABLE: Exit early for web context
-      if (isWebContext) {
-        console.log('❌ Web popup disabled - skipping web context');
-        return;
-      }
+      // if (isWebContext) {
+      //   console.log('❌ Web popup disabled - skipping web context');
+      //   return;
+      // }
       
       // Don't show popup if wallet status hasn't been determined yet
       if (!walletStatusDetermined) {
@@ -579,15 +498,17 @@ export function LinkVisitProvider({
           console.log('❌ Triggered but web user not eligible for link visit - combined claim status:', combinedHasClaimed);
         }
       } else {
-        // Mini-app logic (existing)
-        if (manualHasClaimedLatest === false && latestWonAuctionId && !isLoading) {
-          console.log('🎉 TRIGGERED - SHOWING MINI-APP LINK VISIT POPUP');
+        // Mini-app logic - use combined claim status
+        const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+        
+        if (!combinedHasClaimed && latestWonAuctionId && !isLoading) {
+          console.log('🎉 TRIGGERED - SHOWING MINI-APP LINK VISIT POPUP (combined check)');
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
           }
         } else {
-          console.log('❌ Triggered but mini-app user not eligible for link visit');
+          console.log('❌ Triggered but mini-app user not eligible for link visit (combined status: manual=' + manualHasClaimedLatest + ', hook=' + hasClaimed + ')');
         }
       }
       setHasCheckedEligibility(true);
@@ -603,10 +524,10 @@ export function LinkVisitProvider({
     console.log('LinkVisit auto-show is enabled - checking eligibility independently');
     
     // QUICK DISABLE: Exit early for web context
-    if (isWebContext) {
-      console.log('❌ Web popup disabled - skipping web context auto-show');
-      return;
-    }
+    // if (isWebContext) {
+    //   console.log('❌ Web popup disabled - skipping web context auto-show');
+    //   return;
+    // }
     
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
@@ -687,9 +608,12 @@ export function LinkVisitProvider({
         latestWonAuctionId,
       });
       
+      // Use combined claim status (same as context value)
+      const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+      
       // Only show popup if the user hasn't claimed for the latest won auction
-      if (manualHasClaimedLatest === false && latestWonAuctionId) {
-        console.log('SHOWING POPUP - Mini-app user has not claimed tokens for the latest won auction');
+      if (!combinedHasClaimed && latestWonAuctionId) {
+        console.log('SHOWING POPUP - Mini-app user has not claimed tokens for the latest won auction (combined check)');
         
         // Shorter delay since we've already waited for status determination
         const timer = setTimeout(() => {
@@ -703,8 +627,8 @@ export function LinkVisitProvider({
         
         return () => clearTimeout(timer);
       } else {
-        if (manualHasClaimedLatest === true) {
-          console.log('NOT showing popup - Mini-app user already claimed (confirmed with DB)');
+        if (combinedHasClaimed) {
+          console.log('NOT showing popup - Mini-app user already claimed (combined status: manual=' + manualHasClaimedLatest + ', hook=' + hasClaimed + ')');
         } else if (!latestWonAuctionId) {
           console.log('NOT showing popup - No latest won auction found');
         }

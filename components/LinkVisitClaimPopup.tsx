@@ -129,7 +129,7 @@ export function LinkVisitClaimPopup({
   
   // Use the claim hook and eligibility hook
   const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
-  const { hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
+  const { hasClicked: hasClickedFromHook, hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
   const { data: auctionImageData } = useAuctionImage(auctionId, winningUrl);
@@ -159,18 +159,18 @@ export function LinkVisitClaimPopup({
           // Web flow: visit -> (trigger wallet connection) -> claim -> success
           if (!authenticated) {
             return 'visit'; // Will trigger wallet connection after visiting
-          } else if (hasClicked || hasClickedLocally) {
+          } else if (hasClickedFromHook || hasClickedLocally) {
             return 'claim';
           } else {
             return 'visit';
           }
         } else {
           // Mini-app flow: visit -> claim -> success (existing)
-          return hasClicked ? 'claim' : 'visit';
+          return (hasClickedFromHook || hasClickedLocally) ? 'claim' : 'visit';
         }
       });
     }
-  }, [isOpen, hasClicked, hasClickedLocally, isWebContext, authenticated, claimState]);
+  }, [isOpen, hasClickedFromHook, hasClickedLocally, isWebContext, authenticated, claimState]);
 
   // Handle automatic state transition when authentication changes
   useEffect(() => {
@@ -189,7 +189,7 @@ export function LinkVisitClaimPopup({
         }
       }
       // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state
-      else if (claimState === 'visit' && (hasClicked || hasClickedLocally)) {
+      else if (claimState === 'visit' && (hasClickedFromHook || hasClickedLocally)) {
         if (hasClaimed) {
           console.log('User authenticated, has clicked, but already claimed - showing already_claimed state');
           setClaimState('already_claimed');
@@ -199,7 +199,21 @@ export function LinkVisitClaimPopup({
         }
       }
     }
-  }, [authenticated, hasClicked, hasClickedLocally, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
+  }, [authenticated, hasClickedFromHook, hasClickedLocally, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
+
+  // Handle automatic state transition for mini-app when local click state changes
+  useEffect(() => {
+    if (!isWebContext && hasClickedLocally && claimState === 'visit') {
+      console.log('Mini-app user clicked locally, transitioning to claim state');
+      if (hasClaimed) {
+        console.log('Mini-app user has already claimed, showing already_claimed state');
+        setClaimState('already_claimed');
+      } else {
+        console.log('Mini-app user transitioning to claim state');
+        setClaimState('claim');
+      }
+    }
+  }, [hasClickedLocally, hasClaimed, claimState, isWebContext]);
 
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
@@ -330,25 +344,11 @@ export function LinkVisitClaimPopup({
         
         try {
           await frameSdk.redirectToUrl(trackedUrl);
-          setTimeout(() => {
-            if (hasClaimed) {
-              console.log('Mini-app user has already claimed, showing already_claimed state');
-              setClaimState('already_claimed');
-            } else {
-              setClaimState('claim');
-            }
-          }, 1000);
+          // State transition is now handled by useEffect when hasClickedLocally changes
         } catch (error) {
           console.error("Error redirecting to URL:", error);
           window.open(trackedUrl, '_blank', 'noopener,noreferrer');
-          setTimeout(() => {
-            if (hasClaimed) {
-              console.log('Mini-app user has already claimed (fallback), showing already_claimed state');
-              setClaimState('already_claimed');
-            } else {
-              setClaimState('claim');
-            }
-          }, 1000);
+          // State transition is now handled by useEffect when hasClickedLocally changes
         }
       }
     } catch (error) {

@@ -391,7 +391,9 @@ export async function POST(req: NextRequest) {
           tx_hash: txReceipt.hash,
           success: true,
           username: failure.username || null,
-          winning_url: failure.winning_url || `https://qrcoin.fun/auction/${failure.auction_id}`
+          winning_url: failure.winning_url || `https://qrcoin.fun/auction/${failure.auction_id}`,
+          claim_source: failure.claim_source || 'mini_app',
+          client_ip: failure.client_ip || 'queue_retry' // Track original IP or mark as retry
         });
       
       if (insertError) {
@@ -403,9 +405,11 @@ export async function POST(req: NextRequest) {
           .update({
             eth_address: failure.eth_address,
             claimed_at: new Date().toISOString(),
-            amount: 2000,
+            amount: 1000, // Fixed: was incorrectly 2000
             tx_hash: txReceipt.hash,
-            success: true
+            success: true,
+            claim_source: failure.claim_source || 'mini_app',
+            client_ip: failure.client_ip || 'queue_retry' // Track original IP or mark as retry
           })
           .match({
             fid: failure.fid,

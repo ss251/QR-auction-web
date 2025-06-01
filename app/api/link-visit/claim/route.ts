@@ -228,12 +228,6 @@ export async function POST(request: NextRequest) {
   
   console.log(`🌐 REQUEST IP DEBUGGING: Detected IP=${clientIP}`);
   
-  // Rate limiting FIRST: 3 requests per minute per IP (before any processing)
-  if (isRateLimited(clientIP, 3, 60000)) {
-    console.log(`🚫 RATE LIMITED: IP=${clientIP} (too many link visit claim requests)`);
-    return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
-  }
-  
   try {
     // Validate API key first
     const apiKey = request.headers.get('x-api-key');
@@ -244,12 +238,96 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
     
-    // Parse request body
+    // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
     const { fid, address, auction_id, username, winning_url, claim_source } = requestData;
     
+    // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
+    const isWebClaim = claim_source === 'web';
+    const rateLimit = isWebClaim ? 2 : 3;
+    const rateLimitWindow = 60000; // 1 minute
+    
+    if (isRateLimited(clientIP, rateLimit, rateLimitWindow)) {
+      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${isWebClaim ? 'web' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
+      return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
+    }
+    
     // Log all requests with IP
     console.log(`💰 LINK VISIT CLAIM: IP=${clientIP}, FID=${fid || 'none'}, auction=${auction_id}, address=${address || 'none'}, username=${username || 'none'}, source=${claim_source || 'mini_app'}`);
+    
+    // IP-based anti-bot validation (WEB USERS ONLY)
+    if (claim_source === 'web') {
+      console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for web claim protection`);
+      
+      // Check 1: Max 2 claims per IP per auction
+      const { data: ipClaimsThisAuction, error: ipAuctionError } = await supabase
+        .from('link_visit_claims')
+        .select('id, claimed_at, eth_address')
+        .eq('auction_id', auction_id)
+        .eq('client_ip', clientIP)
+        .not('claimed_at', 'is', null);
+      
+      if (ipAuctionError) {
+        console.error('Error checking IP auction claims:', ipAuctionError);
+      } else if (ipClaimsThisAuction && ipClaimsThisAuction.length >= 2) {
+        console.log(`🚫 IP AUCTION LIMIT: IP=${clientIP} has ${ipClaimsThisAuction.length} claims for auction ${auction_id} (max: 2)`);
+        
+        // Log this as a blocked attempt
+        await logFailedTransaction({
+          fid: -1,
+          eth_address: address || 'unknown',
+          auction_id: auction_id || 'unknown',
+          username: 'qrcoinweb',
+          winning_url: winning_url || null,
+          error_message: `IP ${clientIP} exceeded per-auction limit (${ipClaimsThisAuction.length}/2 claims)`,
+          error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Too many claims from this IP address for this auction' 
+        }, { status: 429 });
+      }
+      
+      // Check 2: Max 5 claims per IP per 24 hours
+      const yesterday = new Date();
+      yesterday.setHours(yesterday.getHours() - 24);
+      
+      const { data: ipClaimsDaily, error: ipDailyError } = await supabase
+        .from('link_visit_claims')
+        .select('id, claimed_at, auction_id')
+        .eq('client_ip', clientIP)
+        .gte('claimed_at', yesterday.toISOString())
+        .not('claimed_at', 'is', null);
+      
+      if (ipDailyError) {
+        console.error('Error checking IP daily claims:', ipDailyError);
+      } else if (ipClaimsDaily && ipClaimsDaily.length >= 5) {
+        console.log(`🚫 IP DAILY LIMIT: IP=${clientIP} has ${ipClaimsDaily.length} claims in 24h (max: 5)`);
+        
+        // Log this as a blocked attempt
+        await logFailedTransaction({
+          fid: -1,
+          eth_address: address || 'unknown',
+          auction_id: auction_id || 'unknown',
+          username: 'qrcoinweb',
+          winning_url: winning_url || null,
+          error_message: `IP ${clientIP} exceeded daily limit (${ipClaimsDaily.length}/5 claims in 24h)`,
+          error_code: 'IP_DAILY_LIMIT_EXCEEDED',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Too many claims from this IP address in the last 24 hours' 
+        }, { status: 429 });
+      }
+      
+      console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/2, daily: ${ipClaimsDaily?.length || 0}/5)`);
+    }
     
     // IMMEDIATE BLOCK for known abuser (before any validation) - only for mini-app users
     if (claim_source !== 'web' && (fid === 521172 || username === 'nancheng' || address === '0x52d24FEcCb7C546ABaE9e89629c9b417e48FaBD2')) {
@@ -779,7 +857,8 @@ export async function POST(request: NextRequest) {
           success: true,
           username: effectiveUsername,
           winning_url: winningUrl,
-          claim_source: claim_source || 'mini_app'
+          claim_source: claim_source || 'mini_app',
+          client_ip: clientIP // Track IP for successful claims
         });
         
       if (insertError) {
@@ -795,7 +874,8 @@ export async function POST(request: NextRequest) {
             success: true,
             username: effectiveUsername,
             winning_url: winningUrl,
-            claim_source: claim_source || 'mini_app'
+            claim_source: claim_source || 'mini_app',
+            client_ip: clientIP // Track IP for successful claims
           })
           .match({
             fid: effectiveFid,

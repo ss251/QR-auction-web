@@ -296,27 +296,24 @@ export async function POST(request: NextRequest) {
     if (claim_source === 'web') {
       console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for web claim protection`);
       
-      // Check 1: Max 2 claims per IP per auction
-      const { data: ipClaimsThisAuction, error: ipAuctionError } = await supabase
+      // Check 1: Max 3 claims per IP per auction
+      const { data: ipClaimsThisAuction } = await supabase
         .from('link_visit_claims')
         .select('id, claimed_at, eth_address')
         .eq('auction_id', auction_id)
         .eq('client_ip', clientIP)
         .not('claimed_at', 'is', null);
       
-      if (ipAuctionError) {
-        console.error('Error checking IP auction claims:', ipAuctionError);
-      } else if (ipClaimsThisAuction && ipClaimsThisAuction.length >= 2) {
-        console.log(`🚫 IP AUCTION LIMIT: IP=${clientIP} has ${ipClaimsThisAuction.length} claims for auction ${auction_id} (max: 2)`);
+      if (ipClaimsThisAuction && ipClaimsThisAuction.length >= 3) {
+        console.log(`🚫 IP AUCTION LIMIT EXCEEDED: IP=${clientIP} has ${ipClaimsThisAuction.length} claims for auction ${auction_id} (max: 3)`);
         
-        // Log this as a blocked attempt
         await logFailedTransaction({
           fid: -1,
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
           username: 'qrcoinweb',
           winning_url: winning_url || null,
-          error_message: `IP ${clientIP} exceeded per-auction limit (${ipClaimsThisAuction.length}/2 claims)`,
+          error_message: `IP has exceeded auction claim limit: ${ipClaimsThisAuction.length}/3`,
           error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
           client_ip: clientIP
@@ -324,7 +321,7 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({ 
           success: false, 
-          error: 'Too many claims from this IP address for this auction' 
+          error: 'Too many claims from this IP for this auction' 
         }, { status: 429 });
       }
       
@@ -363,7 +360,7 @@ export async function POST(request: NextRequest) {
         }, { status: 429 });
       }
       
-      console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/2, daily: ${ipClaimsDaily?.length || 0}/5)`);
+      console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/3, daily: ${ipClaimsDaily?.length || 0}/5)`);
     }
     
     // Captcha verification (for web users only)

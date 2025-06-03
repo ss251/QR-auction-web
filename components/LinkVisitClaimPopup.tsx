@@ -395,8 +395,8 @@ export function LinkVisitClaimPopup({
     setIsConnecting(true);
     setClaimState('connecting');
     
-    // Show persistent toast
-    const toastId = toast.info('Connect wallet or enter email to claim 1000 $QR', {
+    // Show persistent toast with updated message
+    const toastId = toast.info('Sign in with X to claim 1000 $QR', {
       duration: Infinity, // Persistent until manually dismissed
     });
     setPersistentToastId(toastId);

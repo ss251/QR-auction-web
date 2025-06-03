@@ -42,6 +42,9 @@ import { broadcastConnection } from "@/lib/channelManager";
 import { frameSdk } from "@/lib/frame-sdk";
 import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
 
+// Import the frame detection functions from privyConfig
+import { isInFarcasterFrame, isInWarpcastIframe } from "@/config/privyConfig";
+
 // --- Constants ---
 const BASE_MAINNET_ID = 8453;
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as Address; // Base Mainnet USDC
@@ -105,6 +108,13 @@ export function CustomWallet() {
   const drawerRef = useRef<HTMLDivElement>(null);
   const dragControls = useDragControls();
 
+  // NEW: Detect website context
+  const [isWebsiteContext, setIsWebsiteContext] = useState(false);
+  
+  useEffect(() => {
+    setIsWebsiteContext(!isInFarcasterFrame() && !isInWarpcastIframe());
+  }, []);
+
   const { ready, authenticated, user } = usePrivy();
   const { wallets } = useWallets();
   const { address: eoaAddress, chain } = useAccount();
@@ -118,9 +128,15 @@ export function CustomWallet() {
   const { login } = useLogin({
     onComplete: () => {
       if (DEBUG) {
-      console.log("Login complete");
+        console.log("Login complete - Twitter/Farcaster user authenticated", { isWebsiteContext });
       }
       setIsConnecting(false); // Reset connecting state on completion
+      
+      // For Twitter/Farcaster users on website, we want them to connect a wallet next
+      // Don't force another login - let them see the "connect wallet" flow
+      if (isWebsiteContext) {
+        console.log("Twitter/Farcaster user logged in successfully on website - ready for wallet connection");
+      }
     },
     onError: (error: Error) => {
       console.error("Login error:", error);
@@ -151,11 +167,34 @@ export function CustomWallet() {
   const { client: smartWalletClient } = useSmartWallets();
   const userEmail = user?.email?.address;
 
+  // NEW: Get Twitter/X username from user's linked accounts
+  const twitterUsername = useMemo(() => {
+    if (user?.linkedAccounts) {
+      const twitterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'twitter_oauth');
+      // Return the twitter username if available
+      return (twitterAccount as { username?: string })?.username || null;
+    }
+    return null;
+  }, [user?.linkedAccounts]);
+
+  // NEW: Get Farcaster username from user's linked accounts
+  const farcasterUsername = useMemo(() => {
+    if (user?.linkedAccounts) {
+      const farcasterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'farcaster');
+      return (farcasterAccount as { username?: string })?.username || null;
+    }
+    return null;
+  }, [user?.linkedAccounts]);
+
   const isBaseColors = useBaseColors();
   
   // Helper function to determine avatar fallback content
   const getAvatarFallback = () => {
-    if (userEmail) {
+    if (twitterUsername) {
+      return twitterUsername.substring(0, 1).toUpperCase();
+    } else if (farcasterUsername) {
+      return farcasterUsername.substring(0, 1).toUpperCase();
+    } else if (userEmail) {
       return userEmail.substring(0, 1).toUpperCase();
     } else if (displayName) {
       if (displayName.startsWith('0x')) {
@@ -165,6 +204,38 @@ export function CustomWallet() {
       }
     }
     return <Wallet className="h-4 w-4"/>;
+  };
+
+  // NEW: Helper function to get the primary display name
+  const getPrimaryDisplayName = () => {
+    if (twitterUsername) {
+      return `@${twitterUsername}`;
+    } else if (farcasterUsername) {
+      return `@${farcasterUsername}`;
+    } else if (userEmail) {
+      return userEmail;
+    } else if (displayName) {
+      return displayName;
+    }
+    return null;
+  };
+
+  // NEW: Helper function to get the avatar URL
+  const getAvatarUrl = () => {
+    // For Twitter users, try to get their profile picture from linked accounts
+    if (user?.linkedAccounts) {
+      const twitterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'twitter_oauth');
+      if (twitterAccount && (twitterAccount as { pfpUrl?: string })?.pfpUrl) {
+        return (twitterAccount as { pfpUrl: string }).pfpUrl;
+      }
+      
+      const farcasterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'farcaster');
+      if (farcasterAccount && (farcasterAccount as { pfpUrl?: string })?.pfpUrl) {
+        return (farcasterAccount as { pfpUrl: string }).pfpUrl;
+      }
+    }
+    
+    return pfpUrl;
   };
 
   // Check if we're in a Farcaster frame on component mount
@@ -401,8 +472,18 @@ export function CustomWallet() {
     
     // Only run this check after a delay to allow wagmi connections to initialize
     const timeoutId = setTimeout(() => {
+      // UPDATED: Don't auto-logout Twitter/Farcaster users without wallets
+      // For website context (Twitter/Farcaster), being authenticated without wallet is expected
+      if (isWebsiteContext && (twitterUsername || farcasterUsername)) {
+        if (DEBUG) {
+          console.log("Twitter/Farcaster user without wallet - this is expected, not inconsistent");
+        }
+        return; // Don't auto-logout social auth users
+      }
+      
       // Check for inconsistent state: authenticated but no wallet connected
-      const isInconsistentState = authenticated && !eoaAddress && !finalSmartWalletAddress;
+      // Only apply this to email/traditional auth users, not social auth
+      const isInconsistentState = authenticated && !eoaAddress && !finalSmartWalletAddress && !twitterUsername && !farcasterUsername;
       
       if (isInconsistentState) {
         if (DEBUG) {
@@ -415,7 +496,7 @@ export function CustomWallet() {
     
     // Clean up timeout on unmount
     return () => clearTimeout(timeoutId);
-  }, [ready, authenticated, eoaAddress, finalSmartWalletAddress, logout]);
+  }, [ready, authenticated, eoaAddress, finalSmartWalletAddress, logout, isWebsiteContext, twitterUsername, farcasterUsername]);
 
   // Handle connect wallet properly in drawer for frames
   const handleConnectInDrawer = async () => {
@@ -459,7 +540,17 @@ export function CustomWallet() {
         } else {
           // We don't have a connected wallet
           if (authenticated) {
-            // If authenticated but no wallet, force logout then login in one step
+            // UPDATED: Don't force logout for Twitter/Farcaster users - they're expected to not have wallets initially
+            if (isWebsiteContext && (twitterUsername || farcasterUsername)) {
+              if (DEBUG) {
+                console.log("Twitter/Farcaster user without wallet - showing connect wallet flow, not logging out");
+              }
+              // Just show login modal to connect a wallet, don't logout
+              login();
+              return;
+            }
+            
+            // If authenticated but no wallet, force logout then login in one step (for email/traditional users only)
             if (DEBUG) {
               console.log("Authenticated but no wallet detected, forcing reset");
             }
@@ -1122,7 +1213,7 @@ export function CustomWallet() {
             aria-label="Open wallet dialog"
           >
             <Avatar className="h-6 w-6 border-none rounded-full"> 
-              <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? headerAddress} />
+              <AvatarImage src={getAvatarUrl() ?? undefined} alt={getPrimaryDisplayName() ?? headerAddress} />
               <AvatarFallback className="text-xs bg-muted">
                 {isWalletLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : getAvatarFallback()}
               </AvatarFallback>
@@ -1130,7 +1221,7 @@ export function CustomWallet() {
             <span className="text-sm font-medium hidden">
               {isWalletLoading ? 
                 <Skeleton className="h-4 w-20 inline-block" /> : 
-                (userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-4 w-20 inline-block" />)
+                (getPrimaryDisplayName() ? getPrimaryDisplayName() : <Skeleton className="h-4 w-20 inline-block" />)
               }
             </span>
           </Button>
@@ -1145,8 +1236,8 @@ export function CustomWallet() {
             )}
             onClick={handleConnectWallet}
           >
-            
-            <span className="md:inline">Connect Wallet</span>
+            {/* NEW: Show "Sign in" for website context, "Connect Wallet" for others */}
+            <span className="md:inline">{isWebsiteContext ? "Sign in" : "Connect Wallet"}</span>
           </Button>
         )}
       </DialogTrigger>
@@ -1156,7 +1247,7 @@ export function CustomWallet() {
                 <DialogHeader className="pb-2">
                   <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
                     <Avatar className="h-7 w-7 sm:h-8 sm:w-8">
-                        <AvatarImage src={pfpUrl ?? undefined} alt={displayName ?? ""} />
+                        <AvatarImage src={getAvatarUrl() ?? undefined} alt={getPrimaryDisplayName() ?? ""} />
                         <AvatarFallback className="text-sm bg-muted">
                             {isWalletLoading ? "..." : getAvatarFallback()}
                         </AvatarFallback>
@@ -1164,7 +1255,7 @@ export function CustomWallet() {
                     {isWalletLoading ? 
                       <Skeleton className="h-5 w-24" /> : 
                       <span className="truncate max-w-[180px] sm:max-w-[250px]">
-                        {userEmail ? userEmail : displayName ? displayName : <Skeleton className="h-5 w-24" />}
+                        {getPrimaryDisplayName() ? getPrimaryDisplayName() : <Skeleton className="h-5 w-24" />}
                       </span>
                     }
                   </DialogTitle>
@@ -1176,11 +1267,7 @@ export function CustomWallet() {
                             <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
                           ) : (
                             <Copy className="h-3 w-3 flex-shrink-0 cursor-pointer" onClick={() => {
-                              if (smartWalletAddress) {
-                                navigator.clipboard.writeText(smartWalletAddress);
-                                setCopied(true);
-                                setTimeout(() => setCopied(false), 1400);
-                              } else {
+                              if (displayAddress) {
                                 navigator.clipboard.writeText(displayAddress);
                                 setCopied(true);
                                 setTimeout(() => setCopied(false), 1400);

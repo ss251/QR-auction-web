@@ -1,4 +1,4 @@
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useMemo } from 'react';
 import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { LinkVisitClaimPopup } from '@/components/LinkVisitClaimPopup';
@@ -57,6 +57,11 @@ const LinkVisitContext = createContext<LinkVisitContextType>({
 // Hook to use the link visit context
 export const useLinkVisit = () => useContext(LinkVisitContext);
 
+interface LinkedAccount {
+  type: string;
+  // Add other properties as needed
+}
+
 export function LinkVisitProvider({ 
   children,
   auctionId,
@@ -70,14 +75,15 @@ export function LinkVisitProvider({
 }) {
   const [showClaimPopup, setShowClaimPopup] = useState(false);
   const [hasCheckedEligibility, setHasCheckedEligibility] = useState(false);
-  const [isLatestWonAuction, setIsLatestWonAuction] = useState(false);
-  const [isCheckingLatestAuction, setIsCheckingLatestAuction] = useState(true);
+  const [isWebContext, setIsWebContext] = useState(false);
   const [latestWonAuctionId, setLatestWonAuctionId] = useState<number | null>(null);
-  const [latestWinningUrl, setLatestWinningUrl] = useState<string>('');
-  const [latestWinningImage, setLatestWinningImage] = useState<string>('');
+  const [isLatestWonAuction, setIsLatestWonAuction] = useState(false);
+  const [latestWinningUrl, setLatestWinningUrl] = useState<string | null>(null);
+  const [latestWinningImage, setLatestWinningImage] = useState<string | null>(null);
   const [manualHasClaimedLatest, setManualHasClaimedLatest] = useState<boolean | null>(null);
   const [explicitlyCheckedClaim, setExplicitlyCheckedClaim] = useState(false);
-  const [isWebContext, setIsWebContext] = useState(false);
+  const [isCheckingLatestAuction, setIsCheckingLatestAuction] = useState(false);
+  const [isCheckingDatabase, setIsCheckingDatabase] = useState(false);
   
   // Web-specific state
   const { authenticated, user } = usePrivy();
@@ -95,11 +101,35 @@ export function LinkVisitProvider({
   // Add state to track when wallet connection status is determined
   const [walletStatusDetermined, setWalletStatusDetermined] = useState(false);
   const [authCheckComplete, setAuthCheckComplete] = useState(false);
-  const [isCheckingDatabase, setIsCheckingDatabase] = useState(false);
+  
+  // NEW: Check if user is authenticated with Twitter or Farcaster
+  const isTwitterOrFarcasterUser = useMemo(() => {
+    if (!authenticated || !user?.linkedAccounts) return false;
+    
+    return user.linkedAccounts.some((account: LinkedAccount) => 
+      account.type === 'twitter_oauth' || account.type === 'farcaster'
+    );
+  }, [authenticated, user?.linkedAccounts]);
+  
+  // NEW: Check if user has traditional wallet connected (not Twitter/Farcaster)
+  const hasTraditionalWalletOnly = useMemo(() => {
+    if (!authenticated || !user?.linkedAccounts) return false;
+    
+    const hasTraditionalWallet = user.linkedAccounts.some((account: LinkedAccount) => 
+      account.type === 'wallet' || account.type === 'smart_wallet'
+    );
+    
+    const hasSocialAuth = user.linkedAccounts.some((account: LinkedAccount) => 
+      account.type === 'twitter_oauth' || account.type === 'farcaster'
+    );
+    
+    // Has wallet but no social auth
+    return hasTraditionalWallet && !hasSocialAuth;
+  }, [authenticated, user?.linkedAccounts]);
   
   // Get popup coordinator to manage popup display
   const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
-
+  
   // Detect if we're in web context vs mini-app context
   useEffect(() => {
     async function detectContext() {
@@ -180,7 +210,7 @@ export function LinkVisitProvider({
     hasClicked, 
     hasClaimed, 
     isLoading, 
-    frameContext
+    frameContext: eligibilityFrameContext
   } = useLinkVisitEligibility(eligibilityAuctionId, isWebContext);
   
   // ALWAYS use the latestWonAuctionId for claim operations - never fall back to current auction
@@ -270,7 +300,7 @@ export function LinkVisitProvider({
       }
     } else {
       // Mini-app logic (existing)
-      if (!effectiveWalletAddress || !frameContext?.user?.fid || !latestWonAuctionId) {
+      if (!effectiveWalletAddress || !eligibilityFrameContext?.user?.fid || !latestWonAuctionId) {
         console.log('Cannot check claim status: missing wallet, fid, or auctionId');
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
@@ -279,10 +309,10 @@ export function LinkVisitProvider({
       }
       
       try {
-        console.log(`Checking claim status for FID=${frameContext.user.fid}, auctionId=${latestWonAuctionId}`);
+        console.log(`Checking claim status for FID=${eligibilityFrameContext.user.fid}, auctionId=${latestWonAuctionId}`);
         
         // Get the Farcaster username from frame context
-        const farcasterUsername = frameContext.user.username;
+        const farcasterUsername = eligibilityFrameContext.user.username;
         
         // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
         const { data: allClaims, error } = await supabase
@@ -334,7 +364,7 @@ export function LinkVisitProvider({
         return false;
       }
     }
-  }, [latestWonAuctionId, effectiveWalletAddress, frameContext, isWebContext]);
+  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, isWebContext]);
   
   // Check if this auction is the latest won auction using Supabase
   useEffect(() => {
@@ -427,12 +457,12 @@ export function LinkVisitProvider({
       }
     } else {
       // Mini-app context: check when we have frame context and wallet status is determined
-      if (latestWonAuctionId && frameContext?.user?.fid && !explicitlyCheckedClaim && walletStatusDetermined) {
+      if (latestWonAuctionId && eligibilityFrameContext?.user?.fid && !explicitlyCheckedClaim && walletStatusDetermined) {
         console.log('Triggering explicit claim check for latest auction (mini-app)');
         checkClaimStatusForLatestAuction();
       }
     }
-  }, [latestWonAuctionId, effectiveWalletAddress, frameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
+  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
   
   // Reset eligibility check when hasClicked or hasClaimed or manualHasClaimedLatest changes
   useEffect(() => {
@@ -454,10 +484,10 @@ export function LinkVisitProvider({
       console.log('===== LINK VISIT TRIGGERED BY OTHER POPUP =====');
       
       // QUICK DISABLE: Exit early for web context
-      if (isWebContext) {
-        console.log('❌ Web popup disabled - skipping web context');
-        return;
-      }
+      // if (isWebContext) {
+      //   console.log('❌ Web popup disabled - skipping web context');
+      //   return;
+      // }
       
       // Don't show popup if wallet status hasn't been determined yet
       if (!walletStatusDetermined) {
@@ -477,25 +507,33 @@ export function LinkVisitProvider({
         return;
       }
       
-      // For web context, we need to ensure user is authenticated first
+      // For web context, check eligibility based on authentication status
       if (isWebContext) {
-        if (!authenticated) {
-          console.log('❌ Web user not authenticated, cannot show popup');
+        // Hide popup for traditional wallet users (coinbase, metamask, etc.)
+        if (hasTraditionalWalletOnly) {
+          console.log('❌ Web user has traditional wallet only, hiding popup');
           return;
         }
         
-        // Use combined claim status (same logic as context value and popup logic)
-        const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+        // Show popup for disconnected users or Twitter/Farcaster users
+        const shouldShow = !authenticated || isTwitterOrFarcasterUser;
         
-        // Check if user is eligible (hasn't claimed for latest won auction)
-        if (!combinedHasClaimed && latestWonAuctionId && effectiveWalletAddress && !isLoading) {
-          console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
-          const granted = requestPopup('linkVisit');
-          if (granted) {
-            setShowClaimPopup(true);
+        if (shouldShow) {
+          // Use combined claim status for authenticated users
+          const combinedHasClaimed = authenticated ? (manualHasClaimedLatest === true || hasClaimed) : false;
+          
+          // Check if user is eligible (disconnected or hasn't claimed for latest won auction)
+          if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId && !isLoading) {
+            console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
+            const granted = requestPopup('linkVisit');
+            if (granted) {
+              setShowClaimPopup(true);
+            }
+          } else {
+            console.log('❌ Triggered but web user not eligible for link visit - already claimed:', combinedHasClaimed);
           }
         } else {
-          console.log('❌ Triggered but web user not eligible for link visit - combined claim status:', combinedHasClaimed);
+          console.log('❌ Web user not eligible for popup (not disconnected or Twitter/Farcaster)');
         }
       } else {
         // Mini-app logic - use combined claim status
@@ -516,18 +554,18 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser]);
   
-  // Show popup when user can interact with it (ENABLED - shows independently if eligible)
+  // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
     // LinkVisit popup can now auto-show if user is eligible
     console.log('LinkVisit auto-show is enabled - checking eligibility independently');
     
     // QUICK DISABLE: Exit early for web context
-    if (isWebContext) {
-      console.log('❌ Web popup disabled - skipping web context auto-show');
-      return;
-    }
+    // if (isWebContext) {
+    //   console.log('❌ Web popup disabled - skipping web context auto-show');
+    //   return;
+    // }
     
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
@@ -557,45 +595,60 @@ export function LinkVisitProvider({
       return;
     }
     
-    // For web context, need authentication first
+    // For web context, check eligibility based on authentication and wallet type
     if (isWebContext) {
       console.log('Checking if web user should show popup:', {
+        authenticated,
+        isTwitterOrFarcasterUser,
+        hasTraditionalWalletOnly,
         hasClicked,
         hasClaimed,
         manualHasClaimedLatest,
         auctionId,
         latestWonAuctionId,
-        authenticated,
         effectiveWalletAddress: !!effectiveWalletAddress,
         walletStatusDetermined,
         explicitlyCheckedClaim
       });
       
-      // Use combined claim status (same logic as context value)
-      const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
+      // Hide popup for traditional wallet users (coinbase, metamask, etc.)
+      if (hasTraditionalWalletOnly) {
+        console.log('NOT showing popup - Web user has traditional wallet only');
+        setHasCheckedEligibility(true);
+        return;
+      }
       
-      // Show popup if they haven't claimed for the latest won auction
-      // Only show after we've determined wallet status and checked database
-      if (!combinedHasClaimed && latestWonAuctionId) {
-        console.log('SHOWING POPUP - Web user eligible (wallet status determined, no existing claim found)');
+      // Show popup for disconnected users or Twitter/Farcaster users
+      const shouldShow = !authenticated || isTwitterOrFarcasterUser;
+      
+      if (shouldShow) {
+        // Use combined claim status for authenticated users (disconnected users haven't claimed)
+        const combinedHasClaimed = authenticated ? (manualHasClaimedLatest === true || hasClaimed) : false;
         
-        // Shorter delay since we've already waited for status determination
-        const timer = setTimeout(() => {
-          console.log('Requesting linkVisit popup from coordinator (web)');
-          const granted = requestPopup('linkVisit');
-          if (granted) {
-            setShowClaimPopup(true);
+        // Show popup if they haven't claimed for the latest won auction or are disconnected
+        if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId) {
+          console.log('SHOWING POPUP - Web user eligible (disconnected or Twitter/Farcaster without claim)');
+          
+          const timer = setTimeout(() => {
+            console.log('Requesting linkVisit popup from coordinator (web)');
+            const granted = requestPopup('linkVisit');
+            if (granted) {
+              setShowClaimPopup(true);
+            }
+            setHasCheckedEligibility(true);
+          }, 2500);
+          
+          return () => clearTimeout(timer);
+        } else {
+          if (authenticated && combinedHasClaimed) {
+            console.log('NOT showing popup - Web user already claimed (combined status)');
+          } else if (!latestWonAuctionId) {
+            console.log('NOT showing popup - No latest won auction found');
           }
           setHasCheckedEligibility(true);
-        }, 2500); // Reduced delay since we already waited for status
-        
-        return () => clearTimeout(timer);
-      } else {
-        if (combinedHasClaimed) {
-          console.log('NOT showing popup - Web user already claimed (combined status)');
-        } else if (!latestWonAuctionId) {
-          console.log('NOT showing popup - No latest won auction found');
         }
+      } else {
+        console.log('NOT showing popup - Web user not eligible (not disconnected or Twitter/Farcaster)');
         setHasCheckedEligibility(true);
       }
     } else {
@@ -615,7 +668,6 @@ export function LinkVisitProvider({
       if (!combinedHasClaimed && latestWonAuctionId) {
         console.log('SHOWING POPUP - Mini-app user has not claimed tokens for the latest won auction (combined check)');
         
-        // Shorter delay since we've already waited for status determination
         const timer = setTimeout(() => {
           console.log('Requesting linkVisit popup from coordinator (mini-app)');
           const granted = requestPopup('linkVisit');
@@ -623,7 +675,7 @@ export function LinkVisitProvider({
             setShowClaimPopup(true);
           }
           setHasCheckedEligibility(true);
-        }, 1000); // Reduced delay since we already waited for status
+        }, 1000);
         
         return () => clearTimeout(timer);
       } else {
@@ -635,7 +687,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser]);
   
   // Handle claim action
   const handleClaim = async (captchaToken: string) => {

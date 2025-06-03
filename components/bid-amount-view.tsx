@@ -29,7 +29,7 @@ import { Address, Chain } from "viem";
 import { useFundWallet } from "@privy-io/react-auth";
 import { base } from "viem/chains";
 import { frameSdk } from "@/lib/frame-sdk";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useConnectWallet } from "@privy-io/react-auth";
 
 // Polling configuration
 const BALANCE_POLL_INTERVAL = 3000; // 3 seconds
@@ -57,7 +57,7 @@ export function BidForm({
   
   // Single state to track funding status - this represents both which button initiated funding
   // and whether we're waiting for funds
-  const [fundingState, setFundingState] = useState<'idle' | 'waiting_from_bid' | 'waiting_from_buy'>('idle');
+  const [fundingState, setFundingState] = useState<'none' | 'bid' | 'funded'>('none');
   
   // Store pending bid data for auto-execution after funding
   const pendingBidRef = useRef<{
@@ -77,7 +77,28 @@ export function BidForm({
   const isFrame = useRef(false);
   
   // Add Privy hooks
-  const { login, authenticated } = usePrivy();
+  const { login, authenticated, user } = usePrivy();
+  
+  // Check if user is authenticated with Twitter or Farcaster
+  const isTwitterOrFarcasterUser = useMemo(() => {
+    if (!authenticated || !user?.linkedAccounts) return false;
+    
+    return user.linkedAccounts.some((account: any) => 
+      account.type === 'twitter_oauth' || account.type === 'farcaster'
+    );
+  }, [authenticated, user?.linkedAccounts]);
+  
+  // NEW: Connect wallet hook for alternative wallet options
+  const { connectWallet } = useConnectWallet({
+    onSuccess: () => {
+      console.log("Alternative wallet connected successfully");
+      toast.success("Wallet connected! You can now place bids.");
+    },
+    onError: (error: Error) => {
+      console.error("Alternative wallet connection error:", error);
+      toast.error("Failed to connect wallet. Please try again.");
+    }
+  });
   
   // Check if we're in Farcaster frame context on mount
   useEffect(() => {
@@ -224,7 +245,7 @@ export function BidForm({
   
   // Calculate full token value based on auction type
   const fullMinimumBid = lastHighestBid === 0n 
-    ? (isV3Auction ? 11.11 : MIN_QR_BID) // For V3, we use 11.11 USDC flat minimum
+    ? (isV3Auction ? 1 : MIN_QR_BID) // For V3, we use 11.11 USDC flat minimum
     : isV3Auction 
       ? Number(formatUnits(lastHighestBid + increment, 6)) // USDC has 6 decimals
       : Number(formatEther(lastHighestBid + increment)); // ETH/QR have 18 decimals
@@ -380,7 +401,7 @@ export function BidForm({
   // Function to cancel funding process and clear up state
   const cancelFunding = () => {
     clearPolling();
-    setFundingState('idle');
+    setFundingState('none');
     pendingBidRef.current = null;
     toast.info("Funding process canceled");
   };
@@ -418,7 +439,7 @@ export function BidForm({
       if (pollingStartTimeRef.current && Date.now() - pollingStartTimeRef.current > MAX_POLLING_DURATION) {
         console.log(`[Polling] Exceeded maximum polling time of ${MAX_POLLING_DURATION}ms`);
         clearPolling();
-        setFundingState('idle');
+        setFundingState('none');
         pendingBidRef.current = null;
         toast.error("Funding timeout. You can try placing your bid again.");
         return;
@@ -462,14 +483,14 @@ export function BidForm({
     const pendingBid = pendingBidRef.current;
     if (!pendingBid) {
       console.log("[AutoBid] No pending bid found");
-      setFundingState('idle');
+      setFundingState('none');
       return;
     }
     
     console.log(`[AutoBid] Executing pending bid: ${pendingBid.amount} USDC on URL ${pendingBid.url}`);
     
     // Update UI
-    setFundingState('idle');
+    setFundingState('none');
     setIsPlacingBid(true);
     setTxPhase('approving'); // Start with approval phase
     
@@ -584,7 +605,7 @@ export function BidForm({
   };
 
   // Handle the buy USDC action with specified amount
-  const handleBuyUSDC = (amount?: number, source: 'waiting_from_bid' | 'waiting_from_buy' = 'waiting_from_bid') => {
+  const handleBuyUSDC = (amount?: number, source: 'bid' | 'funded' = 'bid') => {
     console.log("[Fund] Starting funding process");
     
     if (hasSmartWallet && activeAddress) {
@@ -804,7 +825,7 @@ export function BidForm({
         
         // Open funding modal with exact bid amount and start polling
         toast.info(`Insufficient balance. Opening payment to add ${fullBidAmount} USDC. Your bid will be placed automatically when funded.`);
-        handleBuyUSDC(fullBidAmount, 'waiting_from_bid');
+        handleBuyUSDC(fullBidAmount, 'bid');
         return;
       }
     } else {
@@ -958,8 +979,8 @@ export function BidForm({
   };
 
   // Check if button should be disabled
-  const isPlaceBidDisabled = !isValid || isPlacingBid || fundingState === 'waiting_from_bid';
-  const isBuyUsdcDisabled = isPlacingBid || fundingState === 'waiting_from_buy';
+  const isPlaceBidDisabled = !isValid || isPlacingBid || fundingState === 'bid';
+  const isBuyUsdcDisabled = isPlacingBid || fundingState === 'funded';
 
   return (
     <form onSubmit={handleSubmit(onSubmit)}>
@@ -972,7 +993,7 @@ export function BidForm({
             value={displayValue}
             onChange={handleBidInput}
             onKeyDown={handleTypingEvent}
-            disabled={isPlacingBid || fundingState !== 'idle'}
+            disabled={isPlacingBid || fundingState !== 'none'}
           />
           <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
             {isV3Auction ? 'USDC' : 'M $QR'}
@@ -994,7 +1015,7 @@ export function BidForm({
               onChange={handleUrlInput}
               onKeyDown={handleTypingEvent}
               onInput={handleTypingEvent}
-              disabled={isPlacingBid || fundingState !== 'idle'}
+              disabled={isPlacingBid || fundingState !== 'none'}
               name="url"
             />
             <div className={`${isBaseColors ? "text-foreground" : "text-gray-500"} absolute inset-y-0 right-7 flex items-center pointer-events-none h-[36px]`}>
@@ -1030,9 +1051,9 @@ export function BidForm({
                   </>
                 )}
                 {/* Still show funding message for both wallet types */}
-                {txPhase === 'idle' && fundingState === 'waiting_from_bid' && "Waiting for funds..."}
+                {txPhase === 'idle' && fundingState === 'bid' && "Waiting for funds..."}
               </span>
-            ) : fundingState === 'waiting_from_bid' ? (
+            ) : fundingState === 'bid' ? (
               <span className="flex items-center justify-center">
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Waiting for funds...
@@ -1043,7 +1064,7 @@ export function BidForm({
           </Button>
           
           {/* Cancel button for the Place Bid button - only during funding */}
-          {fundingState === 'waiting_from_bid' && (
+          {fundingState === 'bid' && (
             <button
               type="button"
               onClick={cancelFunding}
@@ -1054,6 +1075,24 @@ export function BidForm({
             </button>
           )}
         </div>
+
+        {/* NEW: Connect a different wallet button - only show for Twitter/Farcaster users without wallets */}
+        {isTwitterOrFarcasterUser && !activeAddress && (
+          <div>
+            <Button
+              type="button"
+              onClick={() => connectWallet()}
+              variant="outline"
+              className={`px-8 py-2 w-full ${
+                isBaseColors 
+                  ? "border-foreground/20 text-foreground hover:bg-foreground/10" 
+                  : "border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
+              }`}
+            >
+              Connect a different wallet to bid
+            </Button>
+          </div>
+        )}
 
         {/* Buy USDC Button with Cancel Option - Only show for non-smart wallet users */}
         {!hasSmartWallet && (

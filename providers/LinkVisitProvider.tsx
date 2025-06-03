@@ -5,7 +5,7 @@ import { LinkVisitClaimPopup } from '@/components/LinkVisitClaimPopup';
 import { usePopupCoordinator } from './PopupCoordinator';
 import { createClient } from "@supabase/supabase-js";
 import { getAuctionImage } from '@/utils/auctionImageOverrides';
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useConnectWallet } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { getFarcasterUser } from '@/utils/farcaster';
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
@@ -33,6 +33,7 @@ interface LinkVisitContextType {
   walletStatusDetermined: boolean;
   authCheckComplete: boolean;
   isCheckingDatabase: boolean;
+  isTwitterUserNeedsWallet: boolean;
 }
 
 // Create context with default values
@@ -51,7 +52,8 @@ const LinkVisitContext = createContext<LinkVisitContextType>({
   needsWalletConnection: false,
   walletStatusDetermined: false,
   authCheckComplete: false,
-  isCheckingDatabase: false
+  isCheckingDatabase: false,
+  isTwitterUserNeedsWallet: false,
 });
 
 // Hook to use the link visit context
@@ -89,6 +91,7 @@ export function LinkVisitProvider({
   const { authenticated, user } = usePrivy();
   const { address: walletAddress } = useAccount();
   const { client: smartWalletClient } = useSmartWallets();
+  const { connectWallet } = useConnectWallet();
   
   // Get smart wallet address from user's linked accounts (more reliable)
   const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
@@ -478,16 +481,78 @@ export function LinkVisitProvider({
     }
   }, [hasClicked, hasClaimed, manualHasClaimedLatest]);
   
+  // NEW: Check if user is Twitter/Farcaster but needs wallet for claiming
+  const isTwitterUserNeedsWallet = useMemo(() => {
+    if (!isWebContext || !authenticated || !user?.linkedAccounts) return false;
+    
+    const hasTwitterOrFarcaster = user.linkedAccounts.some((account: LinkedAccount) => 
+      account.type === 'twitter_oauth' || account.type === 'farcaster'
+    );
+    
+    return hasTwitterOrFarcaster && !effectiveWalletAddress;
+  }, [isWebContext, authenticated, user?.linkedAccounts, effectiveWalletAddress]);
+
+  // NEW: LocalStorage flow state tracking
+  const FLOW_STATE_KEY = 'qrcoin_claim_flow_state';
+  
+  const setFlowState = useCallback((state: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(FLOW_STATE_KEY, state);
+    }
+  }, []);
+  
+  const getFlowState = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(FLOW_STATE_KEY);
+    }
+    return null;
+  }, []);
+  
+  const clearFlowState = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(FLOW_STATE_KEY);
+    }
+  }, []);
+
+  // NEW: Track when user starts claim flow
+  useEffect(() => {
+    if (showClaimPopup && isWebContext) {
+      setFlowState('claiming');
+    }
+  }, [showClaimPopup, isWebContext, setFlowState]);
+
+  // NEW: Check flow state on mount - handle page reload scenarios
+  useEffect(() => {
+    if (!isWebContext) return;
+    
+    const flowState = getFlowState();
+    
+    // If user was in claiming flow and now authenticated, show appropriate popup
+    if (flowState === 'claiming' && authenticated) {
+      console.log('🔄 User returned from auth, checking wallet status for claim flow');
+      
+      // Small delay to ensure wallet state is determined
+      setTimeout(() => {
+        if (isTwitterUserNeedsWallet) {
+          console.log('✋ Twitter user needs wallet - showing wallet connection');
+          connectWallet();
+        } else if (latestWonAuctionId && !manualHasClaimedLatest) {
+          console.log('🎯 User has wallet - showing claim popup');
+          const granted = requestPopup('linkVisit');
+          if (granted) {
+            setShowClaimPopup(true);
+          }
+        }
+        // Clear the flow state after handling
+        clearFlowState();
+      }, 1000);
+    }
+  }, [authenticated, isTwitterUserNeedsWallet, latestWonAuctionId, manualHasClaimedLatest, isWebContext, getFlowState, clearFlowState, requestPopup, connectWallet]);
+  
   // Listen for trigger from other popups closing
   useEffect(() => {
     const handleTrigger = () => {
       console.log('===== LINK VISIT TRIGGERED BY OTHER POPUP =====');
-      
-      // QUICK DISABLE: Exit early for web context
-      // if (isWebContext) {
-      //   console.log('❌ Web popup disabled - skipping web context');
-      //   return;
-      // }
       
       // Don't show popup if wallet status hasn't been determined yet
       if (!walletStatusDetermined) {
@@ -525,6 +590,7 @@ export function LinkVisitProvider({
           // Check if user is eligible (disconnected or hasn't claimed for latest won auction)
           if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId && !isLoading) {
             console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
+            setFlowState('claiming'); // NEW: Track flow state
             const granted = requestPopup('linkVisit');
             if (granted) {
               setShowClaimPopup(true);
@@ -554,18 +620,12 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState, connectWallet]);
   
   // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
     // LinkVisit popup can now auto-show if user is eligible
     console.log('LinkVisit auto-show is enabled - checking eligibility independently');
-    
-    // QUICK DISABLE: Exit early for web context
-    // if (isWebContext) {
-    //   console.log('❌ Web popup disabled - skipping web context auto-show');
-    //   return;
-    // }
     
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
@@ -631,6 +691,7 @@ export function LinkVisitProvider({
           
           const timer = setTimeout(() => {
             console.log('Requesting linkVisit popup from coordinator (web)');
+            setFlowState('claiming'); // NEW: Track flow state
             const granted = requestPopup('linkVisit');
             if (granted) {
               setShowClaimPopup(true);
@@ -687,7 +748,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState]);
   
   // Handle claim action
   const handleClaim = async (captchaToken: string) => {
@@ -710,8 +771,9 @@ export function LinkVisitProvider({
     console.log('Closing link visit popup');
     setShowClaimPopup(false);
     releasePopup('linkVisit');
+    clearFlowState(); // NEW: Clear flow state on close
   };
-  
+
   return (
     <LinkVisitContext.Provider
       value={{
@@ -729,7 +791,8 @@ export function LinkVisitProvider({
         needsWalletConnection,
         walletStatusDetermined,
         authCheckComplete,
-        isCheckingDatabase
+        isCheckingDatabase,
+        isTwitterUserNeedsWallet
       }}
     >
       {children}

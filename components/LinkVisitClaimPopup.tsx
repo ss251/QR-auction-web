@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Dialog, DialogPortal } from './ui/dialog';
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Button } from './ui/button';
@@ -12,8 +12,9 @@ import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
-import { usePrivy, useLogin } from "@privy-io/react-auth";
+import { usePrivy, useLogin, useConnectWallet } from "@privy-io/react-auth";
 import { Turnstile } from '@marsidev/react-turnstile';
+import { useLinkVisit } from '@/providers/LinkVisitProvider';
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -82,7 +83,45 @@ export function LinkVisitClaimPopup({
   // Web context detection
   const [isWebContext, setIsWebContext] = useState(false);
   const [persistentToastId, setPersistentToastId] = useState<string | number | null>(null);
-  const { authenticated } = usePrivy();
+  const { authenticated, user } = usePrivy();
+  const { connectWallet } = useConnectWallet();
+  const { isTwitterUserNeedsWallet } = useLinkVisit();
+  
+  // NEW: Track click state in localStorage
+  const CLICK_STATE_KEY = 'qrcoin_link_clicked';
+  
+  const setClickedInStorage = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(CLICK_STATE_KEY, 'true');
+    }
+  }, []);
+  
+  const getClickedFromStorage = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(CLICK_STATE_KEY) === 'true';
+    }
+    return false;
+  }, []);
+  
+  const clearClickedFromStorage = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(CLICK_STATE_KEY);
+    }
+  }, []);
+
+  // Check both hook state and localStorage for click status
+  const hasClickedAny = hasClicked || getClickedFromStorage();
+  
+  // Log user state for debugging
+  console.log('LinkVisitClaimPopup - User state:', { 
+    authenticated, 
+    hasLinkedAccounts: !!user?.linkedAccounts?.length,
+    isTwitterUserNeedsWallet,
+    hasClicked,
+    hasClickedFromStorage: getClickedFromStorage(),
+    hasClickedAny
+  });
+  
   const { login } = useLogin({
     onComplete: () => {
       console.log("Login completed, dismissing persistent toast");
@@ -91,7 +130,15 @@ export function LinkVisitClaimPopup({
         toast.dismiss(persistentToastId);
         setPersistentToastId(null);
       }
-      // Don't automatically transition here - let the useEffect handle it
+      
+      // NEW: After login, check if user needs wallet connection
+      setTimeout(() => {
+        if (isTwitterUserNeedsWallet) {
+          console.log('✋ Twitter user needs wallet after login - showing wallet connection');
+          connectWallet();
+          onClose(); // Close claim popup to show Privy connect wallet modal
+        }
+      }, 500);
     },
     onError: (error: Error) => {
       console.error("Login error:", error);
@@ -126,7 +173,6 @@ export function LinkVisitClaimPopup({
   const isFrameRef = useRef(false);
   const isClaimingRef = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [hasClickedLocally, setHasClickedLocally] = useState(false); // Track click in this session
   
   // Captcha state
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -145,41 +191,70 @@ export function LinkVisitClaimPopup({
   // Reset state when dialog opens based on hasClicked and context
   useEffect(() => {
     if (isOpen) {
-      console.log('LinkVisitClaimPopup opened:', { hasClicked, hasClickedLocally, isWebContext, authenticated, claimState });
+      console.log('LinkVisitClaimPopup opened:', { 
+        hasClicked, 
+        hasClickedAny, 
+        isWebContext, 
+        authenticated, 
+        claimState,
+        hasClaimed 
+      });
       
       setClaimState(prevState => {
+        console.log('Setting claim state, previous state:', prevState);
+        
         // Don't reset if we're already in success state
-        if (prevState === 'success') return prevState;
+        if (prevState === 'success') {
+          console.log('Keeping success state');
+          return prevState;
+        }
         
         // Don't reset if we're already in already_claimed state
-        if (prevState === 'already_claimed') return prevState;
+        if (prevState === 'already_claimed') {
+          console.log('Keeping already_claimed state');
+          return prevState;
+        }
         
         // Don't reset if we're in connecting state (during authentication flow)
-        if (prevState === 'connecting') return prevState;
+        if (prevState === 'connecting') {
+          console.log('Keeping connecting state');
+          return prevState;
+        }
         
         // Don't reset if we're in captcha or claim state and user is authenticated
-        if ((prevState === 'captcha' || prevState === 'claim') && authenticated) return prevState;
+        if ((prevState === 'captcha' || prevState === 'claim') && authenticated) {
+          console.log('Keeping current state during auth flow:', prevState);
+          return prevState;
+        }
         
         if (isWebContext) {
+          console.log('Web context detected');
           // Web flow: visit -> (trigger wallet connection) -> captcha -> claim -> success
           if (!authenticated) {
+            console.log('Not authenticated, going to visit state');
             return 'visit'; // Will trigger wallet connection after visiting
-          } else if (hasClicked || hasClickedLocally) {
+          } else if (hasClickedAny) {
             if (hasClaimed) {
+              console.log('User has clicked and already claimed, going to already_claimed state');
               return 'already_claimed';
             } else {
+              console.log('User has clicked and authenticated, going to captcha state');
               return 'captcha'; // Go to captcha state for web users
             }
           } else {
+            console.log('User authenticated but has not clicked, going to visit state');
             return 'visit';
           }
         } else {
+          console.log('Mini-app context detected');
           // Mini-app flow: visit -> claim -> success (skip captcha)
-          return (hasClicked || hasClickedLocally) ? 'claim' : 'visit';
+          const newState = hasClickedAny ? 'claim' : 'visit';
+          console.log('Mini-app new state:', newState);
+          return newState;
         }
       });
     }
-  }, [isOpen, hasClicked, hasClickedLocally, isWebContext, authenticated, claimState]);
+  }, [isOpen, hasClicked, hasClickedAny, isWebContext, authenticated, claimState, hasClaimed]);
 
   // Handle automatic state transition when authentication changes
   useEffect(() => {
@@ -197,8 +272,8 @@ export function LinkVisitClaimPopup({
           setClaimState('captcha');
         }
       }
-      // If user is authenticated and has clicked (either from hook or locally), and we're still in visit state
-      else if (claimState === 'visit' && (hasClicked || hasClickedLocally)) {
+      // If user is authenticated and has clicked (either from hook or localStorage), and we're still in visit state
+      else if (claimState === 'visit' && hasClickedAny) {
         if (hasClaimed) {
           console.log('User authenticated, has clicked, but already claimed - showing already_claimed state');
           setClaimState('already_claimed');
@@ -208,12 +283,12 @@ export function LinkVisitClaimPopup({
         }
       }
     }
-  }, [authenticated, hasClicked, hasClickedLocally, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
+  }, [authenticated, hasClickedAny, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
 
-  // Handle mini-app auto-transition when hasClickedLocally changes
+  // Handle mini-app auto-transition when hasClickedAny changes
   useEffect(() => {
-    if (!isWebContext && hasClickedLocally && claimState === 'visit') {
-      console.log('Mini-app user clicked locally, auto-transitioning to claim state');
+    if (!isWebContext && hasClickedAny && claimState === 'visit') {
+      console.log('Mini-app user clicked, auto-transitioning to claim state');
       if (hasClaimed) {
         console.log('Mini-app user has already claimed, showing already_claimed state');
         setClaimState('already_claimed');
@@ -222,7 +297,7 @@ export function LinkVisitClaimPopup({
         setClaimState('claim');
       }
     }
-  }, [hasClickedLocally, isWebContext, claimState, hasClaimed]);
+  }, [hasClickedAny, isWebContext, claimState, hasClaimed]);
 
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
@@ -301,6 +376,9 @@ export function LinkVisitClaimPopup({
     try {
       setClaimState('success');
       
+      // Clear the click state since they've successfully claimed
+      clearClickedFromStorage();
+      
       toast.success('1,000 $QR has been sent to your wallet.', {
         style: {
           background: 'var(--primary)',
@@ -325,8 +403,8 @@ export function LinkVisitClaimPopup({
   const onLinkClick = async () => {
     console.log('Link clicked, handling click for URL:', winningUrl);
     
-    // Mark as clicked locally immediately
-    setHasClickedLocally(true);
+    // Mark as clicked in localStorage immediately
+    setClickedInStorage();
     
     try {
       if (isWebContext) {
@@ -405,7 +483,22 @@ export function LinkVisitClaimPopup({
     login();
   };
 
-  // Handle captcha verification
+  // Show captcha when entering captcha state (web users only)
+  useEffect(() => {
+    console.log('Captcha useEffect triggered:', { 
+      claimState, 
+      isWebContext, 
+      showCaptcha, 
+      captchaToken: !!captchaToken 
+    });
+    
+    if (claimState === 'captcha' && isWebContext && !showCaptcha && !captchaToken) {
+      console.log('✅ Showing captcha for web user in captcha state');
+      setShowCaptcha(true);
+    }
+  }, [claimState, isWebContext, showCaptcha, captchaToken]);
+
+  // Handle captcha verification - auto-advance to claim state
   const handleCaptchaSuccess = (token: string) => {
     console.log('Captcha verified successfully, advancing to claim state');
     setCaptchaToken(token);
@@ -428,13 +521,6 @@ export function LinkVisitClaimPopup({
     // Reset to captcha state to try again
     setClaimState('captcha');
   };
-
-  // Show captcha when entering claim state (web users only)
-  useEffect(() => {
-    if (claimState === 'claim' && isWebContext && !showCaptcha && !captchaToken) {
-      setShowCaptcha(true);
-    }
-  }, [claimState, isWebContext, showCaptcha, captchaToken]);
 
   // Handle share
   const handleShare = async () => {

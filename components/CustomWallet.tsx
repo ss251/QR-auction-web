@@ -222,19 +222,21 @@ export function CustomWallet() {
 
   // NEW: Helper function to get the avatar URL
   const getAvatarUrl = () => {
-    // For Twitter users, try to get their profile picture from linked accounts
-    if (user?.linkedAccounts) {
-      const twitterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'twitter_oauth');
-      if (twitterAccount && (twitterAccount as { pfpUrl?: string })?.pfpUrl) {
-        return (twitterAccount as { pfpUrl: string }).pfpUrl;
-      }
-      
-      const farcasterAccount = user.linkedAccounts.find((account: PrivyLinkedAccount) => account.type === 'farcaster');
+    // First priority: Twitter username -> unavatar.io
+    if (twitterUsername) {
+      return `https://unavatar.io/x/${twitterUsername}`;
+    }
+    
+    // Second priority: Farcaster username -> unavatar.io  
+    if (farcasterUsername) {
+      // Check if we have a Farcaster PFP from linked accounts first
+      const farcasterAccount = user?.linkedAccounts?.find((account: PrivyLinkedAccount) => account.type === 'farcaster');
       if (farcasterAccount && (farcasterAccount as { pfpUrl?: string })?.pfpUrl) {
         return (farcasterAccount as { pfpUrl: string }).pfpUrl;
       }
     }
     
+    // Third priority: Generic pfpUrl (for frame context)
     return pfpUrl;
   };
 

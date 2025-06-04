@@ -35,6 +35,7 @@ type NameInfo = {
   twitterUsername: string | null;
   basename: string | null;
   pfpUrl: string | null;
+  twitterPfpUrl: string | null;
 };
 
 export function BidCellView({
@@ -50,7 +51,8 @@ export function BidCellView({
     farcasterUsername: null,
     twitterUsername: null,
     basename: null,
-    pfpUrl: null
+    pfpUrl: null,
+    twitterPfpUrl: null
   });
 
   // Check auction version based on tokenId
@@ -98,7 +100,15 @@ export function BidCellView({
       const bidderAddress = bid.bidder;
       
       // Extract Twitter username from the name field (for V3 auctions)
-      const twitterUsername = isV3Auction && bid.name && bid.name.trim() !== "" ? bid.name : null;
+      // Filter out basenames and addresses - only accept clean usernames
+      let twitterUsername: string | null = null;
+      if (isV3Auction && bid.name && bid.name.trim() !== "" && 
+          !bid.name.includes('.') && !bid.name.startsWith('0x')) {
+        twitterUsername = bid.name.trim();
+      }
+      
+      // Get Twitter PFP from unavatar.io if we have a Twitter username
+      const twitterPfpUrl = twitterUsername ? `https://unavatar.io/x/${twitterUsername}` : null;
       
       // Fetch name (basename or ENS) using onchainkit
       const name = await getName({
@@ -135,9 +145,10 @@ export function BidCellView({
       setNameInfo({
         displayName,
         farcasterUsername: farcasterUser?.username === "!217978" ? "softwarecurator" : (farcasterUser?.username || null),
-        twitterUsername,
+        twitterUsername: twitterUsername || null,
         basename: name === "!217978" ? "softwarecurator" : name, // Store the getName result in basename
-        pfpUrl: farcasterUser?.pfpUrl || null
+        pfpUrl: farcasterUser?.pfpUrl || null,
+        twitterPfpUrl
       });
     };
 
@@ -147,9 +158,9 @@ export function BidCellView({
   return (
     <div className="flex items-center justify-between py-2 group">
       <div className="flex items-center space-x-3 min-w-0">
-        {nameInfo.pfpUrl ? (
+        {(nameInfo.twitterPfpUrl || nameInfo.pfpUrl) ? (
           <img 
-            src={nameInfo.pfpUrl} 
+            src={nameInfo.twitterPfpUrl || nameInfo.pfpUrl || undefined} 
             alt="Profile" 
             className="w-7 h-7 rounded-full object-cover"
           />

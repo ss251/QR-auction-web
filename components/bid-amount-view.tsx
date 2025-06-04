@@ -92,7 +92,6 @@ export function BidForm({
   const { connectWallet } = useConnectWallet({
     onSuccess: () => {
       console.log("Alternative wallet connected successfully");
-      toast.success("Wallet connected! You can now place bids.");
     },
     onError: (error: Error) => {
       console.error("Alternative wallet connection error:", error);

@@ -300,6 +300,7 @@ export function AuctionDetails({
                   url: auctionDetail.qrMetadata?.urlString || null,
                   display_name: bidderNameInfo.displayName || null,
                   farcaster_username: bidderNameInfo.farcasterUsername || null,
+                  twitter_username: bidderNameInfo.twitterUsername || null,
                   basename: bidderNameInfo.basename || null,
                   pfp_url: bidderNameInfo.pfpUrl || null,
                   usd_value: isV3Auction 

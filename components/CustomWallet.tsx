@@ -545,8 +545,9 @@ export function CustomWallet() {
               if (DEBUG) {
                 console.log("Twitter/Farcaster user without wallet - showing connect wallet flow, not logging out");
               }
-              // Just show login modal to connect a wallet, don't logout
-              login();
+              // Use connectWallet for authenticated social users who need to connect a wallet
+              setIsConnecting(true);
+              connectWallet();
               return;
             }
             
@@ -947,11 +948,9 @@ export function CustomWallet() {
 
   // Close handler for the dialog
   const handleOpenChange = (open: boolean) => {
-    // Only allow the dialog to open if we're not in the connecting state
-    if (isConnecting && !open) {
-      setIsConnecting(false); // Allow closing the modal when connecting
-    } else if (isConnecting && open) {
-      return; // Prevent opening the modal when connecting
+    // Reset connecting state when closing
+    if (!open && isConnecting) {
+      setIsConnecting(false);
     }
     setIsOpen(open);
   };
@@ -1277,201 +1276,243 @@ export function CustomWallet() {
                       </DialogDescription>
                   )}
                 </DialogHeader>
-        
-                <div className={clsx(
-                    "flex items-center justify-between p-2 rounded-md text-xs sm:text-sm",
-                    isOnBase ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300"
-                  )}>
-                  <div className="flex items-center gap-1.5">
-                    {isOnBase ? (
-                       <Image src="/base-logo.png" alt="Base" width={14} height={14} className="sm:w-4 sm:h-4" /> 
-                    ) : (
-                       <Network className="h-3 w-3 sm:h-4 sm:w-4"/> 
-                    )}
-                    {isOnBase ? "Base Mainnet" : `Connected to ${chain?.name ?? 'Unknown Network'}`}
-                  </div>
-                  {!isOnBase && (
-                    <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={handleSwitchNetwork}>Switch to Base</Button>
-                  )}
-                </div>
-        
-                <Separator className="my-2" />
-        
-                <div className="space-y-2 py-1">
-                    <DialogTitle className="text-sm sm:text-base flex justify-between items-center">
-                        Balances
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={refreshBalances} title="Refresh balances">
-                            <RefreshCcw className="h-3 w-3" />
-                        </Button>
-                    </DialogTitle>
-                    {isOnBase ? (
-                        <>
-                            <div className="flex justify-between items-center text-xs sm:text-sm">
-                                <span className="text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="sm:w-4 sm:h-4" /> USDC
-                                </span>
-                                {tokensLoading ? <Skeleton className="h-4 w-16" /> :
-                                <span className="font-mono">{usdcBalance.toFixed(2)}</span>
-                                }
-                            </div>
-                            <div className="flex justify-between items-center text-xs sm:text-sm">
-                                <span className="text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="sm:w-4 sm:h-4" /> $QR
-                                </span>
-                                {tokensLoading ? <Skeleton className="h-4 w-16" /> :
-                                <span className="font-mono">{new Intl.NumberFormat().format(qrBalance)}</span>
-                                }
-                            </div>
-                            <div className="flex justify-between items-center text-xs sm:text-sm">
-                                <span className="text-muted-foreground flex items-center gap-1.5">
-                                    <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="rounded-full sm:w-4 sm:h-4"/> ETH
-                                </span>
-                                {ethLoading ? <Skeleton className="h-4 w-16" /> :
-                                <span className="font-mono">{parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(5)}</span>
-                                }
-                            </div>
-                        </>
-                    ) : (
-                        <p className="text-xs sm:text-sm text-center text-muted-foreground py-2">Switch to Base network to see balances.</p>
-                    )}
-                </div>
-        
-                <Separator className="my-2" />
-        
-                {showSendForm ? (
-                    <div className="space-y-2 pt-1">
-                        <DialogTitle className="text-sm sm:text-base">Send Funds</DialogTitle>
-                        <div className="flex gap-2">
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" className="w-[70px] sm:w-[80px] flex items-center justify-between text-xs sm:text-sm h-8 sm:h-10">
-                                        <Image 
-                                            src={selectedToken === 'ETH' ? 'https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040' : selectedToken === 'USDC' ? 'https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040' : '/qr-logo.svg'}
-                                            alt={selectedToken}
-                                            width={14} height={14}
-                                            className={clsx('sm:w-4 sm:h-4', selectedToken === 'ETH' && 'rounded-full')}
-                                        />
-                                        <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50"/>
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                    <DropdownMenuItem onClick={() => setSelectedToken('ETH')}>
-                                        <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="mr-2 rounded-full sm:w-4 sm:h-4"/> ETH
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => setSelectedToken('USDC')}>
-                                        <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> USDC
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => setSelectedToken('$QR')}>
-                                        <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> $QR
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Input 
-                                type="number" 
-                                placeholder="Amount" 
-                                value={sendAmount}
-                                onChange={(e) => setSendAmount(e.target.value)}
-                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
-                            />
-                        </div>
-                        <Input 
-                            type="text" 
-                            placeholder="Recipient Address (0x...)" 
-                            value={sendRecipient}
-                            onChange={(e) => setSendRecipient(e.target.value)}
-                            className="h-8 sm:h-10 text-xs sm:text-sm"
-                        />
-                        <div className="flex gap-2 pt-1">
-                            <Button 
-                                onClick={handleConfirmSend} 
-                                disabled={!isOnBase || isSending || !sendRecipient || !sendAmount}
-                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
-                            >
-                                {isSending ? "Sending..." : `Send ${selectedToken}`}
-                            </Button>
-                            <Button variant="outline" onClick={() => setShowSendForm(false)} className="flex-1 h-8 sm:h-10 text-xs sm:text-sm">
-                                Cancel
-                            </Button>
-                        </div>
-                    </div>
-                ) : showFundForm ? (
-                    <div className="space-y-2 pt-1">
-                        <DialogTitle className="text-sm sm:text-base">Add Funds</DialogTitle>
-                        <div className="flex gap-2">
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" className="w-[70px] sm:w-[80px] flex items-center justify-between text-xs sm:text-sm h-8 sm:h-10">
-                                        <Image 
-                                            src={fundAsset === 'native-currency' ? 'https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040' : 'https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040'}
-                                            alt={fundAsset === 'native-currency' ? 'ETH' : 'USDC'}
-                                            width={14} height={14}
-                                            className={clsx('sm:w-4 sm:h-4', fundAsset === 'native-currency' && 'rounded-full')}
-                                        />
-                                        <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50"/>
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="start">
-                                    <DropdownMenuItem onClick={() => setFundAsset('native-currency')}>
-                                        <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="mr-2 rounded-full sm:w-4 sm:h-4"/> ETH
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => setFundAsset('USDC')}>
-                                        <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> USDC
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                            <Input 
-                                type="number" 
-                                placeholder="Enter amount" 
-                                value={fundAmount}
-                                onChange={(e) => setFundAmount(e.target.value)}
-                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
-                            />
-                        </div>
-                        <div className="pt-2 text-xs text-center text-muted-foreground">
-                            Funds will be added to your wallet on Base network.
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                            <Button 
-                                onClick={handleConfirmFunding} 
-                                disabled={isFunding || fundAmount === "" || isNaN(parseFloat(fundAmount))}
-                                className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
-                            >
-                                {isFunding ? "Processing..." : "Confirm"}
-                            </Button>
-                            <Button variant="outline" onClick={() => setShowFundForm(false)} className="flex-1 h-8 sm:h-10 text-xs sm:text-sm">
-                                Cancel
-                            </Button>
-                        </div>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-2 gap-2 pt-1">
-                      <Button variant="outline" onClick={handleInitiateSend} disabled={!isOnBase} className="h-8 sm:h-10 text-xs sm:text-sm">
-                        <Send className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Send
-                      </Button>
-                      <Button variant="outline" onClick={handleAddFunds} disabled={!displayAddress} className="h-8 sm:h-10 text-xs sm:text-sm">
-                         <PlusCircle className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Add Funds
-                      </Button>
 
-                      <a
-                        href={`https://basescan.org/address/${displayAddress}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="col-span-2"
-                      >
-                          <Button variant="outline" className="w-full h-8 sm:h-10 text-xs sm:text-sm">
-                            <ExternalLink className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> View on Basescan
+                {/* Only show wallet-related UI when there's actually a connected wallet */}
+                {hasConnectedWallet ? (
+                  <>
+                    <div className={clsx(
+                        "flex items-center justify-between p-2 rounded-md text-xs sm:text-sm",
+                        isOnBase ? "bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300" : "bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300"
+                      )}>
+                      <div className="flex items-center gap-1.5">
+                        {isOnBase ? (
+                           <Image src="/base-logo.png" alt="Base" width={14} height={14} className="sm:w-4 sm:h-4" /> 
+                        ) : (
+                           <Network className="h-3 w-3 sm:h-4 sm:w-4"/> 
+                        )}
+                        {isOnBase ? "Base Mainnet" : `Connected to ${chain?.name ?? 'Unknown Network'}`}
+                      </div>
+                      {!isOnBase && (
+                        <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={handleSwitchNetwork}>Switch to Base</Button>
+                      )}
+                    </div>
+            
+                    <Separator className="my-2" />
+            
+                    <div className="space-y-2 py-1">
+                        <DialogTitle className="text-sm sm:text-base flex justify-between items-center">
+                            Balances
+                            <Button variant="ghost" size="icon" className="h-6 w-6" onClick={refreshBalances} title="Refresh balances">
+                                <RefreshCcw className="h-3 w-3" />
+                            </Button>
+                        </DialogTitle>
+                        {isOnBase ? (
+                            <>
+                                <div className="flex justify-between items-center text-xs sm:text-sm">
+                                    <span className="text-muted-foreground flex items-center gap-1.5">
+                                        <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="sm:w-4 sm:h-4" /> USDC
+                                    </span>
+                                    {tokensLoading ? <Skeleton className="h-4 w-16" /> :
+                                    <span className="font-mono">{usdcBalance.toFixed(2)}</span>
+                                    }
+                                </div>
+                                <div className="flex justify-between items-center text-xs sm:text-sm">
+                                    <span className="text-muted-foreground flex items-center gap-1.5">
+                                        <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="sm:w-4 sm:h-4" /> $QR
+                                    </span>
+                                    {tokensLoading ? <Skeleton className="h-4 w-16" /> :
+                                    <span className="font-mono">{new Intl.NumberFormat().format(qrBalance)}</span>
+                                    }
+                                </div>
+                                <div className="flex justify-between items-center text-xs sm:text-sm">
+                                    <span className="text-muted-foreground flex items-center gap-1.5">
+                                        <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="rounded-full sm:w-4 sm:h-4"/> ETH
+                                    </span>
+                                    {ethLoading ? <Skeleton className="h-4 w-16" /> :
+                                    <span className="font-mono">{parseFloat(formatEther(ethBalance?.value ?? 0n)).toFixed(5)}</span>
+                                    }
+                                </div>
+                            </>
+                        ) : (
+                            <p className="text-xs sm:text-sm text-center text-muted-foreground py-2">Switch to Base network to see balances.</p>
+                        )}
+                    </div>
+            
+                    <Separator className="my-2" />
+            
+                    {showSendForm ? (
+                        <div className="space-y-2 pt-1">
+                            <DialogTitle className="text-sm sm:text-base">Send Funds</DialogTitle>
+                            <div className="flex gap-2">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" className="w-[70px] sm:w-[80px] flex items-center justify-between text-xs sm:text-sm h-8 sm:h-10">
+                                            <Image 
+                                                src={selectedToken === 'ETH' ? 'https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040' : selectedToken === 'USDC' ? 'https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040' : '/qr-logo.svg'}
+                                                alt={selectedToken}
+                                                width={14} height={14}
+                                                className={clsx('sm:w-4 sm:h-4', selectedToken === 'ETH' && 'rounded-full')}
+                                            />
+                                            <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50"/>
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start">
+                                        <DropdownMenuItem onClick={() => setSelectedToken('ETH')}>
+                                            <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="mr-2 rounded-full sm:w-4 sm:h-4"/> ETH
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => setSelectedToken('USDC')}>
+                                            <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> USDC
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => setSelectedToken('$QR')}>
+                                            <Image src="/qrLogo.png" alt="$QR" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> $QR
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                <Input 
+                                    type="number" 
+                                    placeholder="Amount" 
+                                    value={sendAmount}
+                                    onChange={(e) => setSendAmount(e.target.value)}
+                                    className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
+                                />
+                            </div>
+                            <Input 
+                                type="text" 
+                                placeholder="Recipient Address (0x...)" 
+                                value={sendRecipient}
+                                onChange={(e) => setSendRecipient(e.target.value)}
+                                className="h-8 sm:h-10 text-xs sm:text-sm"
+                            />
+                            <div className="flex gap-2 pt-1">
+                                <Button 
+                                    onClick={handleConfirmSend} 
+                                    disabled={!isOnBase || isSending || !sendRecipient || !sendAmount}
+                                    className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
+                                >
+                                    {isSending ? "Sending..." : `Send ${selectedToken}`}
+                                </Button>
+                                <Button variant="outline" onClick={() => setShowSendForm(false)} className="flex-1 h-8 sm:h-10 text-xs sm:text-sm">
+                                    Cancel
+                                </Button>
+                            </div>
+                        </div>
+                    ) : showFundForm ? (
+                        <div className="space-y-2 pt-1">
+                            <DialogTitle className="text-sm sm:text-base">Add Funds</DialogTitle>
+                            <div className="flex gap-2">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" className="w-[70px] sm:w-[80px] flex items-center justify-between text-xs sm:text-sm h-8 sm:h-10">
+                                            <Image 
+                                                src={fundAsset === 'native-currency' ? 'https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040' : 'https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040'}
+                                                alt={fundAsset === 'native-currency' ? 'ETH' : 'USDC'}
+                                                width={14} height={14}
+                                                className={clsx('sm:w-4 sm:h-4', fundAsset === 'native-currency' && 'rounded-full')}
+                                            />
+                                            <ChevronDown className="h-3 w-3 sm:h-4 sm:w-4 opacity-50"/>
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start">
+                                        <DropdownMenuItem onClick={() => setFundAsset('native-currency')}>
+                                            <Image src="https://www.cryptologos.cc/logos/ethereum-eth-logo.png?v=040" alt="ETH" width={14} height={14} className="mr-2 rounded-full sm:w-4 sm:h-4"/> ETH
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem onClick={() => setFundAsset('USDC')}>
+                                            <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="mr-2 sm:w-4 sm:h-4"/> USDC
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                <Input 
+                                    type="number" 
+                                    placeholder="Enter amount" 
+                                    value={fundAmount}
+                                    onChange={(e) => setFundAmount(e.target.value)}
+                                    className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
+                                />
+                            </div>
+                            <div className="pt-2 text-xs text-center text-muted-foreground">
+                                Funds will be added to your wallet on Base network.
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                                <Button 
+                                    onClick={handleConfirmFunding} 
+                                    disabled={isFunding || fundAmount === "" || isNaN(parseFloat(fundAmount))}
+                                    className="flex-1 h-8 sm:h-10 text-xs sm:text-sm"
+                                >
+                                    {isFunding ? "Processing..." : "Confirm"}
+                                </Button>
+                                <Button variant="outline" onClick={() => setShowFundForm(false)} className="flex-1 h-8 sm:h-10 text-xs sm:text-sm">
+                                    Cancel
+                                </Button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <Button variant="outline" onClick={handleInitiateSend} disabled={!isOnBase} className="h-8 sm:h-10 text-xs sm:text-sm">
+                            <Send className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Send
                           </Button>
-                      </a>
-                    </div>
-                )}
-        
-                <Separator className="mt-3 mb-2"/> 
+                          <Button variant="outline" onClick={handleAddFunds} disabled={!displayAddress} className="h-8 sm:h-10 text-xs sm:text-sm">
+                             <PlusCircle className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Add Funds
+                          </Button>
 
-                <DialogFooter>
-                  <Button variant="destructive" onClick={handleDisconnect} className="w-full h-8 sm:h-10 text-xs sm:text-sm">
-                    <LogOut className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Disconnect
-                  </Button>
-                </DialogFooter>
+                          <a
+                            href={`https://basescan.org/address/${displayAddress}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="col-span-2"
+                          >
+                              <Button variant="outline" className="w-full h-8 sm:h-10 text-xs sm:text-sm">
+                                <ExternalLink className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> View on Basescan
+                              </Button>
+                          </a>
+                        </div>
+                    )}
+
+                    <Separator className="mt-3 mb-2"/> 
+
+                    <DialogFooter>
+                      <Button variant="destructive" onClick={handleDisconnect} className="w-full h-8 sm:h-10 text-xs sm:text-sm">
+                        <LogOut className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Disconnect
+                      </Button>
+                    </DialogFooter>
+                  </>
+                ) : (
+                  /* Show Connect Wallet UI for authenticated users without wallets */
+                  <div className="space-y-4 pt-4">
+                    <div className="text-center space-y-2">
+                      <Wallet className="mx-auto h-12 w-12 text-muted-foreground/50" />
+                      <h3 className="text-lg font-medium">Connect Your Wallet</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Connect a wallet to participate in auctions and manage your funds
+                      </p>
+                    </div>
+                    
+                    <Button 
+                      onClick={handleConnectInDrawer}
+                      className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-11 text-sm font-medium"
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? (
+                        <span className="flex items-center justify-center">
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Connecting...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center">
+                          <Wallet className="mr-2 h-4 w-4" />
+                          Connect Wallet
+                        </span>
+                      )}
+                    </Button>
+
+                    <Separator className="my-4" />
+
+                    <DialogFooter>
+                      <Button variant="destructive" onClick={handleDisconnect} className="w-full h-8 sm:h-10 text-xs sm:text-sm">
+                        <LogOut className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" /> Sign Out
+                      </Button>
+                    </DialogFooter>
+                  </div>
+                )}
             </> 
         )}
       </DialogContent>

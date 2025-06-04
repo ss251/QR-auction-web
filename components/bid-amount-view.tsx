@@ -1076,24 +1076,6 @@ export function BidForm({
           )}
         </div>
 
-        {/* NEW: Connect a different wallet button - only show for Twitter/Farcaster users without wallets */}
-        {isTwitterOrFarcasterUser && !activeAddress && (
-          <div>
-            <Button
-              type="button"
-              onClick={() => connectWallet()}
-              variant="outline"
-              className={`px-8 py-2 w-full ${
-                isBaseColors 
-                  ? "border-foreground/20 text-foreground hover:bg-foreground/10" 
-                  : "border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-800"
-              }`}
-            >
-              Connect a different wallet to bid
-            </Button>
-          </div>
-        )}
-
         {/* Buy USDC Button with Cancel Option - Only show for non-smart wallet users */}
         {!hasSmartWallet && (
           <div className="relative md:hidden">

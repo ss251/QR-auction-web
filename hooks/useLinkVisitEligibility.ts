@@ -32,6 +32,19 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     ? (smartWalletAddress || smartWalletClient?.account?.address || address)
     : walletAddress;
   
+  // Get Twitter username for web context
+  const getTwitterUsername = () => {
+    if (!isWebContext || !authenticated || !user?.linkedAccounts) {
+      return null;
+    }
+    
+    const twitterAccount = user.linkedAccounts.find((account: { type: string; username?: string }) => 
+      account.type === 'twitter_oauth'
+    );
+    
+    return twitterAccount?.username || null;
+  };
+  
   // Log state changes
   useEffect(() => {
     console.log("LINK VISIT ELIGIBILITY - State changed:");
@@ -129,8 +142,15 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         try {
           console.log("🔍 HOOK: Checking database for web link visit status with cross-context support");
           
-          // Get Farcaster username associated with this address
+          // Get both Twitter and Farcaster usernames
+          let twitterUsername: string | null = null;
           let farcasterUsername: string | null = null;
+          
+          // Get Twitter username from authenticated user
+          twitterUsername = getTwitterUsername();
+          console.log('🔍 HOOK: Twitter username from auth:', twitterUsername);
+          
+          // Get Farcaster username associated with this address
           try {
             console.log('🔍 HOOK: Getting Farcaster username for address:', effectiveWalletAddress);
             const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
@@ -140,27 +160,31 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             console.warn('HOOK: Could not fetch Farcaster username for address:', error);
           }
           
-          // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
+          // Check for ANY claims by this wallet address (regardless of claim_source)
           const { data: allClaims, error } = await supabase
             .from('link_visit_claims')
             .select('*')
             .eq('eth_address', effectiveWalletAddress)
             .eq('auction_id', auctionId);
           
-          // Also check for claims by the Farcaster username if we found one
+          // Also check for claims by usernames if we found any
           let usernameClaims: typeof allClaims = [];
-          if (farcasterUsername) {
-            console.log('🔍 HOOK: Checking for username claims:', farcasterUsername);
-            const { data: usernameClaimsData, error: usernameError } = await supabase
-              .from('link_visit_claims')
-              .select('*')
-              .ilike('username', farcasterUsername)
-              .eq('auction_id', auctionId);
-            
-            if (!usernameError && usernameClaimsData) {
-              usernameClaims = usernameClaimsData;
-              console.log('🔍 HOOK: Username claims found:', usernameClaims.length);
+          const usernamesToCheck = [twitterUsername, farcasterUsername].filter(Boolean);
+          
+          if (usernamesToCheck.length > 0) {
+            console.log('🔍 HOOK: Checking for username claims:', usernamesToCheck);
+            for (const username of usernamesToCheck) {
+              const { data: usernameClaimsData, error: usernameError } = await supabase
+                .from('link_visit_claims')
+                .select('*')
+                .ilike('username', username!)
+                .eq('auction_id', auctionId);
+              
+              if (!usernameError && usernameClaimsData) {
+                usernameClaims = [...usernameClaims, ...usernameClaimsData];
+              }
             }
+            console.log('🔍 HOOK: Username claims found:', usernameClaims.length);
           }
           
           // Combine both sets of claims and deduplicate by id
@@ -289,7 +313,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             tx_hash: txHash,
             success: !!txHash,
             claim_source: 'web',
-            username: 'qrcoinweb'
+            username: getTwitterUsername() || 'qrcoinweb'
           }, {
             onConflict: 'eth_address,auction_id'
           });
@@ -376,7 +400,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             link_visited_at: new Date().toISOString(),
             eth_address: effectiveWalletAddress,
             claim_source: 'web',
-            username: 'qrcoinweb'
+            username: getTwitterUsername() || 'qrcoinweb'
           }, {
             onConflict: 'eth_address,auction_id'
           });
@@ -440,13 +464,22 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         setIsLoading(true);
         
         try {
-          // Get Farcaster username associated with this address
+          // Get both Twitter and Farcaster usernames
+          let twitterUsername: string | null = null;
           let farcasterUsername: string | null = null;
+          
+          // Get Twitter username from authenticated user
+          twitterUsername = getTwitterUsername();
+          console.log('🔍 HOOK REFRESH: Twitter username from auth:', twitterUsername);
+          
+          // Get Farcaster username associated with this address
           try {
+            console.log('🔍 HOOK: Getting Farcaster username for address:', effectiveWalletAddress);
             const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
             farcasterUsername = farcasterUser?.username || null;
+            console.log('🔍 HOOK: Associated Farcaster username:', farcasterUsername);
           } catch (error) {
-            console.warn('Manual refresh: Could not fetch Farcaster username for address:', error);
+            console.warn('HOOK: Could not fetch Farcaster username for address:', error);
           }
           
           // Check for ANY claims by this wallet address (regardless of claim_source)
@@ -456,17 +489,21 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             .eq('eth_address', effectiveWalletAddress)
             .eq('auction_id', auctionId);
           
-          // Also check for claims by the Farcaster username if we found one
+          // Also check for claims by usernames if we found any
           let usernameClaims: typeof allClaims = [];
-          if (farcasterUsername) {
-            const { data: usernameClaimsData, error: usernameError } = await supabase
-              .from('link_visit_claims')
-              .select('*')
-              .ilike('username', farcasterUsername)
-              .eq('auction_id', auctionId);
-            
-            if (!usernameError && usernameClaimsData) {
-              usernameClaims = usernameClaimsData;
+          const usernamesToCheck = [twitterUsername, farcasterUsername].filter(Boolean);
+          
+          if (usernamesToCheck.length > 0) {
+            for (const username of usernamesToCheck) {
+              const { data: usernameClaimsData, error: usernameError } = await supabase
+                .from('link_visit_claims')
+                .select('*')
+                .ilike('username', username!)
+                .eq('auction_id', auctionId);
+              
+              if (!usernameError && usernameClaimsData) {
+                usernameClaims = [...usernameClaims, ...usernameClaimsData];
+              }
             }
           }
           

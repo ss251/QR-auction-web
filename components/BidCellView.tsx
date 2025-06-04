@@ -172,7 +172,7 @@ export function BidCellView({
             <p className="font-medium truncate">{nameInfo.displayName}</p>
             {nameInfo.twitterUsername ? (
               <XLogo 
-                size="md" 
+                size="sm" 
                 username={nameInfo.twitterUsername} 
                 className="ml-0.5 opacity-80 hover:opacity-100"
               />

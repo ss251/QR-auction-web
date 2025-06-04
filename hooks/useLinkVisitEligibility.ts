@@ -47,16 +47,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   
   // Log state changes
   useEffect(() => {
-    console.log("LINK VISIT ELIGIBILITY - State changed:");
-    console.log("auctionId:", auctionId);
-    console.log("isWebContext:", isWebContext);
-    console.log("hasClicked:", hasClicked);
-    console.log("hasClaimed:", hasClaimed);
-    console.log("isLoading:", isLoading);
-    console.log("effectiveWalletAddress:", effectiveWalletAddress);
-    console.log("frameContext username:", frameContext?.user?.username);
-    console.log("frameContext fid:", frameContext?.user?.fid);
-    console.log("authenticated (web):", authenticated);
   }, [hasClicked, hasClaimed, isLoading, effectiveWalletAddress, frameContext, auctionId, isWebContext, authenticated]);
   
   // Function to refresh frame context (can be called repeatedly to check for changes)
@@ -69,7 +59,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     try {
       // Request latest frame context
       const context = await frameSdk.getContext();
-      console.log("Frame context updated:", context);
       
       // Update context state
       setFrameContext(context);
@@ -120,11 +109,9 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   // Check link visit status based on context
   useEffect(() => {
     const checkVisitStatus = async () => {
-      console.log("CHECKING LINK VISIT STATUS - Starting check");
       
       // If no auction ID, can't check status
       if (!auctionId) {
-        console.log("Missing auction ID");
         setIsLoading(false);
         return;
       }
@@ -132,7 +119,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       if (isWebContext) {
         // Web context: check by wallet address with cross-context support
         if (!effectiveWalletAddress) {
-          console.log("No wallet address found for web context");
           setIsLoading(false);
           return;
         }
@@ -140,7 +126,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         setIsLoading(true);
         
         try {
-          console.log("🔍 HOOK: Checking database for web link visit status with cross-context support");
           
           // Get both Twitter and Farcaster usernames
           let twitterUsername: string | null = null;
@@ -148,14 +133,11 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           
           // Get Twitter username from authenticated user
           twitterUsername = getTwitterUsername();
-          console.log('🔍 HOOK: Twitter username from auth:', twitterUsername);
           
           // Get Farcaster username associated with this address
           try {
-            console.log('🔍 HOOK: Getting Farcaster username for address:', effectiveWalletAddress);
             const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
             farcasterUsername = farcasterUser?.username || null;
-            console.log('🔍 HOOK: Associated Farcaster username:', farcasterUsername);
           } catch (error) {
             console.warn('HOOK: Could not fetch Farcaster username for address:', error);
           }
@@ -172,7 +154,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           const usernamesToCheck = [twitterUsername, farcasterUsername].filter(Boolean);
           
           if (usernamesToCheck.length > 0) {
-            console.log('🔍 HOOK: Checking for username claims:', usernamesToCheck);
             for (const username of usernamesToCheck) {
               const { data: usernameClaimsData, error: usernameError } = await supabase
                 .from('link_visit_claims')
@@ -184,7 +165,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
                 usernameClaims = [...usernameClaims, ...usernameClaimsData];
               }
             }
-            console.log('🔍 HOOK: Username claims found:', usernameClaims.length);
           }
           
           // Combine both sets of claims and deduplicate by id
@@ -194,26 +174,17 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           );
         
           if (error && error.code !== 'PGRST116') {
-            console.error('Error checking web link visit status:', error);
           }
           
           if (combinedClaims.length > 0) {
             // Find the most relevant claim (prefer the one that matches the current context)
             const relevantClaim = combinedClaims.find(claim => claim.eth_address === effectiveWalletAddress) || combinedClaims[0];
             
-            console.log("🔍 HOOK: Cross-context visit status found:", {
-              hasClicked: !!relevantClaim.link_visited_at,
-              hasClaimed: !!relevantClaim.claimed_at,
-              totalClaims: combinedClaims.length,
-              farcasterUsername,
-              record: relevantClaim
-            });
             
             setHasClicked(!!relevantClaim.link_visited_at);
             setHasClaimed(!!relevantClaim.claimed_at);
           } else {
             // No record found, reset states
-            console.log("🔍 HOOK: No cross-context visit records found");
             setHasClicked(false);
             setHasClaimed(false);
           }
@@ -226,18 +197,14 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       } else {
         // Mini-app context: check by FID (existing logic)
         if (!frameContext) {
-          console.log("Missing frame context");
           setIsLoading(false);
           return;
         }
 
         const fid = frameContext.user?.fid;
-        const username = frameContext.user?.username;
         
-        console.log("VISIT STATUS CHECK:", { fid, username, auctionId });
       
         if (!fid) {
-          console.log("No FID found");
           setIsLoading(false);
           return;
         }
@@ -246,7 +213,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         
         try {
           // Check if user has already claimed or clicked
-          console.log("Checking database for mini-app link visit status");
           const { data, error } = await supabase
             .from('link_visit_claims')
             .select('*')
@@ -256,20 +222,13 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             .maybeSingle();
         
           if (error && error.code !== 'PGRST116') {
-            console.error('Error checking mini-app link visit status:', error);
           }
           
           if (data) {
-            console.log("Mini-app visit status found:", {
-              hasClicked: !!data.link_visited_at,
-              hasClaimed: !!data.claimed_at,
-              record: data
-            });
             setHasClicked(!!data.link_visited_at);
             setHasClaimed(!!data.claimed_at);
           } else {
             // No record found, reset states
-            console.log("No mini-app visit records found");
             setHasClicked(false);
             setHasClaimed(false);
           }
@@ -292,11 +251,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       if (!effectiveWalletAddress || !auctionId) return false;
       
       try {
-        console.log("Recording web claim in database:", {
-          eth_address: effectiveWalletAddress,
-          auction_id: auctionId,
-          txHash
-        });
 
         const addressHash = effectiveWalletAddress?.slice(2).toLowerCase(); // Remove 0x and lowercase
         const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
@@ -335,11 +289,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       if (!frameContext?.user?.fid || !effectiveWalletAddress || !auctionId) return false;
       
       try {
-        console.log("Recording mini-app claim in database:", {
-          fid: frameContext.user.fid,
-          auction_id: auctionId,
-          txHash
-        });
         
         const { error } = await supabase
           .from('link_visit_claims')
@@ -379,10 +328,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       if (!effectiveWalletAddress || !auctionId) return false;
       
       try {
-        console.log("Recording web link click:", {
-          eth_address: effectiveWalletAddress,
-          auction_id: auctionId
-        });
         
         // Update local state immediately for UI responsiveness
         setHasClicked(true);
@@ -420,10 +365,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       if (!frameContext?.user?.fid || !auctionId) return false;
       
       try {
-        console.log("Recording mini-app link click:", {
-          fid: frameContext.user.fid,
-          auction_id: auctionId
-        });
         
         // Update local state immediately for UI responsiveness
         setHasClicked(true);
@@ -460,7 +401,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     if (isWebContext) {
       // Web context: refresh by wallet address with cross-context support
       if (effectiveWalletAddress && auctionId) {
-        console.log("Manual refresh for web auction with cross-context check", auctionId);
         setIsLoading(true);
         
         try {
@@ -470,14 +410,11 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           
           // Get Twitter username from authenticated user
           twitterUsername = getTwitterUsername();
-          console.log('🔍 HOOK REFRESH: Twitter username from auth:', twitterUsername);
           
           // Get Farcaster username associated with this address
           try {
-            console.log('🔍 HOOK: Getting Farcaster username for address:', effectiveWalletAddress);
             const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
             farcasterUsername = farcasterUser?.username || null;
-            console.log('🔍 HOOK: Associated Farcaster username:', farcasterUsername);
           } catch (error) {
             console.warn('HOOK: Could not fetch Farcaster username for address:', error);
           }
@@ -514,16 +451,13 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           );
           
           if (error && error.code !== 'PGRST116') {
-            console.error('Manual web refresh error:', error);
           }
           
           if (combinedClaims.length > 0) {
             const relevantClaim = combinedClaims.find(claim => claim.eth_address === effectiveWalletAddress) || combinedClaims[0];
-            console.log("Manual web refresh found cross-context record:", relevantClaim);
             setHasClicked(!!relevantClaim.link_visited_at);
             setHasClaimed(!!relevantClaim.claimed_at);
           } else {
-            console.log("Manual web refresh found no cross-context record");
             setHasClicked(false);
             setHasClaimed(false);
           }
@@ -538,7 +472,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       const context = await checkFrameContext();
       
       if (context?.user?.fid && auctionId) {
-        console.log("Manual refresh for mini-app auction", auctionId);
         setIsLoading(true);
         
         try {
@@ -551,15 +484,12 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             .maybeSingle();
           
           if (error && error.code !== 'PGRST116') {
-            console.error('Manual mini-app refresh error:', error);
           }
           
           if (data) {
-            console.log("Manual mini-app refresh found record:", data);
             setHasClicked(!!data.link_visited_at);
             setHasClaimed(!!data.claimed_at);
           } else {
-            console.log("Manual mini-app refresh found no record");
             setHasClicked(false);
             setHasClaimed(false);
           }

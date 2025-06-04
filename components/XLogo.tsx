@@ -1,17 +1,54 @@
-export function XLogo({ className }: { className?: string }) {
+import React from 'react';
+import { cn } from '@/lib/utils';
+
+interface XLogoProps {
+  size?: 'sm' | 'md' | 'lg';
+  username?: string;
+  className?: string;
+}
+
+export function XLogo({ size = 'md', username, className }: XLogoProps) {
+  const sizeClasses = {
+    sm: 'h-3 w-3',
+    md: 'h-4 w-4', 
+    lg: 'h-5 w-5'
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (username) {
+      window.open(`https://x.com/${username}`, '_blank', 'noopener,noreferrer');
+    }
+  };
+
   return (
-    <svg
-      width="32"
-      height="32"
-      viewBox="0 0 24 24"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
+    <div 
+      className={cn(
+        "relative inline-block cursor-pointer transition-opacity hover:opacity-80",
+        className
+      )}
+      onClick={handleClick}
+      title={username ? `@${username} on X` : 'X (Twitter)'}
     >
-      <path
-        d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"
-        fill="currentColor"
+      {/* Light mode X logo (black) */}
+      <img
+        src="https://cdn.cms-twdigitalassets.com/content/dam/about-twitter/x/brand-toolkit/logo-black.png.twimg.2560.png"
+        alt="X"
+        className={cn(
+          sizeClasses[size],
+          "block dark:hidden"
+        )}
       />
-    </svg>
+      
+      {/* Dark mode X logo (white) */}
+      <img
+        src="https://cdn.cms-twdigitalassets.com/content/dam/about-twitter/x/brand-toolkit/logo-white.png.twimg.2560.png"
+        alt="X"
+        className={cn(
+          sizeClasses[size],
+          "hidden dark:block"
+        )}
+      />
+    </div>
   );
 }

@@ -123,13 +123,13 @@ export const getPrivyConfig = () => {
     // Website context: include wallets for connectWallet() but prioritize social in login
     walletList = isMobile 
       ? ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect']
-      : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'detected_ethereum_wallets'];
+      : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'email'];
   } else if (isMobile) {
     // Legacy mobile behavior
     walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'];
   } else {
     // Legacy desktop behavior
-    walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'detected_ethereum_wallets'];
+    walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'email'];
   }
 
   // Determine login methods based on context

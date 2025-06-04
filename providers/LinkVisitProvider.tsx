@@ -34,6 +34,7 @@ interface LinkVisitContextType {
   authCheckComplete: boolean;
   isCheckingDatabase: boolean;
   isTwitterUserNeedsWallet: boolean;
+  isPrivyModalActive: boolean;
 }
 
 // Create context with default values
@@ -54,6 +55,7 @@ const LinkVisitContext = createContext<LinkVisitContextType>({
   authCheckComplete: false,
   isCheckingDatabase: false,
   isTwitterUserNeedsWallet: false,
+  isPrivyModalActive: false,
 });
 
 // Hook to use the link visit context
@@ -86,6 +88,9 @@ export function LinkVisitProvider({
   const [explicitlyCheckedClaim, setExplicitlyCheckedClaim] = useState(false);
   const [isCheckingLatestAuction, setIsCheckingLatestAuction] = useState(false);
   const [isCheckingDatabase, setIsCheckingDatabase] = useState(false);
+  
+  // NEW: Flag to prevent multiple wallet connection calls
+  const [hasTriggeredWalletConnection, setHasTriggeredWalletConnection] = useState(false);
   
   // Web-specific state
   const { authenticated, user } = usePrivy();
@@ -521,33 +526,110 @@ export function LinkVisitProvider({
     }
   }, [showClaimPopup, isWebContext, setFlowState]);
 
-  // NEW: Check flow state on mount - handle page reload scenarios
+  // NEW: Check flow state on mount - handle page reload scenarios  
   useEffect(() => {
     if (!isWebContext) return;
     
     const flowState = getFlowState();
     
-    // If user was in claiming flow and now authenticated, show appropriate popup
+    // If user was in claiming flow and now authenticated, show appropriate action
     if (flowState === 'claiming' && authenticated) {
       console.log('🔄 User returned from auth, checking wallet status for claim flow');
       
       // Small delay to ensure wallet state is determined
       setTimeout(() => {
-        if (isTwitterUserNeedsWallet) {
-          console.log('✋ Twitter user needs wallet - showing wallet connection');
+        if (isTwitterUserNeedsWallet && !hasTriggeredWalletConnection) {
+          console.log('✋ Twitter user needs wallet - triggering wallet connection (first time)');
+          setHasTriggeredWalletConnection(true);
           connectWallet();
+          // Don't clear flow state yet - wait for wallet to connect
+        } else if (hasTriggeredWalletConnection && isTwitterUserNeedsWallet) {
+          console.log('⚠️ Wallet connection already triggered, waiting for completion...');
         } else if (latestWonAuctionId && !manualHasClaimedLatest) {
-          console.log('🎯 User has wallet - showing claim popup');
+          console.log('🎯 User already has wallet - showing claim popup');
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
           }
+          // Clear the flow state after handling
+          clearFlowState();
+        }
+      }, 1000);
+    }
+  }, [authenticated, isTwitterUserNeedsWallet, latestWonAuctionId, manualHasClaimedLatest, isWebContext, getFlowState, clearFlowState, requestPopup, connectWallet, hasTriggeredWalletConnection]);
+
+  // Reset wallet connection flag when not in claiming flow
+  useEffect(() => {
+    const flowState = getFlowState();
+    if (!flowState || flowState !== 'claiming') {
+      setHasTriggeredWalletConnection(false);
+    }
+  }, [getFlowState]);
+
+  // NEW: Listen for wallet connection completion to show claim popup
+  useEffect(() => {
+    if (!isWebContext) return;
+    
+    const flowState = getFlowState();
+    
+    // If user was in claiming flow, is authenticated, but previously needed wallet, and now has wallet
+    if (flowState === 'claiming' && authenticated && !isTwitterUserNeedsWallet && effectiveWalletAddress) {
+      console.log('🎯 Wallet connected after Twitter auth - showing claim popup');
+      console.log('Wallet connection state:', { 
+        flowState, 
+        authenticated, 
+        isTwitterUserNeedsWallet, 
+        effectiveWalletAddress: !!effectiveWalletAddress,
+        latestWonAuctionId,
+        manualHasClaimedLatest
+      });
+      
+      // Small delay to ensure everything is ready
+      setTimeout(() => {
+        if (latestWonAuctionId && !manualHasClaimedLatest) {
+          console.log('🚀 Requesting claim popup from coordinator');
+          const granted = requestPopup('linkVisit');
+          if (granted) {
+            console.log('✅ Claim popup granted and showing');
+            setShowClaimPopup(true);
+          } else {
+            console.log('❌ Claim popup denied by coordinator');
+          }
+        } else {
+          console.log('❌ Cannot show claim popup:', { 
+            hasLatestAuctionId: !!latestWonAuctionId, 
+            hasNotClaimed: !manualHasClaimedLatest 
+          });
         }
         // Clear the flow state after handling
         clearFlowState();
-      }, 1000);
+      }, 1000); // Increased delay to ensure wallet state is fully updated
     }
-  }, [authenticated, isTwitterUserNeedsWallet, latestWonAuctionId, manualHasClaimedLatest, isWebContext, getFlowState, clearFlowState, requestPopup, connectWallet]);
+  }, [isWebContext, authenticated, isTwitterUserNeedsWallet, effectiveWalletAddress, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup]);
+
+  // NEW: Additional fallback - listen for any wallet address changes when in claiming flow
+  useEffect(() => {
+    if (!isWebContext) return;
+    
+    const flowState = getFlowState();
+    
+    // If we have flow state, user is authenticated, and wallet just became available
+    if (flowState === 'claiming' && authenticated && effectiveWalletAddress && !showClaimPopup) {
+      console.log('🔄 Wallet address detected during claiming flow - checking if claim popup should show');
+      
+      // Small delay and then check if we should show the popup
+      setTimeout(() => {
+        if (latestWonAuctionId && !manualHasClaimedLatest && !isPopupActive('linkVisit')) {
+          console.log('🎯 Fallback: Showing claim popup after wallet address detection');
+          const granted = requestPopup('linkVisit');
+          if (granted) {
+            setShowClaimPopup(true);
+          }
+          clearFlowState();
+        }
+      }, 2000);
+    }
+  }, [effectiveWalletAddress, isWebContext, authenticated, showClaimPopup, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup, isPopupActive]);
   
   // Listen for trigger from other popups closing
   useEffect(() => {
@@ -620,7 +702,7 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState, connectWallet]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState, setHasTriggeredWalletConnection]);
   
   // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
@@ -750,6 +832,31 @@ export function LinkVisitProvider({
     }
   }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState]);
   
+  // NEW: Track when Privy modal is active to prevent popup interference
+  const [isPrivyModalActive, setIsPrivyModalActive] = useState(false);
+  
+  // Monitor Privy connection state to detect when modal is active
+  useEffect(() => {
+    if (hasTriggeredWalletConnection && isTwitterUserNeedsWallet && !effectiveWalletAddress) {
+      setIsPrivyModalActive(true);
+      console.log('🔒 Privy modal active - protecting claim popup');
+    } else if (authenticated && effectiveWalletAddress) {
+      // Immediately clear when wallet connection completes
+      setIsPrivyModalActive(false);
+      console.log('🔓 Privy modal closed - claim popup safe');
+    } else if (!isTwitterUserNeedsWallet) {
+      // Clear if user no longer needs wallet
+      setIsPrivyModalActive(false);
+    }
+  }, [hasTriggeredWalletConnection, isTwitterUserNeedsWallet, authenticated, effectiveWalletAddress]);
+  
+  // Cleanup Privy modal state when popup closes
+  useEffect(() => {
+    if (!showClaimPopup) {
+      setIsPrivyModalActive(false);
+    }
+  }, [showClaimPopup]);
+
   // Handle claim action
   const handleClaim = async (captchaToken: string) => {
     console.log('Handling claim in provider...', { claimAuctionId, isWebContext, captchaToken: captchaToken || 'none' });
@@ -771,7 +878,7 @@ export function LinkVisitProvider({
     console.log('Closing link visit popup');
     setShowClaimPopup(false);
     releasePopup('linkVisit');
-    clearFlowState(); // NEW: Clear flow state on close
+    clearFlowState();
   };
 
   return (
@@ -792,7 +899,8 @@ export function LinkVisitProvider({
         walletStatusDetermined,
         authCheckComplete,
         isCheckingDatabase,
-        isTwitterUserNeedsWallet
+        isTwitterUserNeedsWallet,
+        isPrivyModalActive
       }}
     >
       {children}
@@ -805,6 +913,7 @@ export function LinkVisitProvider({
         winningImage={latestWinningImage || winningImage}
         auctionId={claimAuctionId || 0}
         onClaim={handleClaim}
+        isPrivyModalActive={isPrivyModalActive}
       />
     </LinkVisitContext.Provider>
   );

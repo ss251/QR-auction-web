@@ -325,7 +325,7 @@ export function WinDetailsView(winnerdata: AuctionType) {
                 </div>
                 {nameInfo.twitterUsername ? (
                   <XLogo 
-                    size="sm" 
+                    size="md" 
                     username={nameInfo.twitterUsername} 
                     className="ml-1 flex-shrink-0 opacity-80 hover:opacity-100"
                   />

@@ -500,12 +500,6 @@ export function LinkVisitProvider({
   // NEW: LocalStorage flow state tracking
   const FLOW_STATE_KEY = 'qrcoin_claim_flow_state';
   
-  const setFlowState = useCallback((state: string) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(FLOW_STATE_KEY, state);
-    }
-  }, []);
-  
   const getFlowState = useCallback(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(FLOW_STATE_KEY);
@@ -519,14 +513,7 @@ export function LinkVisitProvider({
     }
   }, []);
 
-  // NEW: Track when user starts claim flow
-  useEffect(() => {
-    if (showClaimPopup && isWebContext) {
-      setFlowState('claiming');
-    }
-  }, [showClaimPopup, isWebContext, setFlowState]);
-
-  // NEW: Check flow state on mount - handle page reload scenarios  
+  // NEW: Check flow state on mount - handle page reload scenarios
   useEffect(() => {
     if (!isWebContext) return;
     
@@ -636,6 +623,13 @@ export function LinkVisitProvider({
     const handleTrigger = () => {
       console.log('===== LINK VISIT TRIGGERED BY OTHER POPUP =====');
       
+      // NEW: Skip trigger if there's an active claiming flow - let flow state logic handle it
+      const flowState = getFlowState();
+      if (flowState === 'claiming') {
+        console.log('❌ Triggered but active claiming flow detected - letting flow state logic handle popup');
+        return;
+      }
+      
       // Don't show popup if wallet status hasn't been determined yet
       if (!walletStatusDetermined) {
         console.log('❌ Triggered but wallet status not determined yet');
@@ -672,7 +666,6 @@ export function LinkVisitProvider({
           // Check if user is eligible (disconnected or hasn't claimed for latest won auction)
           if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId && !isLoading) {
             console.log('🎉 TRIGGERED - SHOWING WEB LINK VISIT POPUP');
-            setFlowState('claiming'); // NEW: Track flow state
             const granted = requestPopup('linkVisit');
             if (granted) {
               setShowClaimPopup(true);
@@ -702,12 +695,19 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState, setHasTriggeredWalletConnection]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState]);
   
   // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
     // LinkVisit popup can now auto-show if user is eligible
     console.log('LinkVisit auto-show is enabled - checking eligibility independently');
+    
+    // NEW: Skip auto-show if there's an active claiming flow - let flow state logic handle it
+    const flowState = getFlowState();
+    if (flowState === 'claiming') {
+      console.log('Skipping auto-show - active claiming flow detected, letting flow state logic handle popup');
+      return;
+    }
     
     // Ensure we have explicitly checked claim status before showing popup
     if (!explicitlyCheckedClaim) {
@@ -773,7 +773,6 @@ export function LinkVisitProvider({
           
           const timer = setTimeout(() => {
             console.log('Requesting linkVisit popup from coordinator (web)');
-            setFlowState('claiming'); // NEW: Track flow state
             const granted = requestPopup('linkVisit');
             if (granted) {
               setShowClaimPopup(true);
@@ -830,7 +829,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, setFlowState]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState]);
   
   // NEW: Track when Privy modal is active to prevent popup interference
   const [isPrivyModalActive, setIsPrivyModalActive] = useState(false);

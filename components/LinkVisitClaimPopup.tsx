@@ -266,6 +266,15 @@ export function LinkVisitClaimPopup({
     }
   }, [hasClickedAny, isWebContext, claimState, hasClaimed]);
 
+  // NEW: Handle real-time claim status changes when popup is already open
+  useEffect(() => {
+    // If popup is open and we're in claim state, but user has now claimed, show already_claimed
+    if (isOpen && claimState === 'claim' && hasClaimed) {
+      console.log('Real-time update: User has claimed while popup was open, showing already_claimed state');
+      setClaimState('already_claimed');
+    }
+  }, [isOpen, claimState, hasClaimed]);
+
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
     async function checkFrameContext() {
@@ -384,6 +393,10 @@ export function LinkVisitClaimPopup({
         
         // Move to next state based on authentication status
         if (!authenticated) {
+          // NEW: Set flow state when starting Twitter auth flow
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('qrcoin_claim_flow_state', 'claiming');
+          }
           // Trigger wallet connection
           handleConnectWallet();
         } else if (isEligibilityLoading) {

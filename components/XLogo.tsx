@@ -32,7 +32,7 @@ export function XLogo({ size = 'md', username, className }: XLogoProps) {
     >
       {/* Light mode X logo (black) */}
       <img
-        src="https://cdn.cms-twdigitalassets.com/content/dam/about-twitter/x/brand-toolkit/logo-black.png.twimg.2560.png"
+        src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg"
         alt="X"
         className={cn(
           sizeClasses[size],
@@ -42,7 +42,7 @@ export function XLogo({ size = 'md', username, className }: XLogoProps) {
       
       {/* Dark mode X logo (white) */}
       <img
-        src="https://cdn.cms-twdigitalassets.com/content/dam/about-twitter/x/brand-toolkit/logo-white.png.twimg.2560.png"
+        src="https://upload.wikimedia.org/wikipedia/commons/thumb/b/b7/X_logo.jpg/1200px-X_logo.jpg"
         alt="X"
         className={cn(
           sizeClasses[size],

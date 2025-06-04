@@ -139,7 +139,7 @@ export const getPrivyConfig = () => {
     loginMethods = ["wallet", "farcaster"] as const;
   } else if (isWebsiteContext) {
     // Website context: Twitter and Farcaster only
-    loginMethods = ["twitter", "farcaster"] as const;
+    loginMethods = ["twitter"] as const;
   } else {
     // Legacy behavior for other contexts
     loginMethods = ["email", "wallet"] as const;

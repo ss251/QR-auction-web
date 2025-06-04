@@ -455,7 +455,7 @@ export function LinkVisitClaimPopup({
     setClaimState('connecting');
     
     // Show persistent toast with updated message
-    const toastId = toast.info('Sign in with X to claim 1000 $QR', {
+    const toastId = toast.info('Sign in with X (Twitter) to claim 1,000 $QR', {
       duration: Infinity, // Persistent until manually dismissed
     });
     setPersistentToastId(toastId);
@@ -760,7 +760,7 @@ What The Firkin?`);
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
-                  className="w-full flex justify-center mt-2 min-h-[65px]"
+                  className="w-full flex justify-center mt-2"
                 >
                   <Button 
                     variant="default" 
@@ -858,7 +858,7 @@ What The Firkin?`);
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
-                  className="w-full flex justify-center mt-2 min-h-[65px]"
+                  className="w-full flex justify-center mt-2"
                 >
                   <div className="flex flex-col items-center gap-3">
                     <Turnstile

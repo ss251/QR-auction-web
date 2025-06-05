@@ -138,6 +138,17 @@ export function LinkVisitProvider({
   // Get popup coordinator to manage popup display
   const { requestPopup, releasePopup, isPopupActive } = usePopupCoordinator();
   
+  // Helper to get Twitter username from authenticated user
+  const getTwitterUsername = useCallback(() => {
+    if (!authenticated || !user?.linkedAccounts) return null;
+    
+    const twitterAccount = user.linkedAccounts.find((account: LinkedAccount & { username?: string }) => 
+      account.type === 'twitter_oauth'
+    );
+    
+    return twitterAccount?.username || null;
+  }, [authenticated, user?.linkedAccounts]);
+  
   // Detect if we're in web context vs mini-app context
   useEffect(() => {
     async function detectContext() {
@@ -223,9 +234,12 @@ export function LinkVisitProvider({
   const checkClaimStatusForLatestAuction = useCallback(async () => {
     setIsCheckingDatabase(true);
     
-    // For web context, use wallet address; for mini-app, use FID
+    // For web context, use wallet address or Twitter username; for mini-app, use FID
     if (isWebContext) {
-      if (!effectiveWalletAddress || !latestWonAuctionId) {
+      const twitterUsername = getTwitterUsername();
+      
+      // Need either wallet address or Twitter username to check
+      if ((!effectiveWalletAddress && !twitterUsername) || !latestWonAuctionId) {
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
         setIsCheckingDatabase(false);
@@ -236,30 +250,50 @@ export function LinkVisitProvider({
         
         // Get Farcaster username associated with this address
         let farcasterUsername: string | null = null;
-        try {
-          const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
-          farcasterUsername = farcasterUser?.username || null;
-        } catch {
+        if (effectiveWalletAddress) {
+          try {
+            const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
+            farcasterUsername = farcasterUser?.username || null;
+          } catch {
+          }
         }
         
-        // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
-        const { data: allClaims, error } = await supabase
-          .from('link_visit_claims')
-          .select('*')
-          .eq('eth_address', effectiveWalletAddress)
-          .eq('auction_id', latestWonAuctionId);
-        
-        // Also check for claims by the Farcaster username if we found one
-        let usernameClaims: typeof allClaims = [];
-        if (farcasterUsername) {
-          const { data: usernameClaimsData, error: usernameError } = await supabase
+        // Check for ANY claims by wallet address if available
+        let allClaims: Array<{
+          id: string;
+          eth_address?: string;
+          username?: string;
+          claimed_at?: string;
+          link_visited_at?: string;
+          auction_id: number;
+        }> = [];
+        if (effectiveWalletAddress) {
+          const { data: addressClaims, error } = await supabase
             .from('link_visit_claims')
             .select('*')
-            .ilike('username', farcasterUsername)
+            .eq('eth_address', effectiveWalletAddress)
             .eq('auction_id', latestWonAuctionId);
           
-          if (!usernameError && usernameClaimsData) {
-            usernameClaims = usernameClaimsData;
+          if (!error && addressClaims) {
+            allClaims = addressClaims;
+          }
+        }
+        
+        // Also check for claims by usernames (Twitter and Farcaster)
+        let usernameClaims: typeof allClaims = [];
+        const usernamesToCheck = [twitterUsername, farcasterUsername].filter(Boolean);
+        
+        if (usernamesToCheck.length > 0) {
+          for (const username of usernamesToCheck) {
+            const { data: usernameClaimsData, error: usernameError } = await supabase
+              .from('link_visit_claims')
+              .select('*')
+              .ilike('username', username!)
+              .eq('auction_id', latestWonAuctionId);
+            
+            if (!usernameError && usernameClaimsData) {
+              usernameClaims = [...usernameClaims, ...usernameClaimsData];
+            }
           }
         }
         
@@ -268,13 +302,6 @@ export function LinkVisitProvider({
         const combinedClaims = allClaimsArray.filter((claim, index, self) => 
           index === self.findIndex(c => c.id === claim.id)
         );
-        
-        if (error) {
-          setManualHasClaimedLatest(false);
-          setExplicitlyCheckedClaim(true);
-          setIsCheckingDatabase(false);
-          return false;
-        }
         
         // Check if ANY claim has claimed_at (regardless of web/mini-app source)
         const hasClaimedInAnyContext = combinedClaims && combinedClaims.some(claim => claim.claimed_at);
@@ -351,7 +378,7 @@ export function LinkVisitProvider({
         return false;
       }
     }
-  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, isWebContext]);
+  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, isWebContext, getTwitterUsername]);
   
   // Check if this auction is the latest won auction using Supabase
   useEffect(() => {

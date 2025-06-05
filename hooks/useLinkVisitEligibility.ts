@@ -33,7 +33,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     : walletAddress;
   
   // Get Twitter username for web context
-  const getTwitterUsername = () => {
+  const getTwitterUsername = useCallback(() => {
     if (!isWebContext || !authenticated || !user?.linkedAccounts) {
       return null;
     }
@@ -43,7 +43,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     );
     
     return twitterAccount?.username || null;
-  };
+  }, [isWebContext, authenticated, user?.linkedAccounts]);
   
   // Log state changes
   useEffect(() => {
@@ -117,8 +117,10 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       }
 
       if (isWebContext) {
-        // Web context: check by wallet address with cross-context support
-        if (!effectiveWalletAddress) {
+        // Web context: check by wallet address or Twitter username with cross-context support
+        const twitterUsername = getTwitterUsername();
+        
+        if (!effectiveWalletAddress && !twitterUsername) {
           setIsLoading(false);
           return;
         }
@@ -128,26 +130,40 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         try {
           
           // Get both Twitter and Farcaster usernames
-          let twitterUsername: string | null = null;
           let farcasterUsername: string | null = null;
           
-          // Get Twitter username from authenticated user
-          twitterUsername = getTwitterUsername();
+          // twitterUsername already retrieved above in the scope
           
-          // Get Farcaster username associated with this address
-          try {
-            const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
-            farcasterUsername = farcasterUser?.username || null;
-          } catch (error) {
-            console.warn('HOOK: Could not fetch Farcaster username for address:', error);
+          // Get Farcaster username associated with this address if we have one
+          if (effectiveWalletAddress) {
+            try {
+              const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
+              farcasterUsername = farcasterUser?.username || null;
+            } catch (error) {
+              console.warn('HOOK: Could not fetch Farcaster username for address:', error);
+            }
           }
           
           // Check for ANY claims by this wallet address (regardless of claim_source)
-          const { data: allClaims, error } = await supabase
-            .from('link_visit_claims')
-            .select('*')
-            .eq('eth_address', effectiveWalletAddress)
-            .eq('auction_id', auctionId);
+          let allClaims: Array<{
+            id: string;
+            eth_address?: string;
+            username?: string;
+            claimed_at?: string;
+            link_visited_at?: string;
+            auction_id: number;
+          }> = [];
+          if (effectiveWalletAddress) {
+            const { data: addressClaims, error } = await supabase
+              .from('link_visit_claims')
+              .select('*')
+              .eq('eth_address', effectiveWalletAddress)
+              .eq('auction_id', auctionId);
+            
+            if (!error && addressClaims) {
+              allClaims = addressClaims;
+            }
+          }
           
           // Also check for claims by usernames if we found any
           let usernameClaims: typeof allClaims = [];
@@ -172,9 +188,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           const combinedClaims = allClaimsArray.filter((claim, index, self) => 
             index === self.findIndex(c => c.id === claim.id)
           );
-        
-          if (error && error.code !== 'PGRST116') {
-          }
           
           if (combinedClaims.length > 0) {
             // Find the most relevant claim (prefer the one that matches the current context)
@@ -242,12 +255,12 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     };
 
     checkVisitStatus();
-  }, [frameContext, auctionId, isWebContext, effectiveWalletAddress]);
+  }, [frameContext, auctionId, isWebContext, effectiveWalletAddress, authenticated, user, getTwitterUsername]);
   
   // Record claim in database
   const recordClaim = async (txHash?: string): Promise<boolean> => {
     if (isWebContext) {
-      // Web context: use wallet address
+      // Web context: use wallet address (required for claiming)
       if (!effectiveWalletAddress || !auctionId) return false;
       
       try {
@@ -399,32 +412,48 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   // Manual refresh function
   const refreshStatus = useCallback(async () => {
     if (isWebContext) {
-      // Web context: refresh by wallet address with cross-context support
-      if (effectiveWalletAddress && auctionId) {
+      // Web context: refresh by wallet address or Twitter username with cross-context support
+      const twitterUsername = getTwitterUsername();
+      
+      if ((effectiveWalletAddress || twitterUsername) && auctionId) {
         setIsLoading(true);
         
         try {
           // Get both Twitter and Farcaster usernames
-          let twitterUsername: string | null = null;
           let farcasterUsername: string | null = null;
           
-          // Get Twitter username from authenticated user
-          twitterUsername = getTwitterUsername();
+          // twitterUsername already retrieved above
           
-          // Get Farcaster username associated with this address
-          try {
-            const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
-            farcasterUsername = farcasterUser?.username || null;
-          } catch (error) {
-            console.warn('HOOK: Could not fetch Farcaster username for address:', error);
+          // Get Farcaster username associated with this address if we have one
+          if (effectiveWalletAddress) {
+            try {
+              const farcasterUser = await getFarcasterUser(effectiveWalletAddress);
+              farcasterUsername = farcasterUser?.username || null;
+            } catch (error) {
+              console.warn('HOOK: Could not fetch Farcaster username for address:', error);
+            }
           }
           
           // Check for ANY claims by this wallet address (regardless of claim_source)
-          const { data: allClaims, error } = await supabase
-            .from('link_visit_claims')
-            .select('*')
-            .eq('eth_address', effectiveWalletAddress)
-            .eq('auction_id', auctionId);
+          let allClaims: Array<{
+            id: string;
+            eth_address?: string;
+            username?: string;
+            claimed_at?: string;
+            link_visited_at?: string;
+            auction_id: number;
+          }> = [];
+          if (effectiveWalletAddress) {
+            const { data: addressClaims, error } = await supabase
+              .from('link_visit_claims')
+              .select('*')
+              .eq('eth_address', effectiveWalletAddress)
+              .eq('auction_id', auctionId);
+            
+            if (!error && addressClaims) {
+              allClaims = addressClaims;
+            }
+          }
           
           // Also check for claims by usernames if we found any
           let usernameClaims: typeof allClaims = [];
@@ -449,9 +478,6 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           const combinedClaims = allClaimsArray.filter((claim, index, self) => 
             index === self.findIndex(c => c.id === claim.id)
           );
-          
-          if (error && error.code !== 'PGRST116') {
-          }
           
           if (combinedClaims.length > 0) {
             const relevantClaim = combinedClaims.find(claim => claim.eth_address === effectiveWalletAddress) || combinedClaims[0];
@@ -499,7 +525,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
         }
       }
     }
-  }, [checkFrameContext, auctionId, isWebContext, effectiveWalletAddress]);
+  }, [checkFrameContext, auctionId, isWebContext, effectiveWalletAddress, getTwitterUsername]);
   
   return { 
     hasClicked, 

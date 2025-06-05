@@ -183,8 +183,7 @@ export function WinDetailsView(winnerdata: AuctionType) {
               const latestBid = auctionBids[0];
               
               // Extract Twitter username from the bid's name field (same logic as BidCellView)
-              if (latestBid.name && latestBid.name.trim() !== "" && 
-                  !latestBid.name.includes('.') && !latestBid.name.startsWith('0x')) {
+              if (latestBid.name && latestBid.name.trim() !== "" && !latestBid.name.includes('.')) {
                 twitterUsername = latestBid.name.trim();
               }
             }

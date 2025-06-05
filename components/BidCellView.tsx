@@ -100,10 +100,8 @@ export function BidCellView({
       const bidderAddress = bid.bidder;
       
       // Extract Twitter username from the name field (for V3 auctions)
-      // Filter out basenames and addresses - only accept clean usernames
       let twitterUsername: string | null = null;
-      if (isV3Auction && bid.name && bid.name.trim() !== "" && 
-          !bid.name.includes('.') && !bid.name.startsWith('0x')) {
+      if (isV3Auction && bid.name && bid.name.trim() !== "" && !bid.name.includes('.')) {
         twitterUsername = bid.name.trim();
       }
       

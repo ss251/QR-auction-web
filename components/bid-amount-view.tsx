@@ -707,6 +707,33 @@ export function BidForm({
     }
   }, [isConnected, setValue]);
 
+  // Check for bid intent after Twitter login
+  useEffect(() => {
+    // Only run this check if user is authenticated with Twitter but has no wallet
+    if (authenticated && user?.twitter && !isConnected && !isFrame.current) {
+      const bidIntentStr = sessionStorage.getItem('bidIntent');
+      if (bidIntentStr) {
+        try {
+          const bidIntent = JSON.parse(bidIntentStr);
+          // Check if this is for the current auction and within 5 minutes
+          if (bidIntent.auctionId === auctionDetail?.tokenId?.toString() && 
+              Date.now() - bidIntent.timestamp < 5 * 60 * 1000) {
+            // Clear the bid intent
+            sessionStorage.removeItem('bidIntent');
+            // Show toast and open wallet connection modal
+            setTimeout(() => {
+              toast.info("Connect your wallet to place a bid");
+              connectWallet();
+            }, 100); // Small delay to ensure everything is loaded
+          }
+        } catch (error) {
+          console.error('Error parsing bid intent:', error);
+          sessionStorage.removeItem('bidIntent');
+        }
+      }
+    }
+  }, [authenticated, user?.twitter, isConnected, auctionDetail?.tokenId, connectWallet]);
+
   // Handle typing event separately from form validation
   const handleTypingEvent = () => {
     console.log('Triggering typing event');
@@ -751,6 +778,11 @@ export function BidForm({
       }
       // If not authenticated at all, trigger the Privy login flow
       else if (!authenticated && !isConnected && !isFrame.current) {
+        // Store bid intent in sessionStorage before redirecting to Twitter login
+        sessionStorage.setItem('bidIntent', JSON.stringify({
+          auctionId: auctionDetail?.tokenId?.toString(),
+          timestamp: Date.now()
+        }));
         toast.info("Sign in with X (Twitter) to place a bid");
         login();
         return;

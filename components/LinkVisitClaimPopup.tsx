@@ -194,6 +194,8 @@ export function LinkVisitClaimPopup({
             if (hasClaimed) {
               return 'already_claimed';
             } else {
+              // Clear the click state when entering claim state
+              clearClickedFromStorage();
               return 'claim'; // Go directly to claim state for authenticated users
             }
           } else {
@@ -201,11 +203,17 @@ export function LinkVisitClaimPopup({
           }
         } else {
           // Mini-app flow: visit -> claim -> success (skip captcha)
-          return hasClickedAny ? 'claim' : 'visit';
+          if (hasClickedAny) {
+            // Clear the click state when entering claim state
+            clearClickedFromStorage();
+            return 'claim';
+          } else {
+            return 'visit';
+          }
         }
       });
     }
-  }, [isOpen, hasClicked, hasClickedAny, isWebContext, authenticated, claimState, hasClaimed]);
+  }, [isOpen, hasClicked, hasClickedAny, isWebContext, authenticated, claimState, hasClaimed, clearClickedFromStorage]);
 
   // Handle automatic state transition when authentication changes
   useEffect(() => {
@@ -217,6 +225,8 @@ export function LinkVisitClaimPopup({
         if (hasClaimed) {
           setClaimState('already_claimed');
         } else {
+          // Clear the click state when transitioning to claim state
+          clearClickedFromStorage();
           setClaimState('claim');
         }
       }
@@ -225,11 +235,13 @@ export function LinkVisitClaimPopup({
         if (hasClaimed) {
           setClaimState('already_claimed');
         } else {
+          // Clear the click state when transitioning to claim state
+          clearClickedFromStorage();
           setClaimState('claim');
         }
       }
     }
-  }, [authenticated, hasClickedAny, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading]);
+  }, [authenticated, hasClickedAny, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading, clearClickedFromStorage]);
 
   // Handle mini-app auto-transition when hasClickedAny changes
   useEffect(() => {
@@ -237,10 +249,12 @@ export function LinkVisitClaimPopup({
       if (hasClaimed) {
         setClaimState('already_claimed');
       } else {
+        // Clear the click state when transitioning to claim state
+        clearClickedFromStorage();
         setClaimState('claim');
       }
     }
-  }, [hasClickedAny, isWebContext, claimState, hasClaimed]);
+  }, [hasClickedAny, isWebContext, claimState, hasClaimed, clearClickedFromStorage]);
 
   // NEW: Handle real-time claim status changes when popup is already open
   useEffect(() => {
@@ -371,12 +385,16 @@ export function LinkVisitClaimPopup({
           handleConnectWallet();
         } else if (isEligibilityLoading) {
           // Wait for eligibility check to complete
+          // Clear the click state when transitioning to claim state
+          clearClickedFromStorage();
           setClaimState('claim'); // Go directly to claim state for authenticated users
         } else {
           // Already authenticated and eligibility check complete, check if they've already claimed
           if (hasClaimed) {
             setClaimState('already_claimed');
           } else {
+            // Clear the click state when transitioning to claim state
+            clearClickedFromStorage();
             setClaimState('claim'); // Go directly to claim state for authenticated users
           }
         }
@@ -390,6 +408,8 @@ export function LinkVisitClaimPopup({
             if (hasClaimed) {
               setClaimState('already_claimed');
             } else {
+              // Clear the click state when transitioning to claim state
+              clearClickedFromStorage();
               setClaimState('claim');
             }
           }, 1000);
@@ -430,6 +450,8 @@ export function LinkVisitClaimPopup({
   const handleCaptchaSuccess = (token: string) => {
     setCaptchaToken(token);
     setShowCaptcha(false);
+    // Clear the click state when transitioning to claim state
+    clearClickedFromStorage();
     // Auto-advance to claim state
     setClaimState('claim');
   };

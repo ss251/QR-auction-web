@@ -751,7 +751,7 @@ export function BidForm({
       }
       // If not authenticated at all, trigger the Privy login flow
       else if (!authenticated && !isConnected && !isFrame.current) {
-        toast.info("Please connect a wallet to place a bid");
+        toast.info("Sign in with X (Twitter) to place a bid");
         login();
         return;
       } else if (!isFrame.current) {

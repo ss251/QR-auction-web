@@ -743,8 +743,14 @@ export function BidForm({
     const effectivelyConnected = isConnected || hasFrameWallet;
 
     if (!effectivelyConnected) {
-      // Instead of just showing a toast error, trigger the Privy login flow
-      if (!authenticated && !isConnected && !isFrame.current) {
+      // Check if user is authenticated with Twitter but has no wallet (web context only)
+      if (authenticated && user?.twitter && !isConnected && !isFrame.current) {
+        toast.info("Connect your wallet to place a bid");
+        connectWallet();
+        return;
+      }
+      // If not authenticated at all, trigger the Privy login flow
+      else if (!authenticated && !isConnected && !isFrame.current) {
         toast.info("Please connect a wallet to place a bid");
         login();
         return;

@@ -339,6 +339,42 @@ export async function POST(request: NextRequest) {
     let effectiveUsername: string | null = null;
     
     if (claim_source === 'web') {
+      // Verify auth token for web users (Twitter authentication)
+      const authHeader = request.headers.get('authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Missing or invalid authorization header`);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Authentication required. Please sign in with Twitter.' 
+        }, { status: 401 });
+      }
+      
+      const authToken = authHeader.substring(7); // Remove 'Bearer ' prefix
+      
+      // Verify the Privy auth token
+      try {
+        // For now, just check that token exists and is not empty
+        // In production, you would verify this token with Privy's API
+        // Documentation: https://docs.privy.io/guide/server/authorization/verification
+        if (!authToken || authToken.length < 10) {
+          throw new Error('Invalid auth token format');
+        }
+        
+        // TODO: Add actual Privy token verification here
+        // const privyUser = await verifyPrivyToken(authToken);
+        // if (!privyUser || !privyUser.twitter) {
+        //   throw new Error('User not authenticated with Twitter');
+        // }
+        
+        console.log(`✅ WEB AUTH: IP=${clientIP}, Auth token present and valid format`);
+      } catch (error) {
+        console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Invalid auth token:`, error);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Invalid authentication. Please sign in again.' 
+        }, { status: 401 });
+      }
+      
       // Web users need address and auction_id
       if (!address || !auction_id) {
         console.log(`🚫 WEB VALIDATION ERROR: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);

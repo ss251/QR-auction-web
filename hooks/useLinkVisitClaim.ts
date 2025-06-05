@@ -11,7 +11,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
 
   // Web-specific hooks
-  const { authenticated, user } = usePrivy();
+  const { authenticated, user, getAccessToken } = usePrivy();
   const { address } = useAccount();
   const { client: smartWalletClient } = useSmartWallets();
   
@@ -212,12 +212,24 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         return -(hashNumber % 1000000000);
       })() : frameContext?.user?.fid;
       
+      // Get Privy auth token for web users to verify authentication
+      let authToken: string | undefined;
+      if (isWebContext && authenticated) {
+        try {
+          authToken = await getAccessToken();
+        } catch (error) {
+          console.error('Failed to get Privy auth token:', error);
+          // Continue without token - backend will reject if needed
+        }
+      }
+      
       // Call backend API to execute the token transfer
       const response = await fetch('/api/link-visit/claim', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': process.env.NEXT_PUBLIC_LINK_CLICK_API_KEY || '',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify({
           fid: webFid,

@@ -53,8 +53,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
         const effectiveFid = -(hashNumber % 1000000000);
         
-        // Get Twitter username or fallback to 'qrcoinweb'
-        const twitterUsername = getTwitterUsername() || 'qrcoinweb';
+        // Get Twitter username for web context
+        const twitterUsername = getTwitterUsername();
         
         // Record the click in the database
         const response = await fetch('/api/link-click', {
@@ -202,8 +202,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
       // Add final confirmation of the address being used for airdrop
       console.log('💰 AIRDROP TARGET ADDRESS:', effectiveWalletAddress, isWebContext ? '(web - should be smart wallet if available)' : '(mini-app)');
       
-      // Get Twitter username for web context or fallback
-      const twitterUsername = isWebContext ? (getTwitterUsername() || 'qrcoinweb') : frameContext?.user?.username;
+      // Get Twitter username for web context
+      const twitterUsername = isWebContext ? getTwitterUsername() : frameContext?.user?.username;
       
       // Calculate FID for web context
       const webFid = isWebContext ? (() => {

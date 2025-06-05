@@ -275,7 +275,7 @@ export async function POST(request: NextRequest) {
           fid: -1,
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
-          username: 'qrcoinweb',
+          username: username || null,
           winning_url: winning_url || null,
           error_message: `IP ${clientIP} exceeded per-auction limit: ${ipClaimsThisAuction.length}/3 claims`,
           error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
@@ -311,7 +311,7 @@ export async function POST(request: NextRequest) {
           fid: -1,
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
-          username: 'qrcoinweb',
+          username: username || null,
           winning_url: winning_url || null,
           error_message: `IP ${clientIP} exceeded daily limit (${ipClaimsDaily.length}/5 claims in 24h)`,
           error_code: 'IP_DAILY_LIMIT_EXCEEDED',
@@ -351,7 +351,7 @@ export async function POST(request: NextRequest) {
           fid: effectiveFid, // Use -1 for web validation errors
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
-          username: null,
+          username: username || null,
           winning_url: null,
           error_message: 'Missing required parameters for web user (address or auction_id)',
           error_code: 'WEB_VALIDATION_ERROR',
@@ -365,7 +365,7 @@ export async function POST(request: NextRequest) {
       const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
       const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
       effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
-      effectiveUsername = 'qrcoinweb'; // Use specific username for web users
+      effectiveUsername = username || null; // Use actual username from request or null
     } else {
       // Mini-app users need fid, address, auction_id, and username
       if (!fid || !address || !auction_id || !username) {

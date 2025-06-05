@@ -267,7 +267,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             tx_hash: txHash,
             success: !!txHash,
             claim_source: 'web',
-            username: getTwitterUsername() || 'qrcoinweb'
+            username: getTwitterUsername() || null
           }, {
             onConflict: 'eth_address,auction_id'
           });
@@ -345,7 +345,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             link_visited_at: new Date().toISOString(),
             eth_address: effectiveWalletAddress,
             claim_source: 'web',
-            username: getTwitterUsername() || 'qrcoinweb'
+            username: getTwitterUsername() || null
           }, {
             onConflict: 'eth_address,auction_id'
           });

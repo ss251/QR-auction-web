@@ -123,13 +123,13 @@ export const getPrivyConfig = () => {
     // Website context: include wallets for connectWallet() but prioritize social in login
     walletList = isMobile 
       ? ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect']
-      : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'email'];
+      : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'];
   } else if (isMobile) {
     // Legacy mobile behavior
     walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'];
   } else {
     // Legacy desktop behavior
-    walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'email'];
+    walletList = ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect'];
   }
 
   // Determine login methods based on context
@@ -164,38 +164,6 @@ export const getPrivyConfig = () => {
       rainbow: {
         connectionOptions: 'eoaOnly',
         chains: [{ id: BASE_MAINNET_ID }]  // Explicitly limit to Base only for Rainbow
-      },
-      coinbaseWallet: {
-        connectionOptions: 'eoaOnly'
-      },
-    },
-  };
-};
-
-// Export a separate config for the "Connect different wallet" modal
-export const getAlternativeWalletConfig = () => {
-  const isMobile = isMobileBrowser();
-  
-  // This config excludes Twitter and Farcaster, includes all wallet options
-  const walletList: string[] = isMobile 
-    ? ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect']
-    : ['coinbase_wallet', 'rainbow', 'metamask', 'wallet_connect', 'detected_ethereum_wallets'];
-
-  return {
-    ...basePrivyConfig,
-    appearance: {
-      ...basePrivyConfig.appearance,
-      walletList,
-      showWalletLoginFirst: true, // Prioritize wallets for this flow
-    },
-    embeddedWallets: {
-      createOnLogin: "users-without-wallets" as const,
-    },
-    loginMethods: ["email", "wallet"] as const, // No social logins for alternative flow
-    externalWallets: {
-      rainbow: {
-        connectionOptions: 'eoaOnly',
-        chains: [{ id: BASE_MAINNET_ID }]
       },
       coinbaseWallet: {
         connectionOptions: 'eoaOnly'

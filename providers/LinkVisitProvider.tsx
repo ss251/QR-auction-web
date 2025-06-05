@@ -478,7 +478,9 @@ export function LinkVisitProvider({
     }
   }, []);
 
-  // NEW: Check flow state on mount - handle page reload scenarios
+  // NEW: Check flow state on mount - handle manual sign-in flow
+  // This handles the case where user clicked "Today's Winner", signed in with Twitter,
+  // and needs to connect wallet before seeing claim popup
   useEffect(() => {
     if (!isWebContext) return;
     
@@ -491,7 +493,18 @@ export function LinkVisitProvider({
       setTimeout(() => {
         if (isTwitterUserNeedsWallet && !hasTriggeredWalletConnection) {
           setHasTriggeredWalletConnection(true);
-          connectWallet();
+          connectWallet({
+            onSuccess: () => {
+              // Wallet connected successfully, the other useEffect will handle showing popup
+              console.log('Wallet connected after Twitter sign-in');
+            },
+            onError: (error: Error) => {
+              console.error('Failed to connect wallet after Twitter sign-in:', error);
+              // Clear flow state on error
+              clearFlowState();
+              setHasTriggeredWalletConnection(false);
+            }
+          });
           // Don't clear flow state yet - wait for wallet to connect
         } else if (hasTriggeredWalletConnection && isTwitterUserNeedsWallet) {
         } else if (latestWonAuctionId && !manualHasClaimedLatest) {
@@ -801,6 +814,7 @@ export function LinkVisitProvider({
         auctionId={claimAuctionId || 0}
         onClaim={handleClaim}
         isPrivyModalActive={isPrivyModalActive}
+        isTwitterUserNeedsWallet={isTwitterUserNeedsWallet}
       />
     </LinkVisitContext.Provider>
   );

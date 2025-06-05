@@ -12,7 +12,7 @@ import { useLinkVisitClaim } from '@/hooks/useLinkVisitClaim';
 import { useLinkVisitEligibility } from '@/hooks/useLinkVisitEligibility';
 import { useAuctionImage } from '@/hooks/useAuctionImage';
 import { CLICK_SOURCES } from '@/lib/click-tracking';
-import { usePrivy, useLogin } from "@privy-io/react-auth";
+import { usePrivy, useLogin, useConnectWallet } from "@privy-io/react-auth";
 import { Turnstile } from '@marsidev/react-turnstile';
 
 interface LinkVisitClaimPopupProps {
@@ -24,6 +24,7 @@ interface LinkVisitClaimPopupProps {
   auctionId: number;
   onClaim: (captchaToken: string) => Promise<{ txHash?: string }>;
   isPrivyModalActive: boolean;
+  isTwitterUserNeedsWallet: boolean;
 }
 
 // Custom dialog overlay with standard z-index
@@ -79,12 +80,14 @@ export function LinkVisitClaimPopup({
   winningImage,
   auctionId,
   onClaim,
-  isPrivyModalActive
+  isPrivyModalActive,
+  isTwitterUserNeedsWallet
 }: LinkVisitClaimPopupProps) {
   // Web context detection
   const [isWebContext, setIsWebContext] = useState(false);
   const [persistentToastId, setPersistentToastId] = useState<string | number | null>(null);
   const { authenticated } = usePrivy();
+  const { connectWallet } = useConnectWallet();
   
   // NEW: Track click state in localStorage
   const CLICK_STATE_KEY = 'qrcoin_link_clicked';
@@ -154,6 +157,7 @@ export function LinkVisitClaimPopup({
   const isFrameRef = useRef(false);
   const isClaimingRef = useRef(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isAutoConnectingWallet, setIsAutoConnectingWallet] = useState(false);
   
   // Captcha state
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -264,6 +268,33 @@ export function LinkVisitClaimPopup({
     }
   }, [isOpen, claimState, hasClaimed]);
 
+  // NEW: Auto-connect wallet for Twitter users who need it when entering claim state
+  useEffect(() => {
+    if (isOpen && claimState === 'claim' && isTwitterUserNeedsWallet && authenticated && !isAutoConnectingWallet) {
+      // Automatically trigger wallet connection for Twitter users
+      setIsAutoConnectingWallet(true);
+      connectWallet({
+        onSuccess: () => {
+          setIsAutoConnectingWallet(false);
+          // Keep the popup open - wallet is now connected
+          // The component will re-render with isTwitterUserNeedsWallet = false
+          toast.success('Wallet connected! You can now claim your $QR');
+          
+          // Clear the flow state since wallet is now connected
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('qrcoin_claim_flow_state');
+          }
+        },
+        onError: () => {
+          setIsAutoConnectingWallet(false);
+          toast.error('Please connect a wallet to claim your $QR');
+          // Go back to visit state if wallet connection fails
+          setClaimState('visit');
+        }
+      });
+    }
+  }, [isOpen, claimState, isTwitterUserNeedsWallet, authenticated, isAutoConnectingWallet, connectWallet]);
+
   // Check if we're running in a Farcaster frame context
   useEffect(() => {
     async function checkFrameContext() {
@@ -327,6 +358,12 @@ export function LinkVisitClaimPopup({
   // Handle claim action
   const handleClaimAction = async () => {
     if (isClaimLoading || isClaimingRef.current) return;
+    
+    // NEW: Prevent claiming if Twitter user needs wallet
+    if (isTwitterUserNeedsWallet) {
+      toast.error('Please connect a wallet first to claim your $QR');
+      return;
+    }
     
     // NEW: Skip captcha for authenticated users (Twitter provides verification)
     // Only require captcha for non-authenticated web users
@@ -524,6 +561,11 @@ What The Firkin?`);
       
       // Only prevent closing if Privy modal is actively showing (not just flagged)
       if (!open && isPrivyModalActive && isConnecting) {
+        return;
+      }
+      
+      // NEW: Prevent closing if Twitter user is connecting wallet in claim state
+      if (!open && claimState === 'claim' && isTwitterUserNeedsWallet && isAutoConnectingWallet) {
         return;
       }
       
@@ -730,7 +772,11 @@ What The Firkin?`);
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  Thanks for checking out today&apos;s winner!
+                  {isTwitterUserNeedsWallet && isAutoConnectingWallet ? 
+                    'Connecting your wallet...' :
+                    isTwitterUserNeedsWallet ? 
+                    'Connect a wallet to claim your $QR' :
+                    'Thanks for checking out today\'s winner!'}
                 </motion.p>
                 
                 <motion.div
@@ -743,9 +789,12 @@ What The Firkin?`);
                     variant="default" 
                     className="light:bg-black dark:bg-white text-primary-foreground dark:text-black px-6 py-2 rounded-md focus:outline-none focus:ring-0 h-9"
                     onClick={handleClaimAction}
-                    disabled={isClaimLoading}
+                    disabled={isClaimLoading || isTwitterUserNeedsWallet}
                   >
-                    {isClaimLoading ? 'Processing...' : 'Claim'}
+                    {isClaimLoading ? 'Processing...' : 
+                     (isTwitterUserNeedsWallet && isAutoConnectingWallet) ? 'Connecting Wallet...' : 
+                     isTwitterUserNeedsWallet ? 'Connect Wallet' :
+                     'Claim'}
                   </Button>
                 </motion.div>
               </>

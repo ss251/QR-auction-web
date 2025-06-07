@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useCallback, useEffect, useState, useRef } from "react";
@@ -11,9 +12,9 @@ import { BidHistoryDialog } from "./bid-history-dialog";
 import { formatEther, formatUnits } from "viem";
 import { HowItWorksDialog } from "./HowItWorksDialog";
 
-import { useFetchSettledAuc } from "@/hooks/useFetchSettledAuc";
-import { useFetchBids } from "@/hooks/useFetchBids";
-import { useFetchAuctionDetails } from "@/hooks/useFetchAuctionDetails";
+import { useFetchSettledAucSubgraph } from "@/hooks/useFetchSettledAucSubgraph";
+import { useFetchBidsSubgraph } from "@/hooks/useFetchBidsSubgraph";
+import { useFetchAuctionDetailsSubgraph } from "@/hooks/useFetchAuctionDetailsSubgraph";
 import { useFetchAuctionSettings } from "@/hooks/useFetchAuctionSettings";
 import { useWriteActions } from "@/hooks/useWriteActions";
 import { waitForTransactionReceipt } from "@wagmi/core";
@@ -89,9 +90,9 @@ export function AuctionDetails({
     pfpUrl: null
   });
 
-  const { fetchHistoricalAuctions: auctionsSettled } = useFetchSettledAuc(BigInt(id));
-  const { fetchHistoricalAuctions } = useFetchBids(BigInt(id));
-  const { refetch, forceRefetch, auctionDetail, contractReadError } = useFetchAuctionDetails(BigInt(id));
+  const { fetchHistoricalAuctions: auctionsSettled } = useFetchSettledAucSubgraph(BigInt(id));
+  const { fetchHistoricalAuctions } = useFetchBidsSubgraph(BigInt(id));
+  const { refetch, forceRefetch, auctionDetail, loading, error } = useFetchAuctionDetailsSubgraph(BigInt(id));
   const { refetchSettings, settingDetail, error: settingsError } = useFetchAuctionSettings(BigInt(id));
 
   const { settleTxn } = useWriteActions({ tokenId: BigInt(id) });
@@ -131,7 +132,8 @@ export function AuctionDetails({
 
   // Combine loading states to determine when to show skeleton
   // Include completionStatus to ensure settle button state is considered
-  const showSkeleton = isLoading || !dataReady || !completionStatusReady;
+  // Only show skeleton for current auction
+  const showSkeleton = (isLatest && (isLoading || !dataReady || !completionStatusReady)) || (!isLatest && loading);
 
   // Reset all data ready states whenever ID changes
   useEffect(() => {
@@ -142,7 +144,7 @@ export function AuctionDetails({
 
   // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
   useEffect(() => {
-    if (id) {
+    if (id && isLatest) {
       const refetchDetails = async () => {
         console.log(`[Effect] Refetching details for auction #${id}`);
         setIsLoading(true);
@@ -189,8 +191,13 @@ export function AuctionDetails({
       };
       
       refetchDetails();
+    } else if (!isLatest) {
+      // For historical auctions, just set states to not loading
+      setIsLoading(false);
+      setDataReady(true);
+      setCompletionStatusReady(true);
     }
-  }, [id, refetch, refetchSettings, auctionsSettled]);
+  }, [id, isLatest, refetch, refetchSettings, auctionsSettled]);
 
   // When countdown updates to "complete", make sure we show the settle button immediately
   useEffect(() => {
@@ -732,6 +739,13 @@ export function AuctionDetails({
           </div>
         )}
 
+        {!isLatest && !showSkeleton && !auctionDetail && !loading && (
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-md text-amber-700">
+            <p className="font-medium">Historical Auction Data</p>
+            <p className="text-sm">Historical auction data is temporarily unavailable. Only the current running auction can be viewed at this time.</p>
+          </div>
+        )}
+
         {hasValidAuctionData && !showSkeleton && (
             <>
               {/* Only show settled view if auction is actually settled or it's auction #22 */}
@@ -845,6 +859,15 @@ export function AuctionDetails({
                 <>
                   {/* Don't show the "Visit Winning Site" button for auction #22 */}
                   {isAuction22 || isAuction61 ? (
+                    <WinDetailsView
+                      tokenId={BigInt(id)}
+                      winner={auctionDetail.highestBidder}
+                      amount={auctionDetail.highestBid}
+                      url={auctionDetail.qrMetadata?.urlString || ""}
+                      openDialog={openDialog}
+                      openBids={openBid}
+                    />
+                  ) : auctionDetail.settled ? (
                     <WinDetailsView
                       tokenId={BigInt(id)}
                       winner={auctionDetail.highestBidder}

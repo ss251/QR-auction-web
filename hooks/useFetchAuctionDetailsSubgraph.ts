@@ -5,6 +5,9 @@ import { Address } from "viem";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
 import { SUBGRAPH_URL } from "@/config/subgraph";
+import { getPublicClient } from "@wagmi/core";
+import { wagmiConfig } from "@/config/wagmiConfig";
+import QRAuctionV3 from "../abi/QRAuctionV3.json";
 
 const API_KEY = process.env.NEXT_PUBLIC_GRAPH_API_KEY;
 
@@ -24,13 +27,50 @@ type Auction = {
   qrMetadata: QRData;
 };
 
+interface SubgraphBid {
+  id: string;
+  tokenId: string;
+  bidder: string;
+  amount: string;
+  endTime: string;
+  urlString: string;
+  name?: string;
+  blockTimestamp: string;
+}
+
+interface SubgraphSettled {
+  id: string;
+  tokenId: string;
+  winner: string;
+  amount: string;
+  urlString: string;
+  name?: string;
+  blockTimestamp: string;
+}
+
+interface SubgraphCreated {
+  id: string;
+  tokenId: string;
+  startTime: string;
+  endTime: string;
+  blockTimestamp: string;
+}
+
 // Global auction cache to improve navigation performance
 const auctionCache = new Map<string, Auction>();
+
+// Export a function to clear all auction caches (useful after settlements)
+export const clearAllAuctionCaches = () => {
+  auctionCache.clear();
+  console.log('[Cache] Cleared all auction caches');
+};
 
 export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
   const [auctionDetail, setAuctiondetails] = useState<Auction>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [isUsingRpcFallback, setIsUsingRpcFallback] = useState(false);
 
   const fetchAuctionFromSubgraph = useCallback(async (tokenId: bigint) => {
     // const isLegacyAuction = tokenId <= 22n;
@@ -117,8 +157,8 @@ export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
 
     const cacheKey = `${tokenId}-subgraph`;
 
-    // Check cache first
-    if (auctionCache.has(cacheKey)) {
+    // Check cache first (but skip if we're retrying from RPC fallback)
+    if (auctionCache.has(cacheKey) && !isUsingRpcFallback) {
       setAuctiondetails(auctionCache.get(cacheKey));
       return;
     }
@@ -134,11 +174,64 @@ export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
       const createdKey = isV3Auction ? 'qrauctionV3AuctionCreateds' : 'auctionCreateds';
       const bidKey = isV3Auction ? 'qrauctionV3AuctionBids' : 'auctionBids';
 
-      const settled = data[settledKey]?.[0];
-      const created = data[createdKey]?.[0];
-      const highestBid = data[bidKey]?.[0];
+      const settled = data[settledKey]?.[0] as SubgraphSettled | undefined;
+      const created = data[createdKey]?.[0] as SubgraphCreated | undefined;
+      const highestBid = data[bidKey]?.[0] as SubgraphBid | undefined;
 
       if (!created) {
+        // If subgraph doesn't have the auction yet, try fetching from RPC
+        // This is especially important for newly created auctions
+        console.log(`[Subgraph] No auction found in subgraph for tokenId ${tokenId}, trying RPC fallback`);
+        
+        if (isV3Auction) {
+          try {
+            const publicClient = getPublicClient(wagmiConfig, { chainId: base.id });
+            const contractAddress = process.env.NEXT_PUBLIC_QRAuctionV3 as Address;
+            
+            // Check if this is the current auction
+            const currentAuction = await publicClient.readContract({
+              address: contractAddress,
+              abi: QRAuctionV3.abi,
+              functionName: 'auction',
+            }) as [string, string, string, string, string, boolean, { urlString: string }];
+            
+            if (currentAuction && BigInt(currentAuction[0]) === tokenId) {
+              console.log(`[RPC Fallback] Found auction #${tokenId} via RPC`);
+              
+              // Build auction object from RPC data
+              const auction: Auction = {
+                tokenId: BigInt(currentAuction[0]),
+                highestBid: BigInt(currentAuction[1]),
+                highestBidder: currentAuction[2],
+                startTime: BigInt(currentAuction[3]),
+                endTime: BigInt(currentAuction[4]),
+                settled: currentAuction[5],
+                qrMetadata: {
+                  validUntil: BigInt(currentAuction[4]),
+                  urlString: currentAuction[6]?.urlString || "",
+                },
+              };
+              
+              setAuctiondetails(auction);
+              setLoading(false);
+              setIsUsingRpcFallback(true);
+              // Don't cache RPC data - let subgraph be the source of truth once it catches up
+              
+              // Set up a retry to check subgraph again in a few seconds
+              if (retryCount < 3) {
+                setTimeout(() => {
+                  console.log(`[Retry] Checking subgraph again for auction #${tokenId} (attempt ${retryCount + 1})`);
+                  setRetryCount(prev => prev + 1);
+                }, 5000); // Retry after 5 seconds
+              }
+              
+              return;
+            }
+          } catch (rpcError) {
+            console.error(`[RPC Fallback] Error fetching from RPC:`, rpcError);
+          }
+        }
+        
         throw new Error(`No auction found with tokenId ${tokenId}`);
       }
 
@@ -163,6 +256,7 @@ export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
 
       setAuctiondetails(auction);
       auctionCache.set(cacheKey, auction);
+      setIsUsingRpcFallback(false); // We got data from subgraph
 
       // For V1/V2 auctions or if V3 doesn't have a name, fetch ENS/basename asynchronously
       if (!auction.highestBidderName && auction.highestBidder !== "0x0000000000000000000000000000000000000000") {
@@ -190,11 +284,22 @@ export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
     } finally {
       setLoading(false);
     }
-  }, [tokenId, fetchAuctionFromSubgraph]);
+  }, [tokenId, fetchAuctionFromSubgraph, isUsingRpcFallback]);
 
   useEffect(() => {
+    // Reset retry count when tokenId changes
+    setRetryCount(0);
+    setIsUsingRpcFallback(false);
     fetchDetails();
-  }, [fetchDetails]);
+  }, [tokenId, fetchDetails]); // Include fetchDetails dependency
+
+  // Retry effect when retry count changes
+  useEffect(() => {
+    if (retryCount > 0 && tokenId && isUsingRpcFallback) {
+      console.log(`[Retry] Attempting to fetch from subgraph again for auction #${tokenId}`);
+      fetchDetails();
+    }
+  }, [retryCount, tokenId, isUsingRpcFallback, fetchDetails]);
 
   const forceRefetch = useCallback(async () => {
     if (!tokenId) return;
@@ -205,11 +310,18 @@ export function useFetchAuctionDetailsSubgraph(tokenId?: bigint) {
     await fetchDetails();
   }, [tokenId, fetchDetails]);
 
+  // Clear cache for a specific auction (useful when other auctions settle)
+  const clearCacheForAuction = useCallback((auctionId: bigint) => {
+    const cacheKey = `${auctionId}-subgraph`;
+    auctionCache.delete(cacheKey);
+  }, []);
+
   return { 
     auctionDetail, 
     refetch: fetchDetails, 
     forceRefetch, 
     loading, 
-    error 
+    error,
+    clearCacheForAuction 
   };
 }

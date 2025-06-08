@@ -139,7 +139,12 @@ export function AuctionDetails({
     setDataReady(false);
     setCompletionStatusReady(false);
     setIsLoading(true);
-  }, [id]);
+    
+    // Force clear cache when navigating to a different auction
+    // This ensures we always get fresh data
+    console.log(`[AuctionDetails] ID changed to ${id}, clearing cache and refetching`);
+    forceRefetch();
+  }, [id, forceRefetch]);
 
   // Update the refetching mechanism when ID changes to ensure proper refresh after settlement
   useEffect(() => {
@@ -613,19 +618,29 @@ export function AuctionDetails({
       }
     },
     onAuctionSettled: (tokenId, winner, amount, urlString, name) => {
-      // Only update if this event is for the current auction
+      // Update if this event is for the current auction
       if (tokenId === BigInt(id)) {
         console.log(`Real-time update: Auction #${id} settled`);
-        // Use forceRefetch to bypass the cache for settlement as well
+        // Use forceRefetch to bypass the cache for settlement
         forceRefetch();
+        
+        // Also refetch the settled auctions list
+        auctionsSettled().then((settled) => {
+          if (settled) {
+            setSettledAcustions(settled);
+          }
+        });
       }
     },
     onAuctionCreated: (tokenId, startTime, endTime) => {
       console.log(`Real-time update: New auction #${tokenId} created`);
       
-      // If we're on the latest auction, refresh data for the newly created auction
+      // Don't handle navigation here - let the parent page handle it
+      // This prevents duplicate navigation
+      
+      // If we're on the latest auction, just refresh the data
       if (isLatest) {
-        console.log(`Refreshing data for new auction #${tokenId}`);
+        console.log(`Refreshing data for newly created auction`);
         refetch();
         refetchSettings();
       }

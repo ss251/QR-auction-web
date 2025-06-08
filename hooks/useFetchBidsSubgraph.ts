@@ -1,8 +1,8 @@
 "use client";
 import { useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { SUBGRAPH_URL } from "@/config/subgraph";
 
-const SUBGRAPH_URL = process.env.NEXT_PUBLIC_SUBGRAPH_URL;
 const API_KEY = process.env.NEXT_PUBLIC_SUBGRAPH_API_KEY;
 
 type AuctionType = {
@@ -14,6 +14,18 @@ type AuctionType = {
   url: string;
   name?: string;
   _id: string;
+};
+
+type SubgraphBid = {
+  tokenId: string;
+  bidder: string;
+  amount: string;
+  extended: boolean;
+  endTime: string;
+  urlString: string;
+  name?: string;
+  blockTimestamp: string;
+  transactionHash: string;
 };
 
 export function useFetchBidsSubgraph(tokenId?: bigint) {
@@ -79,15 +91,15 @@ export function useFetchBidsSubgraph(tokenId?: bigint) {
 
       const bids = data.data[entityName] || [];
 
-      const formatted: AuctionType[] = bids.map((bid: AuctionType) => ({
+      const formatted: AuctionType[] = bids.map((bid: SubgraphBid) => ({
         tokenId: BigInt(bid.tokenId),
         bidder: bid.bidder,
         amount: BigInt(bid.amount),
         extended: bid.extended,
         endTime: BigInt(bid.endTime),
-        url: bid.url === "0x" ? 
+        url: bid.urlString === "0x" || !bid.urlString ? 
               (process.env.NEXT_PUBLIC_DEFAULT_REDIRECT as string) : 
-              bid.url,
+              bid.urlString,
         name: bid.name, // Will be undefined for V1/V2, populated for V3 when indexed
         _id: uuidv4(),
       }));

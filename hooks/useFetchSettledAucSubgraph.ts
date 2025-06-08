@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback } from "react";
+import { SUBGRAPH_URL } from "@/config/subgraph";
 
-const SUBGRAPH_URL = process.env.NEXT_PUBLIC_SUBGRAPH_URL;
 const API_KEY = process.env.NEXT_PUBLIC_SUBGRAPH_API_KEY;
 
 type AuctionType = {

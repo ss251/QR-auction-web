@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Address } from "viem";
 import { base } from "viem/chains";
 import { getName } from "@coinbase/onchainkit/identity";
+import { SUBGRAPH_URL } from "@/config/subgraph";
 
-const SUBGRAPH_URL = process.env.NEXT_PUBLIC_SUBGRAPH_URL;
 const API_KEY = process.env.NEXT_PUBLIC_GRAPH_API_KEY;
 
 type QRData = {

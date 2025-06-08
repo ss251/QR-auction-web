@@ -106,7 +106,7 @@ export default function AuctionImagesAdmin() {
     }
   };
 
-  const handleClear = async (auctionId: string) => {
+  const handleClear = async (auctionId: number) => {
     try {
       const success = await removeAuctionImageOverride(auctionId);
       
@@ -235,7 +235,7 @@ export default function AuctionImagesAdmin() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => handleClear(override.auction_id.toString())}
+                  onClick={() => handleClear(override.auction_id)}
                   title={override.image_url.trim() === '' ? 'Already cleared' : 'Clear image URL'}
                   disabled={override.image_url.trim() === ''}
                 >

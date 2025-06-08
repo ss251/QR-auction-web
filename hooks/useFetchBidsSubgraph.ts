@@ -3,7 +3,7 @@ import { useCallback } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { SUBGRAPH_URL } from "@/config/subgraph";
 
-const API_KEY = process.env.NEXT_PUBLIC_SUBGRAPH_API_KEY;
+const API_KEY = process.env.NEXT_PUBLIC_GRAPH_API_KEY;
 
 type AuctionType = {
   tokenId: bigint;

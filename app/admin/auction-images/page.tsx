@@ -19,7 +19,7 @@ const supabase = createClient<Database>(
 
 interface AuctionImageOverride {
   id: number;
-  auction_id: string;
+  auction_id: number;
   image_url: string;
   is_video: boolean;
   created_at: string;
@@ -235,7 +235,7 @@ export default function AuctionImagesAdmin() {
                 <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => handleClear(override.auction_id)}
+                  onClick={() => handleClear(override.auction_id.toString())}
                   title={override.image_url.trim() === '' ? 'Already cleared' : 'Clear image URL'}
                   disabled={override.image_url.trim() === ''}
                 >

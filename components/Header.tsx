@@ -109,6 +109,22 @@ export function Header() {
           </Button>
         </Link>
 
+        <Link href="/map">
+          <Button
+            variant="outline"
+            size="icon"
+            className={
+              isBaseColors
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
+                : "h-8 w-8 md:h-10 md:w-10"
+            }
+          >
+            <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
+              🗺️
+            </div>
+          </Button>
+        </Link>
+
         <Button
           variant="outline"
           size="icon"

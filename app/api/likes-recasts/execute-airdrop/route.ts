@@ -640,7 +640,7 @@ export async function POST(request: NextRequest) {
         setTimeout(() => reject(new Error('Airdrop transaction timeout after 55 seconds')), 55000)
       );
       
-      const receipt = await Promise.race([airdropPromise, timeoutPromise]) as any;
+      const receipt = await Promise.race([airdropPromise, timeoutPromise]) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
       console.log(`Airdrop confirmed in block ${receipt.blockNumber}`);
       
       // Record the claim in the database

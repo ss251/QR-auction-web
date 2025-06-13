@@ -101,28 +101,42 @@ export async function POST(req: NextRequest) {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const walletPool = getWalletPool(provider);
     
-    // Get an available wallet from the pool
+    // Check if we should use direct wallet (pool disabled for this purpose)
+    const directWallet = walletPool.getDirectWallet('main-airdrop');
+    
+    let adminWallet: ethers.Wallet;
+    let DYNAMIC_AIRDROP_CONTRACT: string;
+    let lockKey: string | null = null;
     let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
     
-    try {
-      walletConfig = await walletPool.getAvailableWallet('main-airdrop');
-      console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
-    } catch (poolError) {
-      console.error('Error getting available wallet:', poolError);
-      console.log('All wallets are currently busy, will retry later');
-      
-      // Calculate a delay between 5-15 seconds for faster retry
-      const delaySeconds = 5 + Math.floor(Math.random() * 10);
-      
-      return NextResponse.json({
-        success: false, 
-        status: 'retry_scheduled',
-        error: 'All wallets busy',
-        retryAfter: delaySeconds
-      });
+    if (directWallet) {
+      // Use direct wallet without pool logic
+      console.log(`Using direct wallet ${directWallet.wallet.address} (pool disabled for main-airdrop)`);
+      adminWallet = directWallet.wallet;
+      DYNAMIC_AIRDROP_CONTRACT = directWallet.airdropContract;
+    } else {
+      // Use wallet pool
+      try {
+        walletConfig = await walletPool.getAvailableWallet('main-airdrop');
+        console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
+        adminWallet = walletConfig.wallet;
+        DYNAMIC_AIRDROP_CONTRACT = walletConfig.airdropContract;
+        lockKey = walletConfig.lockKey;
+      } catch (poolError) {
+        console.error('Error getting available wallet:', poolError);
+        console.log('All wallets are currently busy, will retry later');
+        
+        // Calculate a delay between 5-15 seconds for faster retry
+        const delaySeconds = 5 + Math.floor(Math.random() * 10);
+        
+        return NextResponse.json({
+          success: false, 
+          status: 'retry_scheduled',
+          error: 'All wallets busy',
+          retryAfter: delaySeconds
+        });
+      }
     }
-    
-    const { wallet: adminWallet, airdropContract: DYNAMIC_AIRDROP_CONTRACT, lockKey } = walletConfig;
     
     try {
       // Update status to processing
@@ -405,8 +419,8 @@ export async function POST(req: NextRequest) {
         error: error instanceof Error ? error.message : 'Unknown error'
       });
     } finally {
-      // Always release the wallet lock
-      if (walletConfig) {
+      // Release the wallet lock if using pool
+      if (lockKey && walletConfig) {
         await walletPool.releaseWallet(lockKey);
         console.log(`Released wallet lock for ${adminWallet.address}`);
       }

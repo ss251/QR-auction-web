@@ -396,48 +396,62 @@ export async function POST(request: NextRequest) {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const walletPool = getWalletPool(provider);
     
-    // Get an available wallet from the pool
+    // Check if we should use direct wallet (pool disabled for this purpose)
+    const directWallet = walletPool.getDirectWallet('likes-recasts');
+    
+    let adminWallet: ethers.Wallet;
+    let DYNAMIC_AIRDROP_CONTRACT: string;
+    let lockKey: string | null = null;
     let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
     
-    try {
-      walletConfig = await walletPool.getAvailableWallet('likes-recasts');
-      console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
-    } catch (poolError) {
-      const errorMessage = 'All wallets are currently busy. Please try again in a moment.';
-      console.error('Failed to get wallet from pool:', poolError);
-      
-      // Log wallet pool busy error
+    if (directWallet) {
+      // Use direct wallet without pool logic
+      console.log(`Using direct wallet ${directWallet.wallet.address} (pool disabled for likes-recasts)`);
+      adminWallet = directWallet.wallet;
+      DYNAMIC_AIRDROP_CONTRACT = directWallet.airdropContract;
+    } else {
+      // Use wallet pool
       try {
-        await logFailedTransaction({
-          fid: fid,
-          eth_address: address,
-          username: username || null,
-          option_type: option_type,
-          error_message: errorMessage,
-          error_code: 'WALLET_POOL_BUSY',
-          signer_uuid: signer_uuid,
-          request_data: {
-            fid,
-            address,
-            username,
-            signer_uuid,
-            amount,
-            option_type
-          },
-          network_status: 'pool_busy',
-          retry_count: 0,
-        });
-      } catch (logError) {
-        console.error('Failed to log wallet pool error:', logError);
+        walletConfig = await walletPool.getAvailableWallet('likes-recasts');
+        console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
+        adminWallet = walletConfig.wallet;
+        DYNAMIC_AIRDROP_CONTRACT = walletConfig.airdropContract;
+        lockKey = walletConfig.lockKey;
+      } catch (poolError) {
+        const errorMessage = 'All wallets are currently busy. Please try again in a moment.';
+        console.error('Failed to get wallet from pool:', poolError);
+        
+        // Log wallet pool busy error
+        try {
+          await logFailedTransaction({
+            fid: fid,
+            eth_address: address,
+            username: username || null,
+            option_type: option_type,
+            error_message: errorMessage,
+            error_code: 'WALLET_POOL_BUSY',
+            signer_uuid: signer_uuid,
+            request_data: {
+              fid,
+              address,
+              username,
+              signer_uuid,
+              amount,
+              option_type
+            },
+            network_status: 'pool_busy',
+            retry_count: 0,
+          });
+        } catch (logError) {
+          console.error('Failed to log wallet pool error:', logError);
+        }
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: errorMessage
+        }, { status: 503 });
       }
-      
-      return NextResponse.json({ 
-        success: false, 
-        error: errorMessage
-      }, { status: 503 });
     }
-    
-    const { wallet: adminWallet, airdropContract: DYNAMIC_AIRDROP_CONTRACT, lockKey } = walletConfig;
     
     try {
       // Check wallet balance
@@ -698,8 +712,8 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
     } finally {
-      // Always release the wallet lock
-      if (walletConfig) {
+      // Release the wallet lock if using pool
+      if (lockKey && walletConfig) {
         await walletPool.releaseWallet(lockKey);
         console.log(`Released wallet lock for ${adminWallet.address}`);
       }

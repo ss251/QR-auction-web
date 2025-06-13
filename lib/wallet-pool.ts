@@ -84,6 +84,53 @@ export class WalletPool {
     });
   }
   
+  // Method to get direct wallet without pool logic (for disabling pool temporarily)
+  getDirectWallet(purpose: 'main-airdrop' | 'likes-recasts' | 'link-web' | 'link-miniapp'): { wallet: ethers.Wallet; airdropContract: string } | null {
+    // Check if wallet pool is disabled for this purpose
+    const disabledPurposes = process.env.WALLET_POOL_DISABLED_PURPOSES?.split(',') || [];
+    if (!disabledPurposes.includes(purpose)) {
+      return null; // Pool is not disabled, return null to use pool logic
+    }
+    
+    // Return direct wallet configuration based on purpose
+    switch (purpose) {
+      case 'main-airdrop':
+        if (process.env.ADMIN_PRIVATE_KEY && process.env.AIRDROP_CONTRACT_ADDRESS) {
+          return {
+            wallet: new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY, this.provider),
+            airdropContract: process.env.AIRDROP_CONTRACT_ADDRESS
+          };
+        }
+        break;
+      case 'likes-recasts':
+        if (process.env.ADMIN_PRIVATE_KEY3 && process.env.AIRDROP_CONTRACT_ADDRESS3) {
+          return {
+            wallet: new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY3, this.provider),
+            airdropContract: process.env.AIRDROP_CONTRACT_ADDRESS3
+          };
+        }
+        break;
+      case 'link-web':
+        if (process.env.ADMIN_PRIVATE_KEY4 && process.env.AIRDROP_CONTRACT_ADDRESS4) {
+          return {
+            wallet: new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY4, this.provider),
+            airdropContract: process.env.AIRDROP_CONTRACT_ADDRESS4
+          };
+        }
+        break;
+      case 'link-miniapp':
+        if (process.env.ADMIN_PRIVATE_KEY2 && process.env.AIRDROP_CONTRACT_ADDRESS2) {
+          return {
+            wallet: new ethers.Wallet(process.env.ADMIN_PRIVATE_KEY2, this.provider),
+            airdropContract: process.env.AIRDROP_CONTRACT_ADDRESS2
+          };
+        }
+        break;
+    }
+    
+    return null;
+  }
+  
   async getAvailableWallet(purpose?: 'main-airdrop' | 'link-miniapp' | 'likes-recasts' | 'link-web'): Promise<{ wallet: ethers.Wallet; airdropContract: string; lockKey: string }> {
     const maxRetries = 3;
     let lastError: Error | null = null;

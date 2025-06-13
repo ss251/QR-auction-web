@@ -395,33 +395,47 @@ export async function POST(request: NextRequest) {
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     const walletPool = getWalletPool(provider);
     
-    // Get an available wallet from the pool
+    // Check if we should use direct wallet (pool disabled for this purpose)
+    const directWallet = walletPool.getDirectWallet('main-airdrop');
+    
+    let adminWallet: ethers.Wallet;
+    let DYNAMIC_AIRDROP_CONTRACT: string;
+    let lockKey: string | null = null;
     let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
     
-    try {
-      walletConfig = await walletPool.getAvailableWallet('main-airdrop');
-      console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
-    } catch (poolError) {
-      const errorMessage = 'All wallets are currently busy. Please try again in a moment.';
-      console.error('Failed to get wallet from pool:', poolError);
-      
-      await logFailedTransaction({
-        fid: fid as number,
-        eth_address: address as string,
-        username,
-        error_message: errorMessage,
-        error_code: 'WALLET_POOL_BUSY',
-        request_data: requestData as Record<string, unknown>,
-        network_status: 'pool_busy'
-      });
-      
-      return NextResponse.json({ 
-        success: false, 
-        error: errorMessage
-      }, { status: 503 });
+    if (directWallet) {
+      // Use direct wallet without pool logic
+      console.log(`Using direct wallet ${directWallet.wallet.address} (pool disabled for main-airdrop)`);
+      adminWallet = directWallet.wallet;
+      DYNAMIC_AIRDROP_CONTRACT = directWallet.airdropContract;
+    } else {
+      // Use wallet pool
+      try {
+        walletConfig = await walletPool.getAvailableWallet('main-airdrop');
+        console.log(`Using wallet ${walletConfig.wallet.address} with contract ${walletConfig.airdropContract}`);
+        adminWallet = walletConfig.wallet;
+        DYNAMIC_AIRDROP_CONTRACT = walletConfig.airdropContract;
+        lockKey = walletConfig.lockKey;
+      } catch (poolError) {
+        const errorMessage = 'All wallets are currently busy. Please try again in a moment.';
+        console.error('Failed to get wallet from pool:', poolError);
+        
+        await logFailedTransaction({
+          fid: fid as number,
+          eth_address: address as string,
+          username,
+          error_message: errorMessage,
+          error_code: 'WALLET_POOL_BUSY',
+          request_data: requestData as Record<string, unknown>,
+          network_status: 'pool_busy'
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: errorMessage
+        }, { status: 503 });
+      }
     }
-    
-    const { wallet: adminWallet, airdropContract: DYNAMIC_AIRDROP_CONTRACT, lockKey } = walletConfig;
     
     try {
       // Check wallet balance before proceeding
@@ -626,7 +640,7 @@ export async function POST(request: NextRequest) {
           );
           
           try {
-            const receipt = await Promise.race([airdropPromise, timeoutPromise]) as any;
+            const receipt = await Promise.race([airdropPromise, timeoutPromise]) as any; // eslint-disable-line @typescript-eslint/no-explicit-any
             console.log(`Airdrop confirmed in block ${receipt.blockNumber}`);
             return receipt;
           } catch (timeoutError) {
@@ -777,8 +791,8 @@ export async function POST(request: NextRequest) {
       }, { status: 500 });
     }
     } finally {
-      // Always release the wallet lock
-      if (walletConfig) {
+      // Release the wallet lock if using pool
+      if (lockKey && walletConfig) {
         await walletPool.releaseWallet(lockKey);
         console.log(`Released wallet lock for ${adminWallet.address}`);
       }

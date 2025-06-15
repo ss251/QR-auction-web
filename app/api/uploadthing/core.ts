@@ -26,8 +26,13 @@ export const ourFileRouter = {
       // Extract auth header from request
       const authHeader = req.headers.get("authorization");
       
+      console.log("UploadThing middleware - Auth header:", authHeader ? "Present" : "Missing");
+      console.log("UploadThing middleware - Auth header length:", authHeader?.length || 0);
+      
       // Verify admin authentication using Privy JWT
       const authResult = await verifyAdminAuth(authHeader);
+      
+      console.log("UploadThing middleware - Auth result:", authResult);
       
       if (!authResult.isValid) {
         throw new UploadThingError(`Unauthorized: ${authResult.error || 'Authentication required'}`);

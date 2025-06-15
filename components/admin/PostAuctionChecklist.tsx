@@ -382,12 +382,7 @@ export function PostAuctionChecklist() {
         isVideoOverride
       );
 
-      if (!latestWonSuccess) {
-        toast.error('Failed to set image override for latest won auction');
-        return;
-      }
-
-      // Also update the next auction (current running auction)
+      // Also update the next auction (current running auction) - always attempt this
       const nextAuctionId = latestWonAuctionId + 1;
       const nextAuctionSuccess = await addAuctionImageOverride(
         nextAuctionId,
@@ -395,8 +390,9 @@ export function PostAuctionChecklist() {
         isVideoOverride
       );
 
+      // Handle results
       if (latestWonSuccess && nextAuctionSuccess) {
-        // Refresh current override display
+        // Both succeeded
         const newOverride = await getAuctionImage(latestWonAuctionId);
         const newIsVideo = await isAuctionImageVideo(latestWonAuctionId);
         setCurrentImageOverride(newOverride);
@@ -404,17 +400,22 @@ export function PostAuctionChecklist() {
         
         toast.success(`Image override set for auctions #${latestWonAuctionId} and #${nextAuctionId}`);
         toggleChecklistItem('image-override');
-      } else if (latestWonSuccess) {
-        // Partial success
+      } else if (latestWonSuccess && !nextAuctionSuccess) {
+        // Only latest won succeeded
         const newOverride = await getAuctionImage(latestWonAuctionId);
         const newIsVideo = await isAuctionImageVideo(latestWonAuctionId);
         setCurrentImageOverride(newOverride);
         setIsCurrentOverrideVideo(newIsVideo);
         
-        toast.success(`Image override set for auction #${latestWonAuctionId} (next auction failed)`);
+        toast.success(`Image override set for auction #${latestWonAuctionId} (current running auction #${nextAuctionId} failed)`);
+        toggleChecklistItem('image-override');
+      } else if (!latestWonSuccess && nextAuctionSuccess) {
+        // Only current running succeeded
+        toast.success(`Image override set for current running auction #${nextAuctionId} (latest won auction #${latestWonAuctionId} failed)`);
         toggleChecklistItem('image-override');
       } else {
-        toast.error('Failed to set image override');
+        // Both failed
+        toast.error(`Failed to set image override for both auctions #${latestWonAuctionId} and #${nextAuctionId}`);
       }
     } catch (error) {
       console.error('Error setting image override:', error);
@@ -732,8 +733,16 @@ export function PostAuctionChecklist() {
                 <Label>Upload New Image/Video</Label>
                 <UploadButton
                   endpoint="auctionImageUploader"
+                  className="ut-button:bg-blue-600 ut-button:hover:bg-blue-500 ut-allowed-content:text-muted-foreground"
+                  appearance={{
+                    button: "bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-md transition-colors",
+                    allowedContent: "text-sm text-muted-foreground mt-2"
+                  }}
                   headers={async (): Promise<Record<string, string>> => {
+                    console.log('UploadButton - Getting access token...');
                     const accessToken = await getAccessToken();
+                    console.log('UploadButton - Access token:', accessToken ? 'Present' : 'Missing');
+                    console.log('UploadButton - Token length:', accessToken?.length || 0);
                     if (accessToken) {
                       return { authorization: `Bearer ${accessToken}` };
                     }

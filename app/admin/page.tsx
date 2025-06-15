@@ -1618,10 +1618,10 @@ export default function AdminDashboard() {
         </div>
 
         <div className="max-w-fit">
-          <Tabs defaultValue="clicks">
+          <Tabs defaultValue="claims">
             <TabsList className="mb-6 flex flex-wrap h-auto">
+            <TabsTrigger value="claims" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Claims</TabsTrigger>
               <TabsTrigger value="clicks" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Clicks</TabsTrigger>
-              <TabsTrigger value="claims" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Claims</TabsTrigger>
               <TabsTrigger value="auctions" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Auctions (TBU)</TabsTrigger>
               <TabsTrigger value="farcaster" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Farcaster (TBU)</TabsTrigger>
               <TabsTrigger value="clanker" className="px-[14.5px] border-r border-gray-200 dark:border-gray-700">Clanker (TBU)</TabsTrigger>

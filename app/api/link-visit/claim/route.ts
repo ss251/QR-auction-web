@@ -104,6 +104,8 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import queue functionality
 import { queueFailedClaim, redis } from '@/lib/queue/failedClaims';
+// Import batch processing functionality
+import { addToBatch, isBatchProcessingEnabled } from '@/lib/batch-claim-processor';
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {
@@ -855,6 +857,42 @@ export async function POST(request: NextRequest) {
     }
     
     console.log(`✅ CLEANUP COMPLETE: Ready to proceed with new claim`);
+    
+    // 🚀 BATCH PROCESSING: Check if batch processing is enabled
+    if (isBatchProcessingEnabled()) {
+      console.log(`📦 BATCH MODE: Adding claim to batch processor for ${claim_source}`);
+      
+      try {
+        const batchResult = await addToBatch({
+          fid: effectiveFid,
+          address,
+          auction_id,
+          username: effectiveUsername || undefined,
+          user_id: effectiveUserId || undefined,
+          winning_url: winningUrl,
+          claim_source: claim_source || 'mini_app',
+          client_ip: clientIP
+        });
+        
+        if (batchResult.success) {
+          console.log(`✅ BATCH SUCCESS: Claim processed in batch tx ${batchResult.tx_hash}`);
+          return NextResponse.json({ 
+            success: true, 
+            message: 'Tokens claimed successfully via batch processing',
+            tx_hash: batchResult.tx_hash,
+            batch_processed: true
+          });
+        } else {
+          throw new Error(batchResult.error || 'Batch processing failed');
+        }
+      } catch (batchError) {
+        console.log(`⚠️ BATCH FAILED: Falling back to individual processing - ${batchError}`);
+        // Fall through to individual processing
+      }
+    }
+    
+    // Individual processing (original logic)
+    console.log(`🔧 INDIVIDUAL MODE: Processing claim individually`);
     
     // Initialize ethers provider and get wallet from pool
     const provider = new ethers.JsonRpcProvider(RPC_URL);

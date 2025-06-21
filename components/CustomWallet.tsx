@@ -1003,7 +1003,7 @@ export function CustomWallet() {
         onClick={handleProfileClick}
         aria-label="View profile"
       >
-          <Avatar className="h-6 w-6 border rounded-full overflow-hidden md:h-8 md:w-8"> 
+          <Avatar className="h-8 w-8 border rounded-full overflow-hidden md:h-8 md:w-8"> 
             <AvatarImage 
               src={frameUser?.pfpUrl ?? undefined} 
               alt={frameUser?.displayName ?? "Profile"} 

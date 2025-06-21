@@ -380,11 +380,11 @@ export async function POST(request: NextRequest) {
     const { fid, address, auction_id, username, winning_url, claim_source } = requestData;
     
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
-    const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source) ? 2 : 3;
+    const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
     const rateLimitWindow = 60000; // 1 minute
     
     if (isRateLimited(clientIP, rateLimit, rateLimitWindow)) {
-      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${NON_FC_CLAIM_SOURCES.includes(claim_source) ? 'web/mobile' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
+      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 'web/mobile' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
       return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
     }
     
@@ -392,7 +392,7 @@ export async function POST(request: NextRequest) {
     console.log(`💰 LINK VISIT CLAIM: IP=${clientIP}, FID=${fid || 'none'}, auction=${auction_id}, address=${address || 'none'}, username=${username || 'none'}, source=${claim_source || 'mini_app'}`);
     
     // IP-based anti-bot validation (WEB USERS ONLY)
-    if (NON_FC_CLAIM_SOURCES.includes(claimSource)) {
+    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for web claim protection`);
       
       // Check 1: Max 3 claims per IP per auction
@@ -469,7 +469,7 @@ export async function POST(request: NextRequest) {
     // Check by FID (mini-app) or address (both)
     const banCheckConditions = [];
     
-    if (!NON_FC_CLAIM_SOURCES.includes(claimSource) && fid) {
+    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
       banCheckConditions.push(`fid.eq.${fid}`);
     }
     
@@ -477,7 +477,7 @@ export async function POST(request: NextRequest) {
       banCheckConditions.push(`eth_address.ilike.${address}`);
     }
     
-    if (username && !NON_FC_CLAIM_SOURCES.includes(claimSource)) {
+    if (username && !NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       banCheckConditions.push(`username.ilike.${username}`);
     }
     
@@ -520,7 +520,7 @@ export async function POST(request: NextRequest) {
     }
     
     // For mini-app claims, acquire FID lock first to prevent same FID claiming with multiple addresses
-    if (!NON_FC_CLAIM_SOURCES.includes(claimSource) && fid) {
+    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
       fidLockKey = `claim-fid-lock:${fid}:${auction_id}`;
       
       const fidLockAcquired = await redis.set(fidLockKey, Date.now().toString(), {
@@ -590,7 +590,7 @@ export async function POST(request: NextRequest) {
       }
       
       // For mini-app users, also check by FID
-      if (!NON_FC_CLAIM_SOURCES.includes(claimSource) && fid) {
+      if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
         const { data: existingClaimByFid, error: fidCheckError } = await supabase
           .from('link_visit_claims')
           .select('tx_hash, claimed_at, claim_source')
@@ -624,7 +624,7 @@ export async function POST(request: NextRequest) {
       let effectiveUsername: string | null = null;
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
     
-    if (NON_FC_CLAIM_SOURCES.includes(claimSource)) {
+    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       // Verify auth token for web users (Twitter authentication)
       const authHeader = request.headers.get('authorization');
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -791,7 +791,7 @@ export async function POST(request: NextRequest) {
     console.log(`📋 DETAILED CLAIM: IP=${clientIP}, FID=${fid}, address=${address}, auction=${auction_id}, username=${username || 'unknown'}`);
     
     // Validate Mini App user and verify wallet address in one call (skip for web users)
-    if (!NON_FC_CLAIM_SOURCES.includes(claimSource)) {
+    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       console.log(`🔍 MINI-APP VALIDATION: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - validating via miniapp-validation.ts`);
       
       const userValidation = await validateMiniAppUser(effectiveFid, effectiveUsername || undefined, address);
@@ -825,7 +825,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Clean up incomplete claims by FID (mini-app only)
-    if (!NON_FC_CLAIM_SOURCES.includes(claimSource) && fid) {
+    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
       const { error: cleanupFidError } = await supabase
         .from('link_visit_claims')
         .delete()
@@ -865,7 +865,14 @@ export async function POST(request: NextRequest) {
     let DYNAMIC_AIRDROP_CONTRACT: string;
     
     // Determine the purpose based on claim source
-    const walletPurpose = NON_FC_CLAIM_SOURCES.includes(claim_source) ? 'link-web' : 'link-miniapp';
+    let walletPurpose: 'link-web' | 'mobile-link-visit' | 'link-miniapp';
+    if (claim_source === 'mobile') {
+      walletPurpose = 'mobile-link-visit';
+    } else if (claim_source === 'web') {
+      walletPurpose = 'link-web';
+    } else {
+      walletPurpose = 'link-miniapp';
+    }
     
     // Check if we should use direct wallet (pool disabled for this purpose)
     const directWallet = walletPool.getDirectWallet(walletPurpose);
@@ -1493,10 +1500,10 @@ export async function POST(request: NextRequest) {
     }
     
     // Extract whatever information we can from the request
-    const fidForLog = typeof requestData.fid === 'number' ? requestData.fid : (NON_FC_CLAIM_SOURCES.includes(requestData.claim_source) ? -1 : 0);
+    const fidForLog = typeof requestData.fid === 'number' ? requestData.fid : (NON_FC_CLAIM_SOURCES.includes(requestData.claim_source || '') ? -1 : 0);
     const addressForLog = typeof requestData.address === 'string' ? requestData.address : 'unknown';
     const auctionIdForLog = typeof requestData.auction_id === 'string' ? requestData.auction_id : 'unknown';
-    const usernameForLog = NON_FC_CLAIM_SOURCES.includes(requestData.claim_source) ? null : requestData.username;
+    const usernameForLog = NON_FC_CLAIM_SOURCES.includes(requestData.claim_source || '') ? null : requestData.username;
     const winningUrlForLog = requestData.winning_url;
     
     // Attempt to log error even in case of unexpected errors

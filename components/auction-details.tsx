@@ -35,7 +35,7 @@ import { useBaseColors } from "@/hooks/useBaseColors";
 import { TypingIndicator } from "./TypingIndicator";
 import { useWhitelistStatus } from "@/hooks/useWhitelistStatus";
 import { Address } from "viem";
-import { frameSdk } from "@/lib/frame-sdk";
+import { frameSdk } from "@/lib/frame-sdk-singleton";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../types/database";
 import { queryClient } from "@/providers/provider";
@@ -800,7 +800,7 @@ export function AuctionDetails({
                         </div>
                       </div>
                       <div className="h-4 md:mt-1 overflow-hidden" style={{ minHeight: "18px" }}>
-                        <TypingIndicator />
+                        {/* <TypingIndicator /> */}
                       </div>
                     </div>
                     {!isComplete && (

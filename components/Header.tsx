@@ -10,7 +10,8 @@ import { ThemeDialog } from '@/components/ThemeDialog';
 import { QRContextMenu } from '@/components/QRContextMenu';
 import { useBaseColors } from '@/hooks/useBaseColors';
 import { useFetchAuctions, getLatestV3AuctionId } from '@/hooks/useFetchAuctions';
-import { sdk } from '@farcaster/frame-sdk';
+import { useIsMiniApp } from '@/hooks/useIsMiniApp';
+import { frameSdk } from '@/lib/frame-sdk-singleton';
 
 export function Header() {
   const router = useRouter();
@@ -18,27 +19,13 @@ export function Header() {
   const isBaseColors = useBaseColors();
   const [themeDialogOpen, setThemeDialogOpen] = useState(false);
   const [latestV3Id, setLatestV3Id] = useState(0);
-  const [isMiniApp, setIsMiniApp] = useState(false);
+  const { isMiniApp } = useIsMiniApp();
   
   // Check if we're on the Base Colors UI page
   const isBaseColorsUI = pathname === '/ui';
   
   // Call useFetchAuctions without a tokenId parameter to get auctions from all contracts
   const { auctions } = useFetchAuctions();
-  
-  // Check if we're in a Mini App context once on mount
-  useEffect(() => {
-    const checkMiniApp = async () => {
-      try {
-        const isInMiniApp = await sdk.isInMiniApp();
-        setIsMiniApp(isInMiniApp);
-      } catch {
-        setIsMiniApp(false);
-      }
-    };
-    
-    checkMiniApp();
-  }, []);
   
   // Fetch the latest V3 auction ID when auctions data updates
   useEffect(() => {
@@ -99,11 +86,11 @@ export function Header() {
             size="icon"
             className={
               isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
-                : "h-8 w-8 md:h-10 md:w-10"
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10 md:h-10 md:w-10"
+                : "h-10 w-10 md:h-10 md:w-10"
             }
           >
-            <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
+            <div className="text-xl flex items-center justify-center">
               🏆
             </div>
           </Button>
@@ -116,7 +103,7 @@ export function Header() {
               // Use cached mini app status
               if (isMiniApp) {
                 e.preventDefault();
-                await sdk.actions.openUrl("https://shop.qrcoin.fun");
+                await frameSdk.redirectToUrl("https://shop.qrcoin.fun");
               }
               // Otherwise, not in mini app, let Link handle normally
             }}
@@ -126,11 +113,11 @@ export function Header() {
               size="icon"
               className={
                 isBaseColors
-                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
-                  : "h-8 w-8 md:h-10 md:w-10"
+                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10 md:h-10 md:w-10"
+                  : "h-10 w-10 md:h-10 md:w-10"
               }
             >
-              <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
+              <div className="text-xl flex items-center justify-center">
                 🔥
               </div>
             </Button>
@@ -144,7 +131,7 @@ export function Header() {
               // Use cached mini app status
               if (isMiniApp) {
                 e.preventDefault();
-                await sdk.actions.openUrl("https://farcaster.xyz/miniapps/vTuDnU8a1PCz/qr-map");
+                await frameSdk.redirectToUrl("https://farcaster.xyz/miniapps/vTuDnU8a1PCz/qr-map");
               }
               // Otherwise, not in mini app, let Link handle normally
             }}
@@ -154,11 +141,11 @@ export function Header() {
               size="icon"
               className={
                 isBaseColors
-                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
-                  : "h-8 w-8 md:h-10 md:w-10"
+                  ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10 md:h-10 md:w-10"
+                  : "h-10 w-10 md:h-10 md:w-10"
               }
             >
-              <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
+              <div className="text-xl flex items-center justify-center">
                 🌎
               </div>
             </Button>
@@ -170,11 +157,11 @@ export function Header() {
             size="icon"
             className={
               isBaseColors
-                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
-                : "h-8 w-8 md:h-10 md:w-10"
+                ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10 md:h-10 md:w-10"
+                : "h-10 w-10 md:h-10 md:w-10"
             }
           >
-            <div className="h-5 w-5 flex items-center justify-center md:h-10 md:w-10">
+            <div className="text-xl flex items-center justify-center">
               ℹ️
             </div>
           </Button>
@@ -185,23 +172,23 @@ export function Header() {
           size="icon"
           className={
             isBaseColors
-              ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-8 w-8 md:h-10 md:w-10"
-              : "h-8 w-8 md:h-10 md:w-10"
+              ? "bg-primary text-foreground hover:bg-primary/90 hover:text-foreground border-none h-10 w-10 md:h-10 md:w-10"
+              : "h-10 w-10 md:h-10 md:w-10"
           }
           onClick={() => setThemeDialogOpen(true)}
         >
-          <div className="h-5 w-5 flex items-center justify-center">
+          <div className="h-6 w-6 md:h-5 md:w-5 flex items-center justify-center">
             {isBaseColors ? (
               <img 
                 src="/basecolors2.jpeg" 
                 alt="Theme toggle - base colors"
-                className="h-5 w-5 object-cover"
+                className="h-6 w-6 md:h-5 md:w-5 object-cover"
               />
             ) : (
               <img 
                 src="/basecolors.jpeg" 
                 alt="Theme toggle - light/dark" 
-                className="h-5 w-5 object-cover border"
+                className="h-6 w-6 md:h-5 md:w-5 object-cover border"
               />
             )}
           </div>

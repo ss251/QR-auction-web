@@ -15,7 +15,7 @@ import { WarpcastLogo } from "@/components/WarpcastLogo";
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "../../types/database";
 import { getFarcasterProfilePicture } from "@/utils/farcaster";
-import { frameSdk } from "@/lib/frame-sdk";
+import { frameSdk } from "@/lib/frame-sdk-singleton";
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient<Database>(
@@ -386,7 +386,7 @@ export default function WinnersPage() {
             <h1 className="text-2xl md:text-3xl font-bold text-center">All-Time Winners</h1>
           </div>
           <p className="text-sm md:text-lg text-gray-600 dark:text-gray-400">
-            Complete history of all auction winners
+            Complete history of our auction winners
           </p>
         </div>
 

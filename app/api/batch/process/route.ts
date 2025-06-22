@@ -10,20 +10,30 @@ const receiver = new Receiver({
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify the request is from QStash
-    const signature = req.headers.get('upstash-signature');
-    if (!signature) {
-      return NextResponse.json({ success: false, error: 'Unauthorized - missing signature' }, { status: 401 });
-    }
+    // Check if running locally
+    const isLocalhost = req.url.includes('localhost') || req.url.includes('127.0.0.1');
     
-    const bodyText = await req.text();
-    const isValid = await receiver.verify({
-      signature,
-      body: bodyText,
-    });
+    let bodyText: string;
     
-    if (!isValid) {
-      return NextResponse.json({ success: false, error: 'Unauthorized - invalid signature' }, { status: 401 });
+    if (!isLocalhost) {
+      // Verify the request is from QStash
+      const signature = req.headers.get('upstash-signature');
+      if (!signature) {
+        return NextResponse.json({ success: false, error: 'Unauthorized - missing signature' }, { status: 401 });
+      }
+      
+      bodyText = await req.text();
+      const isValid = await receiver.verify({
+        signature,
+        body: bodyText,
+      });
+      
+      if (!isValid) {
+        return NextResponse.json({ success: false, error: 'Unauthorized - invalid signature' }, { status: 401 });
+      }
+    } else {
+      console.log('🔧 LOCALHOST: Bypassing signature verification for batch processor');
+      bodyText = await req.text();
     }
     
     // Parse the body

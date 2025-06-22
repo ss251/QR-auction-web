@@ -116,10 +116,14 @@ async function processBatch(claimSource: string): Promise<void> {
       return;
     }
     
-    // Parse claims
-    const claims: PendingClaim[] = claimStrings.map(str => 
-      JSON.parse(str as string) as PendingClaim
-    );
+    // Parse claims (handle both string and object responses from Redis)
+    const claims: PendingClaim[] = claimStrings.map(str => {
+      if (typeof str === 'string') {
+        return JSON.parse(str) as PendingClaim;
+      }
+      // If Redis returns an object, use it directly
+      return str as PendingClaim;
+    });
     
     console.log(`🚀 Processing batch of ${claims.length} claims for ${claimSource}`);
     

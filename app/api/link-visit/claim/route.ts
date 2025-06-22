@@ -105,7 +105,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 // Import queue functionality
 import { queueFailedClaim, redis } from '@/lib/queue/failedClaims';
 // Import batch processing functionality
-import { addToBatch, isBatchProcessingEnabled } from '@/lib/batch-claim-processor';
+import { addToBatch, isBatchProcessingEnabled } from '@/lib/batch-claim-processor-redis';
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {

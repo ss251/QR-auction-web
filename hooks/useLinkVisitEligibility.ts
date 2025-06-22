@@ -117,6 +117,28 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       return { hasClicked: false, hasClaimed: false };
     }
 
+    // First check for pending claims in batch queue
+    try {
+      const pendingResponse = await fetch('/api/link-visit/check-pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          address: effectiveWalletAddress,
+          fid: frameContext?.user?.fid,
+          auction_id: auctionId,
+          username: isWebContext ? getTwitterUsername() : frameContext?.user?.username
+        })
+      });
+      
+      const pendingData = await pendingResponse.json();
+      if (pendingData.success && pendingData.hasPendingClaim) {
+        console.log('Found pending claim in batch queue during eligibility check');
+        return { hasClicked: true, hasClaimed: true };
+      }
+    } catch (e) {
+      console.error('Error checking pending claims in eligibility:', e);
+    }
+
     if (isWebContext) {
       // Web context logic
       const twitterUsername = getTwitterUsername();

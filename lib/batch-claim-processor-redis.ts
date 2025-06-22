@@ -89,6 +89,7 @@ interface PendingClaim {
 const pendingResolvers = new Map<string, {
   resolve: (result: { success: boolean; tx_hash?: string; error?: string }) => void;
   reject: (error: Error) => void;
+  timeoutId?: NodeJS.Timeout;
 }>();
 
 // Process a batch of claims for a specific source
@@ -141,7 +142,7 @@ async function processBatch(claimSource: string): Promise<void> {
     const directWallet = walletPool.getDirectWallet(walletPurpose);
     let adminWallet: ethers.Wallet;
     let DYNAMIC_AIRDROP_CONTRACT: string;
-    let lockKey: string | null = null;
+    let walletLockKey: string | null = null;
     let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
     
     if (directWallet) {
@@ -152,7 +153,7 @@ async function processBatch(claimSource: string): Promise<void> {
         walletConfig = await walletPool.getAvailableWallet(walletPurpose);
         adminWallet = walletConfig.wallet;
         DYNAMIC_AIRDROP_CONTRACT = walletConfig.airdropContract;
-        lockKey = walletConfig.lockKey;
+        walletLockKey = walletConfig.lockKey;
       } catch {
         // If no wallet available, reject all claims
         claims.forEach(claim => {
@@ -288,6 +289,10 @@ async function processBatch(claimSource: string): Promise<void> {
       claims.forEach(claim => {
         const resolver = pendingResolvers.get(claim.id);
         if (resolver) {
+          // Clear the timeout to prevent false timeouts
+          if (resolver.timeoutId) {
+            clearTimeout(resolver.timeoutId);
+          }
           resolver.resolve({
             success: true,
             tx_hash: txReceipt.hash
@@ -304,6 +309,10 @@ async function processBatch(claimSource: string): Promise<void> {
       claims.forEach(claim => {
         const resolver = pendingResolvers.get(claim.id);
         if (resolver) {
+          // Clear the timeout first
+          if (resolver.timeoutId) {
+            clearTimeout(resolver.timeoutId);
+          }
           resolver.reject(new Error(errorMessage));
           pendingResolvers.delete(claim.id);
         }
@@ -311,8 +320,8 @@ async function processBatch(claimSource: string): Promise<void> {
       
     } finally {
       // Release wallet lock if using pool
-      if (lockKey && walletConfig) {
-        await walletPool.releaseWallet(lockKey);
+      if (walletLockKey && walletConfig) {
+        await walletPool.releaseWallet(walletLockKey);
         console.log(`Released wallet lock for ${adminWallet.address}`);
       }
     }
@@ -381,7 +390,8 @@ export async function addToBatch(claimData: {
       };
       
       // Store resolver for later
-      pendingResolvers.set(claimId, { resolve, reject });
+      const resolver = { resolve, reject, timeoutId: undefined as NodeJS.Timeout | undefined };
+      pendingResolvers.set(claimId, resolver);
       
       try {
         // Add to Redis queue
@@ -401,12 +411,16 @@ export async function addToBatch(claimData: {
       }
       
       // Set a timeout to reject if not processed within reasonable time
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (pendingResolvers.has(claimId)) {
+          console.log(`⏱️ Batch processing timeout for claim ${claimId} - triggering fallback`);
           pendingResolvers.delete(claimId);
           reject(new Error('Batch processing timeout'));
         }
       }, BATCH_TIMEOUT * 2); // Double the batch timeout for safety
+      
+      // Store the timeout ID so we can clear it later
+      resolver.timeoutId = timeoutId;
       
     } catch (error) {
       reject(error);

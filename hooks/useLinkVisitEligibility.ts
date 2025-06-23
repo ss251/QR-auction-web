@@ -117,27 +117,8 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       return { hasClicked: false, hasClaimed: false };
     }
 
-    // First check for pending claims in batch queue
-    try {
-      const pendingResponse = await fetch('/api/link-visit/check-pending', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          address: effectiveWalletAddress,
-          fid: frameContext?.user?.fid,
-          auction_id: auctionId,
-          username: isWebContext ? getTwitterUsername() : frameContext?.user?.username
-        })
-      });
-      
-      const pendingData = await pendingResponse.json();
-      if (pendingData.success && pendingData.hasPendingClaim) {
-        console.log('Found pending claim in batch queue during eligibility check');
-        return { hasClicked: true, hasClaimed: true };
-      }
-    } catch (e) {
-      console.error('Error checking pending claims in eligibility:', e);
-    }
+    // The immediate database insertion in the claim route handles preventing popup display
+    // No need to check the queue separately
 
     if (isWebContext) {
       // Web context logic
@@ -255,10 +236,12 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     enabled: isWebContext 
       ? !!(effectiveWalletAddress || getTwitterUsername()) && !!auctionId
       : !!frameContext?.user?.fid && !!auctionId,
-    // Stale time of 30 seconds - data is fresh for 30 seconds
-    staleTime: 30 * 1000,
+    // Reduced stale time to ensure we check for pending claims more frequently
+    staleTime: 5 * 1000, // 5 seconds instead of 30
     // Cache time of 5 minutes
     gcTime: 5 * 60 * 1000,
+    // Refetch on window focus to ensure fresh data
+    refetchOnWindowFocus: true,
   });
   
   // Mutation for recording clicks

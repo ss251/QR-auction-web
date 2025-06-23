@@ -255,34 +255,46 @@ async function processBatch(claimSource: string): Promise<void> {
       
       console.log(`Batch airdrop successful: ${txReceipt.hash}`);
       
-      // Record all successful claims
-      const successfulClaims = claims.map(claim => ({
-        fid: claim.fid,
-        auction_id: parseInt(claim.auction_id),
-        eth_address: claim.address,
-        link_visited_at: new Date().toISOString(),
-        claimed_at: new Date().toISOString(),
-        amount: 420,
-        tx_hash: txReceipt.hash,
-        success: true,
-        username: claim.username || null,
-        user_id: claim.user_id || null,
-        winning_url: claim.winning_url || `https://qrcoin.fun/auction/${claim.auction_id}`,
-        claim_source: claim.claim_source,
-        client_ip: claim.client_ip
-      }));
-      
-      // Insert successful claims
-      const { error: insertError } = await supabase
-        .from('link_visit_claims')
-        .upsert(successfulClaims, {
-          onConflict: 'fid,auction_id',
-          ignoreDuplicates: false
-        });
-      
-      if (insertError) {
-        console.error('Error inserting batch claims:', insertError);
-        throw new Error(`Database error: ${insertError.message}`);
+      // Update all successful claims (they should already exist as pending records)
+      for (const claim of claims) {
+        const { error: updateError } = await supabase
+          .from('link_visit_claims')
+          .update({
+            tx_hash: txReceipt.hash,
+            success: true,
+            claimed_at: new Date().toISOString()
+          })
+          .match({
+            fid: claim.fid,
+            auction_id: parseInt(claim.auction_id),
+            eth_address: claim.address
+          });
+        
+        if (updateError) {
+          console.error(`Error updating claim for ${claim.address}:`, updateError);
+          // If update fails, try insert (in case pending record wasn't created)
+          const { error: insertError } = await supabase
+            .from('link_visit_claims')
+            .insert({
+              fid: claim.fid,
+              auction_id: parseInt(claim.auction_id),
+              eth_address: claim.address,
+              link_visited_at: new Date().toISOString(),
+              claimed_at: new Date().toISOString(),
+              amount: 420,
+              tx_hash: txReceipt.hash,
+              success: true,
+              username: claim.username || null,
+              user_id: claim.user_id || null,
+              winning_url: claim.winning_url || `https://qrcoin.fun/auction/${claim.auction_id}`,
+              claim_source: claim.claim_source,
+              client_ip: claim.client_ip
+            });
+          
+          if (insertError && !insertError.message.includes('duplicate key')) {
+            console.error(`Failed to insert claim for ${claim.address}:`, insertError);
+          }
+        }
       }
       
       // Resolve all claims successfully
@@ -304,8 +316,78 @@ async function processBatch(claimSource: string): Promise<void> {
     } catch (batchError) {
       console.error(`Batch failed for ${claimSource}:`, batchError);
       
-      // Reject all claims in the batch
       const errorMessage = batchError instanceof Error ? batchError.message : String(batchError);
+      
+      // Clean up pending database records for all failed claims
+      console.log(`🧹 Cleaning up ${claims.length} pending records after batch failure`);
+      
+      for (const claim of claims) {
+        try {
+          // Delete the pending record
+          const { error: deleteError } = await supabase
+            .from('link_visit_claims')
+            .delete()
+            .match({
+              fid: claim.fid,
+              auction_id: parseInt(claim.auction_id),
+              eth_address: claim.address,
+              tx_hash: null
+            });
+          
+          if (deleteError) {
+            console.error(`Failed to delete pending record for ${claim.address}:`, deleteError);
+          }
+          
+          // Log to failure queue for retry
+          const { data: failureData, error: failureError } = await supabase
+            .from('link_visit_claim_failures')
+            .insert({
+              fid: claim.fid,
+              eth_address: claim.address,
+              auction_id: claim.auction_id,
+              username: claim.username || null,
+              user_id: claim.user_id || null,
+              winning_url: claim.winning_url || null,
+              error_message: `Batch processing failed: ${errorMessage}`,
+              error_code: 'BATCH_PROCESSING_FAILED',
+              request_data: JSON.stringify({
+                claim_source: claim.claim_source,
+                client_ip: claim.client_ip,
+                batch_size: claims.length,
+                batch_error: errorMessage
+              }),
+              gas_price: null,
+              gas_limit: null,
+              network_status: 'batch_failed',
+              retry_count: 0,
+              client_ip: claim.client_ip
+            })
+            .select('id')
+            .single();
+          
+          if (failureError) {
+            console.error(`Failed to log batch failure for ${claim.address}:`, failureError);
+          } else if (failureData) {
+            // Queue for retry
+            console.log(`📋 Queuing batch failure for retry: ID=${failureData.id}`);
+            // Import the queue function
+            const { queueFailedClaim } = await import('@/lib/queue/failedClaims');
+            await queueFailedClaim({
+              id: failureData.id,
+              fid: claim.fid,
+              eth_address: claim.address,
+              auction_id: claim.auction_id,
+              username: claim.username || null,
+              user_id: claim.user_id || null,
+              winning_url: claim.winning_url || null,
+            });
+          }
+        } catch (cleanupError) {
+          console.error(`Error cleaning up failed claim for ${claim.address}:`, cleanupError);
+        }
+      }
+      
+      // Reject all claims in the batch
       claims.forEach(claim => {
         const resolver = pendingResolvers.get(claim.id);
         if (resolver) {
@@ -396,7 +478,8 @@ export async function addToBatch(claimData: {
       try {
         // Add to Redis queue
         const queueKey = `${BATCH_QUEUE_PREFIX}${claimData.claim_source}`;
-        await redis.rpush(queueKey, JSON.stringify(claim));
+        const claimJson = JSON.stringify(claim);
+        await redis.rpush(queueKey, claimJson);
         
         const queueLength = await redis.llen(queueKey);
         console.log(`📦 Added claim to batch (${queueLength}/${BATCH_SIZE}) for ${claimData.claim_source}`);

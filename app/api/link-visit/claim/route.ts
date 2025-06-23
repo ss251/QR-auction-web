@@ -863,6 +863,32 @@ export async function POST(request: NextRequest) {
       console.log(`📦 BATCH MODE: Adding claim to batch processor for ${claim_source}`);
       
       try {
+        // Create a pending claim record in the database immediately
+        // This prevents the popup from showing again while the batch is processing
+        // Mark it with a special batch_pending flag so we can clean it up if needed
+        const { error: pendingError } = await supabase
+          .from('link_visit_claims')
+          .insert({
+            fid: effectiveFid,
+            auction_id: parseInt(auction_id),
+            eth_address: address,
+            link_visited_at: new Date().toISOString(),
+            claimed_at: new Date().toISOString(),
+            amount: 420,
+            tx_hash: null, // Will be updated when batch processes
+            success: false, // Mark as pending
+            username: effectiveUsername || null,
+            user_id: effectiveUserId || null,
+            winning_url: winningUrl || `https://qrcoin.fun/auction/${auction_id}`,
+            claim_source: claim_source || 'mini_app',
+            client_ip: clientIP
+          });
+        
+        if (pendingError && !pendingError.message.includes('duplicate key')) {
+          console.error('Failed to create pending claim record:', pendingError);
+          // Continue anyway - batch processing might still work
+        }
+        
         const batchResult = await addToBatch({
           fid: effectiveFid,
           address,
@@ -883,11 +909,22 @@ export async function POST(request: NextRequest) {
             batch_processed: true
           });
         } else {
-          throw new Error(batchResult.error || 'Batch processing failed');
+          // The batch processor will handle cleanup and retry queueing
+          console.log(`❌ BATCH FAILED: Claim will be retried later`);
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Your claim is being processed. Please check back in a few minutes.',
+            batch_failed: true
+          }, { status: 503 });
         }
       } catch (batchError) {
-        console.log(`⚠️ BATCH FAILED: Falling back to individual processing - ${batchError}`);
-        // Fall through to individual processing
+        console.log(`⚠️ BATCH ERROR: ${batchError}`);
+        // Return error instead of falling back to individual processing
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Your claim is being processed. Please check back in a few minutes.',
+          batch_error: true
+        }, { status: 503 });
       }
     }
     

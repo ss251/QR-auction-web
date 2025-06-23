@@ -9,6 +9,7 @@ import { usePrivy, useConnectWallet } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { getFarcasterUser } from '@/utils/farcaster';
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
+import { useQueryClient } from '@tanstack/react-query';
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -63,7 +64,8 @@ export const useLinkVisit = () => useContext(LinkVisitContext);
 
 interface LinkedAccount {
   type: string;
-  // Add other properties as needed
+  address?: string;
+  username?: string;
 }
 
 export function LinkVisitProvider({ 
@@ -99,7 +101,7 @@ export function LinkVisitProvider({
   const { connectWallet } = useConnectWallet();
   
   // Get smart wallet address from user's linked accounts (more reliable)
-  const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
+  const smartWalletAddress = user?.linkedAccounts?.find((account: LinkedAccount) => account.type === 'smart_wallet')?.address;
   
   // Use appropriate wallet address based on context - prioritize smart wallet for web users
   const effectiveWalletAddress = isWebContext 
@@ -109,7 +111,6 @@ export function LinkVisitProvider({
   // Add state to track when wallet connection status is determined
   const [walletStatusDetermined, setWalletStatusDetermined] = useState(false);
   const [authCheckComplete, setAuthCheckComplete] = useState(false);
-  const [isCheckingPendingClaims, setIsCheckingPendingClaims] = useState(false);
   
   // NEW: Check if user is authenticated with Twitter or Farcaster
   const isTwitterOrFarcasterUser = useMemo(() => {
@@ -143,7 +144,7 @@ export function LinkVisitProvider({
   const getTwitterUsername = useCallback(() => {
     if (!authenticated || !user?.linkedAccounts) return null;
     
-    const twitterAccount = user.linkedAccounts.find((account: LinkedAccount & { username?: string }) => 
+    const twitterAccount = user.linkedAccounts.find((account: LinkedAccount) => 
       account.type === 'twitter_oauth'
     );
     
@@ -226,6 +227,9 @@ export function LinkVisitProvider({
     frameContext: eligibilityFrameContext
   } = useLinkVisitEligibility(eligibilityAuctionId, isWebContext);
   
+  // Get query client to invalidate cache when needed
+  const queryClient = useQueryClient();
+  
   // ALWAYS use the latestWonAuctionId for claim operations - never fall back to current auction
   // This prevents gaming by manually visiting future auction URLs
   const claimAuctionId = latestWonAuctionId;
@@ -248,33 +252,6 @@ export function LinkVisitProvider({
       }
       
       try {
-        // First check for pending claims in batch queue
-        setIsCheckingPendingClaims(true);
-        try {
-          const pendingResponse = await fetch('/api/link-visit/check-pending', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              address: effectiveWalletAddress,
-              auction_id: latestWonAuctionId,
-              username: twitterUsername
-            })
-          });
-          
-          const pendingData = await pendingResponse.json();
-          if (pendingData.success && pendingData.hasPendingClaim) {
-            console.log('Found pending claim in batch queue');
-            setManualHasClaimedLatest(true);
-            setExplicitlyCheckedClaim(true);
-            setIsCheckingDatabase(false);
-            setIsCheckingPendingClaims(false);
-            return true;
-          }
-        } catch (e) {
-          console.error('Error checking pending claims:', e);
-        } finally {
-          setIsCheckingPendingClaims(false);
-        }
         
         // Get Farcaster username associated with this address
         let farcasterUsername: string | null = null;
@@ -354,36 +331,8 @@ export function LinkVisitProvider({
       }
       
       try {
-        // First check for pending claims in batch queue
+        // Get Farcaster username for checking claims
         const farcasterUsername = eligibilityFrameContext.user.username;
-        setIsCheckingPendingClaims(true);
-        
-        try {
-          const pendingResponse = await fetch('/api/link-visit/check-pending', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              address: effectiveWalletAddress,
-              fid: eligibilityFrameContext.user.fid,
-              auction_id: latestWonAuctionId,
-              username: farcasterUsername
-            })
-          });
-          
-          const pendingData = await pendingResponse.json();
-          if (pendingData.success && pendingData.hasPendingClaim) {
-            console.log('Found pending claim in batch queue');
-            setManualHasClaimedLatest(true);
-            setExplicitlyCheckedClaim(true);
-            setIsCheckingDatabase(false);
-            setIsCheckingPendingClaims(false);
-            return true;
-          }
-        } catch (e) {
-          console.error('Error checking pending claims:', e);
-        } finally {
-          setIsCheckingPendingClaims(false);
-        }
         
         // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
         const { data: allClaims, error } = await supabase
@@ -575,21 +524,11 @@ export function LinkVisitProvider({
       setTimeout(() => {
         if (isTwitterUserNeedsWallet && !hasTriggeredWalletConnection) {
           setHasTriggeredWalletConnection(true);
-          connectWallet({
-            onSuccess: () => {
-              // Wallet connected successfully, the other useEffect will handle showing popup
-              console.log('Wallet connected after Twitter sign-in');
-            },
-            onError: (error: Error) => {
-              console.error('Failed to connect wallet after Twitter sign-in:', error);
-              // Clear flow state on error
-              clearFlowState();
-              setHasTriggeredWalletConnection(false);
-            }
-          });
+          connectWallet();
+          // The wallet connection will trigger re-renders when complete
           // Don't clear flow state yet - wait for wallet to connect
         } else if (hasTriggeredWalletConnection && isTwitterUserNeedsWallet) {
-        } else if (latestWonAuctionId && !manualHasClaimedLatest && !isCheckingPendingClaims) {
+        } else if (latestWonAuctionId && !manualHasClaimedLatest && !isCheckingDatabase) {
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
@@ -599,7 +538,7 @@ export function LinkVisitProvider({
         }
       }, 1000);
     }
-  }, [authenticated, isTwitterUserNeedsWallet, latestWonAuctionId, manualHasClaimedLatest, isWebContext, getFlowState, clearFlowState, requestPopup, connectWallet, hasTriggeredWalletConnection, isCheckingPendingClaims]);
+  }, [authenticated, isTwitterUserNeedsWallet, latestWonAuctionId, manualHasClaimedLatest, isWebContext, getFlowState, clearFlowState, requestPopup, connectWallet, hasTriggeredWalletConnection, isCheckingDatabase]);
 
   // Reset wallet connection flag when not in claiming flow
   useEffect(() => {
@@ -620,7 +559,7 @@ export function LinkVisitProvider({
       
       // Small delay to ensure everything is ready
       setTimeout(() => {
-        if (latestWonAuctionId && !manualHasClaimedLatest && !isCheckingPendingClaims) {
+        if (latestWonAuctionId && !manualHasClaimedLatest && !isCheckingDatabase) {
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
@@ -632,7 +571,7 @@ export function LinkVisitProvider({
         clearFlowState();
       }, 1000); // Increased delay to ensure wallet state is fully updated
     }
-  }, [isWebContext, authenticated, isTwitterUserNeedsWallet, effectiveWalletAddress, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup, isCheckingPendingClaims]);
+  }, [isWebContext, authenticated, isTwitterUserNeedsWallet, effectiveWalletAddress, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup, isCheckingDatabase]);
 
   // NEW: Additional fallback - listen for any wallet address changes when in claiming flow
   useEffect(() => {
@@ -645,7 +584,7 @@ export function LinkVisitProvider({
       
       // Small delay and then check if we should show the popup
       setTimeout(() => {
-        if (latestWonAuctionId && !manualHasClaimedLatest && !isPopupActive('linkVisit') && !isCheckingPendingClaims) {
+        if (latestWonAuctionId && !manualHasClaimedLatest && !isPopupActive('linkVisit') && !isCheckingDatabase) {
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
@@ -654,7 +593,7 @@ export function LinkVisitProvider({
         }
       }, 2000);
     }
-  }, [effectiveWalletAddress, isWebContext, authenticated, showClaimPopup, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup, isPopupActive, isCheckingPendingClaims]);
+  }, [effectiveWalletAddress, isWebContext, authenticated, showClaimPopup, latestWonAuctionId, manualHasClaimedLatest, getFlowState, clearFlowState, requestPopup, isPopupActive, isCheckingDatabase]);
   
   // Listen for trigger from other popups closing
   useEffect(() => {
@@ -676,8 +615,8 @@ export function LinkVisitProvider({
         return;
       }
       
-      // Don't show popup if database check is still in progress
-      if (isCheckingDatabase || isCheckingPendingClaims) {
+      // Don't show popup if database check or pending claims check is still in progress
+      if (isCheckingDatabase) {
         return;
       }
       
@@ -696,7 +635,7 @@ export function LinkVisitProvider({
           const combinedHasClaimed = authenticated ? (manualHasClaimedLatest === true || hasClaimed) : false;
           
           // Check if user is eligible (disconnected or hasn't claimed for latest won auction)
-          if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId && !isLoading) {
+          if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId && !isLoading && !isCheckingDatabase) {
             const granted = requestPopup('linkVisit');
             if (granted) {
               setShowClaimPopup(true);
@@ -709,7 +648,7 @@ export function LinkVisitProvider({
         // Mini-app logic - use combined claim status
         const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
         
-        if (!combinedHasClaimed && latestWonAuctionId && !isLoading) {
+        if (!combinedHasClaimed && latestWonAuctionId && !isLoading && !isCheckingDatabase) {
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
@@ -744,7 +683,7 @@ export function LinkVisitProvider({
       return;
     }
     
-    // Wait for database check to complete before showing popup
+    // Wait for database check and pending claims check to complete before showing popup
     if (isCheckingDatabase) {
       return;
     }
@@ -774,9 +713,11 @@ export function LinkVisitProvider({
         if ((!authenticated || !combinedHasClaimed) && latestWonAuctionId) {
           
           const timer = setTimeout(() => {
-            const granted = requestPopup('linkVisit');
-            if (granted) {
-              setShowClaimPopup(true);
+            if (!isCheckingDatabase) {
+              const granted = requestPopup('linkVisit');
+              if (granted) {
+                setShowClaimPopup(true);
+              }
             }
             setHasCheckedEligibility(true);
           }, 2500);
@@ -801,9 +742,11 @@ export function LinkVisitProvider({
       if (!combinedHasClaimed && latestWonAuctionId) {
         
         const timer = setTimeout(() => {
-          const granted = requestPopup('linkVisit');
-          if (granted) {
-            setShowClaimPopup(true);
+          if (!isCheckingDatabase) {
+            const granted = requestPopup('linkVisit');
+            if (granted) {
+              setShowClaimPopup(true);
+            }
           }
           setHasCheckedEligibility(true);
         }, 1000);
@@ -844,13 +787,20 @@ export function LinkVisitProvider({
   // Handle claim action
   const handleClaim = async (captchaToken: string) => {
     
+    // Set manual claim state immediately to prevent popup from showing again
+    // This is important for batch processing where the claim is queued but not yet processed
+    setManualHasClaimedLatest(true);
+    
     // For web context, wallet should already be connected via authentication check
     // For mini-app context, wallet should already be connected as before
     const result = await claimTokens(captchaToken || undefined);
     
-    // Update our manual tracking state after claim
-    if (result.txHash) {
-      setManualHasClaimedLatest(true);
+    // If claim failed (no txHash returned), revert the manual state
+    if (!result.txHash) {
+      setManualHasClaimedLatest(false);
+    } else {
+      // Invalidate React Query cache to ensure hasClaimed reflects the new claim
+      queryClient.invalidateQueries({ queryKey: ['linkVisit'] });
     }
     
     return result;

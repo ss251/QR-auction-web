@@ -16,6 +16,7 @@ import { CLICK_SOURCES } from '@/lib/click-tracking';
 import { usePrivy, useLogin, useConnectWallet } from "@privy-io/react-auth";
 import { Turnstile } from '@marsidev/react-turnstile';
 import { useXPixel } from "@/hooks/useXPixel";
+import { useAnalytics, ANALYTICS_EVENTS } from "@/hooks/useAnalytics";
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -181,16 +182,25 @@ export function LinkVisitClaimPopup({
   // Add X Pixel tracking
   const { trackEvent } = useXPixel();
   
+  // Add Vercel Analytics tracking
+  const { trackEvent: trackAnalytics } = useAnalytics();
+  
   // Track popup view when it opens
   useEffect(() => {
     if (isOpen && auctionId) {
+      // X Pixel tracking
       trackEvent('ViewContent', {
         content_name: `Link Visit Claim Popup - Auction ${auctionId}`,
         content_category: 'Token Claim Popup',
         auction_id: auctionId
       });
+      
+      // Vercel Analytics tracking
+      trackAnalytics(ANALYTICS_EVENTS.LINK_VISIT_POPUP_OPENED, {
+        auction_id: auctionId
+      });
     }
-  }, [isOpen, auctionId, trackEvent]);
+  }, [isOpen, auctionId, trackEvent, trackAnalytics]);
   
   // Reset state when dialog opens based on hasClicked and context
   useEffect(() => {
@@ -401,7 +411,7 @@ export function LinkVisitClaimPopup({
       
       // Track successful token claim with X Pixel
       trackEvent('Lead', {
-        value: 420,
+        value: 1000,
         currency: 'QR',
         content_name: `Token Claim - Auction ${auctionId}`,
         content_category: 'QR Token Claim',
@@ -409,13 +419,19 @@ export function LinkVisitClaimPopup({
         token_type: 'QR'
       });
       
-      toast.success('420 $QR has been sent to your wallet.', {
+      toast.success('1,000 $QR has been sent to your wallet.', {
         style: {
           background: 'var(--primary)',
           color: 'var(--primary-foreground)',
           border: '1px solid var(--border)'
         },
         duration: 5000,
+      });
+      
+      // Track successful claim with Vercel Analytics
+      trackAnalytics(ANALYTICS_EVENTS.LINK_VISIT_CLAIM_SUCCESS, {
+        auction_id: auctionId,
+        context: isWebContext ? 'web' : 'mini_app'
       });
       
       // Pass captcha token to claim function (empty string for authenticated users)
@@ -430,6 +446,12 @@ export function LinkVisitClaimPopup({
 
   // Handle link click
   const onLinkClick = async () => {
+    // Track visit winner button click with Vercel Analytics
+    trackAnalytics(ANALYTICS_EVENTS.VISIT_WINNER_CLICKED, {
+      auction_id: auctionId,
+      context: isWebContext ? 'web' : 'mini_app',
+      source: 'link_visit_claim_popup'
+    });
     
     // Mark as clicked in localStorage immediately
     setClickedInStorage();
@@ -503,7 +525,7 @@ export function LinkVisitClaimPopup({
     setClaimState('connecting');
     
     // Show persistent toast with updated message
-    const toastId = toast.info('Sign in with X (Twitter) to claim 420 $QR!', {
+    const toastId = toast.info('Sign in with X (Twitter) to claim 1,000 $QR!', {
       duration: Infinity, // Persistent until manually dismissed
     });
     setPersistentToastId(toastId);
@@ -544,9 +566,16 @@ export function LinkVisitClaimPopup({
 
   // Handle share
   const handleShare = async () => {
+    // Track share button click with Vercel Analytics
+    trackAnalytics(ANALYTICS_EVENTS.SHARE_CLICKED, {
+      auction_id: auctionId,
+      context: isWebContext ? 'web' : 'mini_app',
+      source: 'link_visit_claim_success'
+    });
+    
     if (isWebContext) {
       // Web context: Twitter/X share with quote tweet
-      const shareText = encodeURIComponent(`just got paid 420 $QR to check out today's winner @qrcoindotfun`);
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
       
       // Use dynamic quote tweet URL from database
       const tweetToQuote = socialLinks.quoteTweetUrl;
@@ -556,7 +585,7 @@ export function LinkVisitClaimPopup({
       window.open(shareUrl, '_blank', 'noopener,noreferrer');
     } else {
       // Mini-app context: Warpcast share (existing logic)
-      const shareText = encodeURIComponent(`just got paid 420 $QR to check out today's winner @qrcoindotfun`);
+      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
       const embedUrl = encodeURIComponent(`https://qrcoin.fun/86`);
       
       let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
@@ -574,6 +603,46 @@ export function LinkVisitClaimPopup({
         }
       } else {
         window.open(shareUrl, '_blank', "noopener,noreferrer");
+      }
+    }
+    
+    onClose();
+  };
+
+  // Handle buy QR
+  const handleBuyQR = async () => {
+    // Track Buy QR button click with Vercel Analytics
+    trackAnalytics(ANALYTICS_EVENTS.BUY_QR_CLICKED, {
+      auction_id: auctionId,
+      context: isWebContext ? 'web' : 'mini_app',
+      source: 'link_visit_claim_popup'
+    });
+    
+    if (isWebContext) {
+      // Web context: redirect to Uniswap
+      const uniswapUrl = 'https://app.uniswap.org/swap?outputCurrency=0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF&chain=base';
+      window.open(uniswapUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      // Mini-app context: use Frame SDK swap
+      try {
+        const result = await frameSdk.swapToken({
+          sellToken: 'eip155:8453/erc20:0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Base USDC
+          buyToken: 'eip155:8453/erc20:0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF', // QR Token
+          sellAmount: '69000000', // 69 USDC (6 decimals)
+        });
+        
+        if (result.success) {
+          toast.success('Swap completed successfully!');
+        } else {
+          if (result.reason === 'rejected_by_user') {
+            toast.info('Swap cancelled by user');
+          } else {
+            toast.error('Swap failed');
+          }
+        }
+      } catch (error) {
+        console.error('Error opening swap:', error);
+        toast.error('Failed to open swap');
       }
     }
     
@@ -689,7 +758,7 @@ export function LinkVisitClaimPopup({
                 transition={{ delay: 0.2 }}
                 className="text-xl font-bold text-foreground"
               >
-                Click to claim 420 $QR!
+                Click to claim 1,000 $QR!
               </motion.h2>
             )}
             
@@ -701,7 +770,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Claim 420 $QR
+                  Claim 1,000 $QR
                 </motion.h2>
               </>
             )}
@@ -791,25 +860,33 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  420 $QR sent to your wallet.
+                  1,000 $QR sent to your wallet.
                 </motion.p>
                 
                 <motion.div
                   initial={{ y: 10, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   transition={{ delay: 0.4 }}
-                  className="w-full flex justify-center mt-2"
+                  className="w-full flex justify-center gap-3 mt-2"
                 >
                   <Button 
                     variant="default" 
                     className={`${
                       isWebContext 
                         ? "bg-[#1DA1F2] hover:bg-[#0d8bd9]" 
-                        : "bg-[#472B92] hover:bg-[#3b2277]"
-                    } text-white px-6 py-2 rounded-md flex items-center focus:outline-none focus:ring-0 h-9`}
+                        : "bg-[#8A63D2] hover:bg-[#7952c4]"
+                    } text-white px-6 py-2 rounded-md flex items-center justify-center focus:outline-none focus:ring-0 h-9 w-20`}
                     onClick={handleShare}
                   >
                     Share
+                  </Button>
+                  
+                  <Button 
+                    variant="default" 
+                    className="bg-black hover:bg-gray-800 text-white dark:bg-white dark:hover:bg-gray-200 dark:text-black px-6 py-2 rounded-md flex items-center justify-center focus:outline-none focus:ring-0 h-9 w-20"
+                    onClick={handleBuyQR}
+                  >
+                    Buy $QR
                   </Button>
                 </motion.div>
               </>

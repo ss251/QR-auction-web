@@ -9,7 +9,10 @@ import { ThemeProvider } from "next-themes";
 import { InfoBar } from "@/components/InfoBar";
 import { Header } from "@/components/Header";
 import { FarcasterLogin } from "@/components/FarcasterLogin";
+import { WorldAutoAuth } from "@/components/WorldAutoAuth";
+// import { MiniAppDebug } from "@/components/MiniAppDebug";
 import { Analytics } from "@vercel/analytics/react";
+import MiniKitProvider from "@/providers/MiniKitProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -95,13 +98,17 @@ export default function RootLayout({
       >
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           <Toaster position="top-center" richColors={true} />
-          <Provider>
-            <InfoBar />
-            <Header />
-            <FarcasterLogin />
-            {children}
-            <Analytics />
-          </Provider>
+          <MiniKitProvider>
+            <Provider>
+              <InfoBar />
+              <Header />
+              <FarcasterLogin />
+              <WorldAutoAuth />
+              {/* <MiniAppDebug /> */}
+              {children}
+              <Analytics />
+            </Provider>
+          </MiniKitProvider>
         </ThemeProvider>
       </body>
     </html>

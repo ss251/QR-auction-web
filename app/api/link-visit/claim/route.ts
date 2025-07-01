@@ -27,14 +27,21 @@ if (!supabaseServiceKey) {
   console.warn('SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database writes may fail due to RLS');
 }
 
-const NON_FC_CLAIM_SOURCES = ['web', 'mobile']
+const NON_FC_CLAIM_SOURCES = ['web', 'mobile', 'world']
 
 // Contract details
 const QR_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN || '';
+const WLD_TOKEN_ADDRESS = process.env.WLD_TOKEN_ADDRESS || '0x2cFc85d8E48F8EAB294be644d9E25C3030863003'; // WLD on World Chain
 
 // Use different contracts based on claim source
 const getContractAddresses = (claimSource: string = 'mini_app') => {
-  if (NON_FC_CLAIM_SOURCES.includes(claimSource)) {
+  if (claimSource === 'world') {
+    // World context: use World-specific contract
+    return {
+      AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS_WORLD || '',
+      ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY_WORLD || ''
+    };
+  } else if (NON_FC_CLAIM_SOURCES.includes(claimSource)) {
     // Web context: use contract 4
     return {
       AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS4 || '',
@@ -55,6 +62,9 @@ const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '';
 const RPC_URL = ALCHEMY_API_KEY ? 
   `${ALCHEMY_RPC_URL}${ALCHEMY_API_KEY}` : 
   'https://mainnet.base.org';
+
+// World Chain RPC URL
+const WORLD_CHAIN_RPC_URL = 'https://worldchain-mainnet.g.alchemy.com/public';
 
 // ERC20 ABI for approval
 const ERC20_ABI = [
@@ -98,6 +108,7 @@ interface LinkVisitRequestData {
   winning_url?: string;
   claim_source?: string;
   captcha_token?: string; // Add captcha token
+  world_id?: string; // Add World ID for World users
   [key: string]: unknown; // Allow other properties
 }
 
@@ -377,7 +388,7 @@ export async function POST(request: NextRequest) {
     
     // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
-    const { fid, address, auction_id, username, winning_url, claim_source } = requestData;
+    const { fid, address, auction_id, username, winning_url, claim_source, world_id } = requestData;
     
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
     const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
@@ -625,13 +636,13 @@ export async function POST(request: NextRequest) {
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
     
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      // Verify auth token for web users (Twitter authentication)
+      // Verify auth token for web/world users
       const authHeader = request.headers.get('authorization');
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Missing or invalid authorization header`);
+        console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Missing or invalid authorization header`);
         return NextResponse.json({ 
           success: false, 
-          error: 'Authentication required. Please sign in with Twitter.' 
+          error: claim_source === 'world' ? 'Authentication required. Please sign in with World ID.' : 'Authentication required. Please sign in with Twitter.' 
         }, { status: 401 });
       }
       
@@ -639,6 +650,7 @@ export async function POST(request: NextRequest) {
       
       // Verify the Privy auth token and extract userId
       let privyUserId: string;
+      let hasWorldId = false;
       try {
         // Verify the auth token with Privy's API
         const verifiedClaims = await privyClient.verifyAuthToken(authToken);
@@ -648,20 +660,35 @@ export async function POST(request: NextRequest) {
           throw new Error('No user ID in token claims');
         }
         
+        // Check if user has World ID linked for World claims
+        if (claim_source === 'world') {
+          // For World users, we check if they have a World ID in their claims
+          const user = await privyClient.getUser(verifiedClaims.userId);
+          hasWorldId = user.linkedAccounts?.some((account: { type: string }) => account.type === 'world_id');
+          
+          if (!hasWorldId) {
+            console.log(`🚫 WORLD AUTH ERROR: IP=${clientIP}, User ${verifiedClaims.userId} does not have World ID linked`);
+            return NextResponse.json({ 
+              success: false, 
+              error: 'World ID verification required. Please authenticate with World ID.' 
+            }, { status: 401 });
+          }
+        }
+        
         // Use the verified Privy userId instead of untrusted username input
         privyUserId = verifiedClaims.userId;
-        console.log(`✅ WEB AUTH: IP=${clientIP}, Verified Privy User: ${privyUserId}`);
+        console.log(`✅ AUTH SUCCESS: IP=${clientIP}, claim_source=${claim_source}, Verified User: ${privyUserId}${hasWorldId ? ' (has World ID)' : ''}`);
       } catch (error) {
-        console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Invalid auth token:`, error);
+        console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Invalid auth token:`, error);
         return NextResponse.json({ 
           success: false, 
           error: 'Invalid authentication. Please sign in again.' 
         }, { status: 401 });
       }
       
-      // Web users need address and auction_id
+      // Web/World users need address and auction_id
       if (!address || !auction_id) {
-        console.log(`🚫 WEB VALIDATION ERROR: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
+        console.log(`🚫 VALIDATION ERROR: IP=${clientIP}, claim_source=${claim_source}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
 
         const addressHash = address?.slice(2).toLowerCase(); // Remove 0x and lowercase
         const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
@@ -682,14 +709,23 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
       }
-      // Create a unique negative FID from wallet address hash for web users
+      // Create a unique negative FID from wallet address hash
       const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
       const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
-      effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
-      effectiveUsername = username || null; // Keep original username from request for display/logging
-      effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
       
-      console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Display username=${username || 'none'}`);
+      if (claim_source === 'world') {
+        // World users get a different FID range
+        effectiveFid = -(hashNumber % 1000000000) - 2000000000; // Add offset for World users
+        effectiveUsername = username || null; // World username from MiniKit
+        effectiveUserId = privyUserId; // Use verified Privy userId
+        console.log(`🌍 WORLD CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, World ID provided=${!!world_id}, Display username=${username || 'none'}`);
+      } else {
+        // Web users (Twitter)
+        effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
+        effectiveUsername = username || null; // Keep original username from request for display/logging
+        effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
+        console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Display username=${username || 'none'}`);
+      }
     } else {
       // Mini-app users need fid, address, auction_id, and username
       if (!fid || !address || !auction_id || !username) {
@@ -945,10 +981,175 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
     
-    // Define airdrop amount (1000 QR tokens)
-    // Assuming 18 decimals for the QR token
-    const airdropAmount = ethers.parseUnits('1000', 18);
+    // Define airdrop amount based on claim source
+    // World users get 1 WLD, others get 1000 QR tokens
+    const isWorldUser = claim_source === 'world';
+    const airdropAmount = isWorldUser 
+      ? ethers.parseUnits('1', 18) // 1 WLD (18 decimals)
+      : ethers.parseUnits('1000', 18); // 1000 QR tokens
     
+    // Handle World users differently - use World Chain for WLD airdrop
+    if (isWorldUser) {
+      console.log(`Preparing World ID claim: 1 WLD to ${address}`);
+      
+      try {
+        // Set up World Chain provider and wallet
+        const worldProvider = new ethers.JsonRpcProvider(WORLD_CHAIN_RPC_URL);
+        const worldContractAddresses = getContractAddresses('world');
+        
+        if (!worldContractAddresses.ADMIN_PRIVATE_KEY) {
+          console.log('World admin private key not configured');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'World configuration error' 
+          }, { status: 500 });
+        }
+        
+        const worldAdminWallet = new ethers.Wallet(worldContractAddresses.ADMIN_PRIVATE_KEY, worldProvider);
+        console.log(`Using World admin wallet: ${worldAdminWallet.address}`);
+        
+        // Check wallet balance on World Chain
+        const worldBalance = await worldProvider.getBalance(worldAdminWallet.address);
+        console.log(`World wallet balance: ${ethers.formatEther(worldBalance)} ETH`);
+        
+        if (worldBalance < ethers.parseEther("0.001")) {
+          console.error('World admin wallet has insufficient ETH for gas');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'World wallet has insufficient gas' 
+          }, { status: 500 });
+        }
+        
+        // Create WLD token contract instance on World Chain
+        const wldTokenContract = new ethers.Contract(
+          WLD_TOKEN_ADDRESS,
+          ERC20_ABI,
+          worldAdminWallet
+        );
+        
+        // Create airdrop contract instance on World Chain
+        const worldAirdropContract = new ethers.Contract(
+          worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
+          AirdropABI.abi,
+          worldAdminWallet
+        );
+        
+        // Check WLD balance
+        const wldBalance = await wldTokenContract.balanceOf(worldAdminWallet.address);
+        console.log(`Admin WLD balance: ${ethers.formatUnits(wldBalance, 18)}`);
+        
+        if (wldBalance < airdropAmount) {
+          console.error('Admin wallet has insufficient WLD for airdrop');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Insufficient WLD balance' 
+          }, { status: 500 });
+        }
+        
+        // Check and approve if needed
+        const allowance = await wldTokenContract.allowance(worldAdminWallet.address, worldContractAddresses.AIRDROP_CONTRACT_ADDRESS);
+        console.log(`Current WLD allowance: ${ethers.formatUnits(allowance, 18)}`);
+        
+        if (allowance < airdropAmount) {
+          console.log('Approving WLD for transfer...');
+          const approveTx = await wldTokenContract.approve(
+            worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
+            airdropAmount
+          );
+          console.log(`WLD approval tx: ${approveTx.hash}`);
+          await approveTx.wait();
+          console.log('WLD approval confirmed');
+        }
+        
+        // Execute the airdrop
+        console.log(`Executing WLD airdrop to ${address}...`);
+        const airdropTx = await executeWithRetry(
+          async (attempt) => {
+            console.log(`Airdrop attempt ${attempt + 1}...`);
+            return await worldAirdropContract.airdrop(
+              [address],
+              [airdropAmount],
+              WLD_TOKEN_ADDRESS,
+              {
+                gasLimit: 200000n
+              }
+            );
+          },
+          3,
+          2000
+        );
+        
+        console.log(`WLD airdrop tx submitted: ${airdropTx.hash}`);
+        
+        // Wait for confirmation with timeout
+        const confirmationPromise = airdropTx.wait();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Transaction confirmation timeout')), 55000)
+        );
+        
+        try {
+          await Promise.race([confirmationPromise, timeoutPromise]);
+          console.log(`✅ WLD airdrop confirmed! TX: ${airdropTx.hash}`);
+        } catch (waitError) {
+          console.error('Error waiting for WLD airdrop confirmation:', waitError);
+          // Even if timeout, the transaction might succeed
+          console.log('Transaction confirmation timeout, but transaction may still succeed');
+        }
+        
+        // Record in link_visit_claims only
+        const { error: insertError } = await supabase
+          .from('link_visit_claims')
+          .insert({
+            fid: effectiveFid,
+            auction_id: auction_id,
+            eth_address: address,
+            link_visited_at: new Date().toISOString(),
+            claimed_at: new Date().toISOString(),
+            amount: 1, // 1 WLD
+            tx_hash: airdropTx.hash,
+            success: true,
+            username: effectiveUsername,
+            user_id: effectiveUserId,
+            winning_url: winningUrl,
+            claim_source: 'world',
+            client_ip: clientIP
+          });
+        
+        if (insertError && insertError.code !== '23505') {
+          console.warn('Error inserting World claim record:', insertError);
+        }
+        
+        return NextResponse.json({ 
+          success: true, 
+          tx_hash: airdropTx.hash,
+          message: 'Successfully airdropped 1 WLD!'
+        });
+        
+      } catch (error) {
+        console.error('Error processing World claim:', error);
+        
+        // Log failed transaction for retry
+        await logFailedTransaction({
+          fid: effectiveFid,
+          eth_address: address,
+          auction_id,
+          username: effectiveUsername,
+          user_id: effectiveUserId,
+          winning_url: winningUrl,
+          error_message: error instanceof Error ? error.message : 'World airdrop failed',
+          error_code: 'WORLD_AIRDROP_ERROR',
+          request_data: requestData as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Failed to process World claim' 
+        }, { status: 500 });
+      }
+    }
+    
+    // Non-World users continue with regular contract-based airdrop
     console.log(`Preparing airdrop of 1,000 QR tokens to ${address}`);
     
       // Create contract instances using the dynamic contract from wallet pool

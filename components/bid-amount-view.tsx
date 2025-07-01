@@ -31,6 +31,7 @@ import { base } from "viem/chains";
 import { frameSdk } from "@/lib/frame-sdk-singleton";
 import { usePrivy, useConnectWallet } from "@privy-io/react-auth";
 import { hapticActions } from "@/lib/haptics";
+import { useIsMiniApp } from "@/hooks/useIsMiniApp";
 
 // Polling configuration
 const BALANCE_POLL_INTERVAL = 3000; // 3 seconds
@@ -76,6 +77,7 @@ export function BidForm({
   const { handleTypingStart } = useTypingStatus();
   const { fetchHistoricalAuctions: bidHistoryFetcher } = useFetchBidsSubgraph(auctionDetail?.tokenId);
   const isFrame = useRef(false);
+  const { miniAppType } = useIsMiniApp();
   
   // Add Privy hooks
   const { login, authenticated, user } = usePrivy();
@@ -772,6 +774,12 @@ export function BidForm({
     
     // Trigger haptic feedback for form submission
     await hapticActions.primaryButtonPress();
+    
+    // Redirect World users to qrcoin.fun for bidding
+    if (miniAppType === 'world') {
+      window.location.href = 'https://qrcoin.fun';
+      return;
+    }
 
     // Check if we have a valid connection - this could be EOA, smart wallet, or frame wallet
     const hasFrameWallet = isFrame.current && !!frameWalletAddress.current;

@@ -42,14 +42,17 @@ import { broadcastConnection } from "@/lib/channelManager";
 import { frameSdk } from "@/lib/frame-sdk-singleton";
 import { useIsMiniApp } from "@/hooks/useIsMiniApp";
 import { motion, AnimatePresence, useDragControls, PanInfo } from "framer-motion";
+import { useWorldcoinAuth } from "@/hooks/useWorldcoinAuth";
 
 // Import the frame detection functions from privyConfig
 import { isInFarcasterFrame, isInWarpcastIframe } from "@/config/privyConfig";
 
 // --- Constants ---
 const BASE_MAINNET_ID = 8453;
+const WORLD_CHAIN_ID = 480;
 const USDC_ADDRESS = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as Address; // Base Mainnet USDC
 const QR_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN as Address;
+const WLD_ADDRESS = "0x2cFc85d8E48F8EAB294be644d9E25C3030863003" as Address; // WLD token on World Chain
 
 // Define Token type
 type Token = "ETH" | "USDC" | "$QR";
@@ -94,9 +97,17 @@ export function CustomWallet() {
   const [selectedToken, setSelectedToken] = useState<Token>("ETH");
   const [isSending, setIsSending] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false); // Track connection state
-  const { isMiniApp: isFrame } = useIsMiniApp(); // Use hook to detect mini app context
+  const { isMiniApp: isFrame, miniAppType } = useIsMiniApp(); // Use hook to detect mini app context
   // We'll use frameUser object to store all frame context user data
   const [frameUser, setFrameUser] = useState<FrameUser | null>(null);
+  
+  // World authentication hook
+  const { 
+    user: worldUser, 
+    isAuthenticated: isWorldAuthenticated,
+    authenticateWithWorldcoin,
+    isAuthenticating: isWorldAuthenticating 
+  } = useWorldcoinAuth();
   const [copied, setCopied] = useState(false); // Track whether the address was just copied
   const [frameWalletAddress, setFrameWalletAddress] = useState<string | null>(null); // Track wallet address in frame context
   
@@ -191,6 +202,21 @@ export function CustomWallet() {
   
   // Helper function to determine avatar fallback content
   const getAvatarFallback = () => {
+    // World users in World Mini App
+    if (miniAppType === 'world' && isWorldAuthenticated && worldUser) {
+      // First check MiniKit username directly
+      if (worldUser.username) {
+        return worldUser.username.substring(0, 1).toUpperCase();
+      }
+      
+      // Fallback to linked accounts
+      const worldAccount = worldUser.linkedAccounts?.find((account: { type: string; username?: string }) => account.type === 'world_id');
+      if (worldAccount && 'username' in worldAccount && worldAccount.username && typeof worldAccount.username === 'string') {
+        return worldAccount.username.substring(0, 1).toUpperCase();
+      }
+      return "W"; // World icon fallback
+    }
+    
     if (twitterUsername) {
       return twitterUsername.substring(0, 1).toUpperCase();
     } else if (farcasterUsername) {
@@ -209,6 +235,28 @@ export function CustomWallet() {
 
   // NEW: Helper function to get the primary display name
   const getPrimaryDisplayName = () => {
+    // World users in World Mini App - prioritize username
+    if (miniAppType === 'world' && isWorldAuthenticated && worldUser) {
+      // First check MiniKit username directly
+      if (worldUser.username) {
+        return `@${worldUser.username}`;
+      }
+      
+      // Fallback to linked accounts
+      const worldAccount = worldUser.linkedAccounts?.find((account: { type: string; username?: string; subject?: string }) => account.type === 'world_id');
+      if (worldAccount && 'username' in worldAccount && worldAccount.username && typeof worldAccount.username === 'string') {
+        return `@${worldAccount.username}`;
+      }
+      
+      // Last resort: truncated World ID
+      if (worldAccount && 'subject' in worldAccount && worldAccount.subject && typeof worldAccount.subject === 'string') {
+        return `world_${worldAccount.subject.slice(0, 6)}`;
+      }
+      
+      // Very last resort: "World User"
+      return "World User";
+    }
+    
     if (twitterUsername) {
       return `@${twitterUsername}`;
     } else if (farcasterUsername) {
@@ -345,9 +393,18 @@ export function CustomWallet() {
   const finalSmartWalletAddress = smartWalletAddressFromUser || smartWalletAddress;
   
   // Use frameWalletAddress in frame context if available
-  const displayAddress = isFrame && frameWalletAddress 
-    ? frameWalletAddress as Address
-    : finalSmartWalletAddress ?? eoaAddress;
+  const displayAddress = (() => {
+    // For World Mini App users, use their wallet address
+    if (miniAppType === 'world' && isWorldAuthenticated && worldUser?.walletAddress) {
+      return worldUser.walletAddress as Address;
+    }
+    // For Farcaster frame users
+    if (isFrame && frameWalletAddress) {
+      return frameWalletAddress as Address;
+    }
+    // Default to smart wallet or EOA
+    return finalSmartWalletAddress ?? eoaAddress;
+  })();
   const headerAddress = eoaAddress;
   
   // Debug logging
@@ -407,6 +464,28 @@ export function CustomWallet() {
     },
   });
 
+  // Separate query for WLD balance on World Chain
+  const { data: wldBalance, isLoading: wldLoading } = useReadContracts({
+    contracts: [
+      { 
+        address: WLD_ADDRESS, 
+        abi: erc20Abi, 
+        functionName: "balanceOf", 
+        args: [displayAddress!],
+        chainId: WORLD_CHAIN_ID
+      },
+      { 
+        address: WLD_ADDRESS, 
+        abi: erc20Abi, 
+        functionName: "decimals",
+        chainId: WORLD_CHAIN_ID
+      },
+    ],
+    query: {
+      enabled: !!displayAddress && miniAppType === 'world',
+    },
+  });
+
   // Track authentication state changes to broadcast connections
   useEffect(() => {
     if (authenticated && eoaAddress) {
@@ -449,6 +528,24 @@ export function CustomWallet() {
   const ethBalanceFormatted = useMemo(() => {
       return parseFloat(formatEther(ethBalance?.value ?? 0n));
   }, [ethBalance]);
+
+  // Format WLD balance
+  const wldBalanceFormatted = useMemo(() => {
+    if (!wldBalance || wldBalance.length < 2) return 0;
+    const wldDecimals = wldBalance[1]?.result ?? 18;
+    const wldRaw = wldBalance[0]?.result ?? 0n;
+    
+    const formatBalance = (raw: bigint, decimals: number): number => {
+        if (!raw || !decimals) return 0;
+        const divisor = 10n ** BigInt(decimals);
+        const integerPart = raw / divisor;
+        const fractionalPart = raw % divisor;
+        const fractionalString = fractionalPart.toString().padStart(decimals, '0');
+        return parseFloat(`${integerPart}.${fractionalString}`);
+    }
+    
+    return formatBalance(wldRaw as bigint, wldDecimals as number);
+  }, [wldBalance]);
 
   // Detect if we're on mobile
   const isMobile = useMemo(() => {
@@ -509,6 +606,22 @@ export function CustomWallet() {
     }
     
     try {
+      // Check if this is World Mini App
+      if (miniAppType === 'world') {
+        if (!isWorldAuthenticated) {
+          // Authenticate with World ID
+          setIsConnecting(true);
+          const result = await authenticateWithWorldcoin();
+          setIsConnecting(false);
+          if (result) {
+            toast.success("Successfully authenticated with World ID!");
+          } else {
+            toast.error("World authentication failed. Please try again.");
+          }
+        }
+        return;
+      }
+      
       if (isFrame) {
         if (DEBUG) {
           // In frame context, use Frame SDK's connect wallet function directly
@@ -859,6 +972,23 @@ export function CustomWallet() {
     e.preventDefault();
     e.stopPropagation();
     
+    // Check if we're in World Mini App context
+    if (miniAppType === 'world' && !isWorldAuthenticated) {
+      // Don't close dialog for World auth
+      setIsConnecting(true);
+      
+      // Authenticate with World ID
+      authenticateWithWorldcoin().then(() => {
+        setIsConnecting(false);
+        toast.success("Successfully authenticated with World ID!");
+      }).catch((error) => {
+        console.error("World authentication error:", error);
+        toast.error("World authentication failed. Please try again.");
+        setIsConnecting(false);
+      });
+      return;
+    }
+    
     // First close our dialog to avoid showing multiple modals
     setIsOpen(false);
     
@@ -1005,14 +1135,18 @@ export function CustomWallet() {
       >
           <Avatar className="h-8 w-8 border rounded-full overflow-hidden md:h-8 md:w-8"> 
             <AvatarImage 
-              src={frameUser?.pfpUrl ?? undefined} 
-              alt={frameUser?.displayName ?? "Profile"} 
+              src={miniAppType === 'world' ? worldUser?.profilePictureUrl : frameUser?.pfpUrl ?? undefined} 
+              alt={miniAppType === 'world' ? worldUser?.username ?? "World User" : frameUser?.displayName ?? "Profile"} 
               className="object-cover"
             />
           <AvatarFallback className="text-xs bg-muted">
-              {frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
-               frameUser?.username?.substring(0, 2)?.toUpperCase() || 
-               <Wallet className="h-3 w-3 md:h-4 md:w-4" />}
+              {miniAppType === 'world' ? (
+                worldUser?.username?.substring(0, 2)?.toUpperCase() || <Wallet className="h-3 w-3 md:h-4 md:w-4" />
+              ) : (
+                frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
+                frameUser?.username?.substring(0, 2)?.toUpperCase() || 
+                <Wallet className="h-3 w-3 md:h-4 md:w-4" />
+              )}
           </AvatarFallback>
         </Avatar>
         </Button>
@@ -1059,20 +1193,30 @@ export function CustomWallet() {
                   <div className="flex items-center gap-3 mb-3">
                     <Avatar className="h-10 w-10 border border-border/30 rounded-full overflow-hidden shadow-sm">
                       <AvatarImage 
-                        src={frameUser?.pfpUrl ?? undefined} 
-                        alt={frameUser?.displayName ?? "Profile"} 
+                        src={miniAppType === 'world' ? worldUser?.profilePictureUrl : frameUser?.pfpUrl ?? undefined} 
+                        alt={miniAppType === 'world' ? worldUser?.username ?? "World User" : frameUser?.displayName ?? "Profile"} 
                         className="object-cover"
                       />
                       <AvatarFallback className="text-sm">
-                        {frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
-                         frameUser?.username?.substring(0, 2)?.toUpperCase() || 
-                        <UserCircle className="h-5 w-5" />}
+                        {miniAppType === 'world' ? (
+                          worldUser?.username?.substring(0, 2)?.toUpperCase() || <UserCircle className="h-5 w-5" />
+                        ) : (
+                          frameUser?.displayName?.substring(0, 2)?.toUpperCase() || 
+                          frameUser?.username?.substring(0, 2)?.toUpperCase() || 
+                          <UserCircle className="h-5 w-5" />
+                        )}
                       </AvatarFallback>
                     </Avatar>
                     
                     <div className="flex-1">
                       <h3 className="text-sm font-medium -mb-0.5 line-clamp-1">
-                        {(frameUser?.username ? `@${frameUser.username}` : "Anonymous")}
+                        {miniAppType === 'world' ? (
+                          isWorldAuthenticated && worldUser ? 
+                            getPrimaryDisplayName() || "World User" : 
+                            "Sign in with World ID"
+                        ) : (
+                          frameUser?.username ? `@${frameUser.username}` : "Anonymous"
+                        )}
                       </h3>
                       
                       {displayAddress && (
@@ -1096,7 +1240,7 @@ export function CustomWallet() {
                     </div>
                   </div>
                   
-                  {hasConnectedWallet ? (
+                  {(hasConnectedWallet || (miniAppType === 'world' && isWorldAuthenticated)) ? (
                     <div className="space-y-3">
                       {/* Token balances in a compact card layout */}
                       <div className="grid grid-cols-3 gap-2">
@@ -1118,22 +1262,39 @@ export function CustomWallet() {
                           <span className="text-[10px] text-muted-foreground">USDC</span>
                         </div>
                         
-                        {/* QR balance */}
+                        {/* QR balance or WLD for World users */}
                         <div className="rounded-lg bg-muted/30 p-2.5 flex flex-col items-center justify-center">
-                          <Image 
-                            src="/qrLogoWebsite.png" 
-                            alt="$QR" 
-                            width={18} 
-                            height={18}
-                            className="mb-1" 
-                          />
-                          <span className="text-xs font-mono">
-                            {tokensLoading ? 
-                              <Skeleton className="h-3 w-10" /> : 
-                              new Intl.NumberFormat().format(qrBalance)
-                            }
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">$QR</span>
+                          {miniAppType === 'world' ? (
+                            <>
+                              <div className="w-[18px] h-[18px] mb-1 bg-black rounded-full flex items-center justify-center">
+                                <span className="text-white text-[10px] font-bold">W</span>
+                              </div>
+                              <span className="text-xs font-mono">
+                                {wldLoading ? 
+                                  <Skeleton className="h-3 w-10" /> : 
+                                  wldBalanceFormatted.toFixed(2)
+                                }
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">WLD</span>
+                            </>
+                          ) : (
+                            <>
+                              <Image 
+                                src="/qrLogoWebsite.png" 
+                                alt="$QR" 
+                                width={18} 
+                                height={18}
+                                className="mb-1" 
+                              />
+                              <span className="text-xs font-mono">
+                                {tokensLoading ? 
+                                  <Skeleton className="h-3 w-10" /> : 
+                                  new Intl.NumberFormat().format(qrBalance)
+                                }
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">$QR</span>
+                            </>
+                          )}
                         </div>
                         
                         {/* ETH balance */}
@@ -1175,8 +1336,11 @@ export function CustomWallet() {
                         className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-11 text-sm font-medium" 
                         onClick={handleConnectInDrawer}
                       >
-                        <Wallet className="mr-2 h-4 w-4" /> 
-                        Connect Wallet
+                        {miniAppType === 'world' ? (
+                          <>Sign in with World ID</>
+                        ) : (
+                          <><Wallet className="mr-2 h-4 w-4" /> Connect Wallet</>
+                        )}
                       </Button>
                       
                       <p className="text-xs text-center text-muted-foreground px-3">
@@ -1238,13 +1402,43 @@ export function CustomWallet() {
             )}
             onClick={handleConnectWallet}
           >
-            {/* NEW: Show "Sign in" for website context, "Connect Wallet" for others */}
-            <span className="md:inline">{isWebsiteContext ? "Sign in" : "Connect Wallet"}</span>
+            {/* Show "Sign in" for World Mini App context */}
+            <span className="md:inline">{miniAppType === 'world' ? "Sign in" : (isWebsiteContext ? "Sign in" : "Connect Wallet")}</span>
           </Button>
         )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] max-h-[80vh] overflow-y-auto mt-8 md:mt-0 p-3 sm:p-6">
-        {authenticated && (
+        {/* Show World sign-in UI if in World context and not authenticated */}
+        {miniAppType === 'world' && !isWorldAuthenticated ? (
+          <div className="space-y-4 pt-4">
+            <div className="text-center space-y-2">
+              <div className="mx-auto h-12 w-12 text-muted-foreground/50 flex items-center justify-center">
+                <img src="/qrLogo.png" alt="World" className="h-12 w-12" />
+              </div>
+              <h3 className="text-lg font-medium">Sign in with World ID</h3>
+              <p className="text-sm text-muted-foreground">
+                Authenticate with your World ID to claim WLD tokens
+              </p>
+            </div>
+            
+            <Button 
+              onClick={handleConnectWallet}
+              className="w-full bg-primary text-primary-foreground hover:bg-primary/90 h-11 text-sm font-medium"
+              disabled={isConnecting || isWorldAuthenticating}
+            >
+              {isConnecting || isWorldAuthenticating ? (
+                <span className="flex items-center justify-center">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Authenticating...
+                </span>
+              ) : (
+                <span className="flex items-center justify-center">
+                  Sign in with World ID
+                </span>
+              )}
+            </Button>
+          </div>
+        ) : authenticated && (
             <> 
                 <DialogHeader className="pb-2">
                   <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
@@ -1311,6 +1505,17 @@ export function CustomWallet() {
                         </DialogTitle>
                         {isOnBase ? (
                             <>
+                                {/* Show WLD balance for World users */}
+                                {miniAppType === 'world' && (
+                                    <div className="flex justify-between items-center text-xs sm:text-sm">
+                                        <span className="text-muted-foreground flex items-center gap-1.5">
+                                            <Image src="/qrLogo.png" alt="WLD" width={14} height={14} className="sm:w-4 sm:h-4 rounded-full" /> WLD
+                                        </span>
+                                        {wldLoading ? <Skeleton className="h-4 w-16" /> :
+                                        <span className="font-mono">{wldBalanceFormatted.toFixed(2)}</span>
+                                        }
+                                    </div>
+                                )}
                                 <div className="flex justify-between items-center text-xs sm:text-sm">
                                     <span className="text-muted-foreground flex items-center gap-1.5">
                                         <Image src="https://www.cryptologos.cc/logos/usd-coin-usdc-logo.png?v=040" alt="USDC" width={14} height={14} className="sm:w-4 sm:h-4" /> USDC

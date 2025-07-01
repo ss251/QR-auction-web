@@ -38,6 +38,8 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   const [frameContext, setFrameContext] = useState<Context.FrameContext | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const frameCheckIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [worldWalletAddress, setWorldWalletAddress] = useState<string | null>(null);
+  const [worldUsername, setWorldUsername] = useState<string | null>(null);
   
   // Web-specific hooks
   const { authenticated, user } = usePrivy();
@@ -50,7 +52,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   // Use appropriate wallet address based on context
   const effectiveWalletAddress = isWebContext 
     ? (smartWalletAddress || smartWalletClient?.account?.address || address)
-    : walletAddress;
+    : (worldWalletAddress || walletAddress);
   
   // Get Twitter username for web context
   const getTwitterUsername = useCallback(() => {
@@ -65,9 +67,40 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     return twitterAccount?.username || null;
   }, [isWebContext, authenticated, user?.linkedAccounts]);
   
+  // Check if World Mini App - use consistent detection
+  const checkWorldMiniApp = useCallback(async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        const { MiniKit } = await import('@worldcoin/minikit-js');
+        const isInstalled = MiniKit.isInstalled();
+        if (isInstalled) {
+          // Get both wallet address and username
+          const walletAddress = MiniKit.user?.walletAddress;
+          const username = MiniKit.user?.username;
+          
+          if (walletAddress) {
+            setWorldWalletAddress(walletAddress);
+          }
+          if (username) {
+            setWorldUsername(username);
+          }
+          
+          return !!(walletAddress || username);
+        }
+      } catch (error) {
+        console.error('Error checking World Mini App:', error);
+      }
+    }
+    return false;
+  }, []);
+
   // Initialize frame context (only for mini-app)
   const initializeFrameContext = useCallback(async () => {
     if (isWebContext) return;
+    
+    // Check if it's World Mini App first
+    const isWorld = await checkWorldMiniApp();
+    if (isWorld) return;
     
     try {
       // Use SDK singleton with built-in caching
@@ -86,7 +119,7 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     } catch (error) {
       console.error('Error initializing frame context:', error);
     }
-  }, [isWebContext, walletAddress]);
+  }, [isWebContext, walletAddress, checkWorldMiniApp]);
   
   // Set up frame context polling with reduced frequency
   useEffect(() => {
@@ -109,6 +142,8 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
   // Build query key based on context
   const queryKey = isWebContext
     ? linkVisitKeys.byUser(auctionId, effectiveWalletAddress || getTwitterUsername() || 'unknown')
+    : worldUsername || worldWalletAddress
+    ? linkVisitKeys.byUser(auctionId, worldUsername || worldWalletAddress || 'unknown')
     : linkVisitKeys.byUser(auctionId, frameContext?.user?.fid?.toString() || 'unknown');
   
   // Query function to check link visit status
@@ -196,8 +231,53 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
       }
       
       return { hasClicked: false, hasClaimed: false };
+    } else if (worldUsername || worldWalletAddress) {
+      // World Mini App context - check by username first, then wallet address
+      let data = null;
+      let error = null;
+      
+      // Primary: Check by username if available
+      if (worldUsername) {
+        const { data: usernameData, error: usernameError } = await supabase
+          .from('link_visit_claims')
+          .select('*')
+          .eq('username', worldUsername)
+          .eq('auction_id', auctionId)
+          .eq('claim_source', 'world')
+          .maybeSingle();
+        
+        data = usernameData;
+        error = usernameError;
+      }
+      
+      // Fallback: Check by wallet address if username check didn't find anything
+      if (!data && worldWalletAddress) {
+        const { data: addressData, error: addressError } = await supabase
+          .from('link_visit_claims')
+          .select('*')
+          .eq('eth_address', worldWalletAddress)
+          .eq('auction_id', auctionId)
+          .eq('claim_source', 'world')
+          .maybeSingle();
+        
+        data = addressData;
+        error = addressError;
+      }
+      
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error checking World user status:', error);
+      }
+      
+      if (data) {
+        return {
+          hasClicked: !!data.link_visited_at,
+          hasClaimed: !!data.claimed_at
+        };
+      }
+      
+      return { hasClicked: false, hasClaimed: false };
     } else {
-      // Mini-app context
+      // Farcaster Mini-app context
       if (!frameContext?.user?.fid) {
         return { hasClicked: false, hasClaimed: false };
       }
@@ -232,6 +312,8 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
     // Only enable query when we have the necessary data
     enabled: isWebContext 
       ? !!(effectiveWalletAddress || getTwitterUsername()) && !!auctionId
+      : (worldUsername || worldWalletAddress)
+      ? !!(worldUsername || worldWalletAddress) && !!auctionId
       : !!frameContext?.user?.fid && !!auctionId,
     // Stale time of 30 seconds - data is fresh for 30 seconds
     staleTime: 30 * 1000,
@@ -264,6 +346,44 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
             user_id: privyUserId
           }, {
             onConflict: 'eth_address,auction_id'
+          });
+        
+        if (error) throw error;
+      } else if (worldUsername || worldWalletAddress) {
+        // World Mini App context - prioritize username
+        if ((!worldUsername && !worldWalletAddress) || !auctionId) throw new Error('Missing required data');
+        
+        const MiniKit = typeof window !== 'undefined' ? (window as unknown as { MiniKit: typeof import('@worldcoin/minikit-js').MiniKit }).MiniKit : null;
+        const username = worldUsername || MiniKit?.user?.username;
+        const walletAddress = worldWalletAddress || MiniKit?.user?.walletAddress;
+        
+        // Generate a unique negative FID for World users (use username hash if available)
+        let worldFid: number;
+        if (username) {
+          // Use username for FID generation (more stable than wallet address)
+          const usernameHash = username.toLowerCase();
+          const hashNumber = usernameHash.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+          worldFid = -(hashNumber % 1000000000) - 2000000000;
+        } else if (walletAddress) {
+          // Fallback to wallet address hash
+          const addressHash = walletAddress.slice(2).toLowerCase();
+          const hashNumber = parseInt(addressHash.slice(0, 8), 16);
+          worldFid = -(hashNumber % 1000000000) - 2000000000;
+        } else {
+          throw new Error('No World user identifier available');
+        }
+        
+        const { error } = await supabase
+          .from('link_visit_claims')
+          .upsert({
+            fid: worldFid,
+            auction_id: auctionId,
+            link_visited_at: new Date().toISOString(),
+            eth_address: walletAddress || null,
+            claim_source: 'world',
+            username: username || null
+          }, {
+            onConflict: username ? 'username,auction_id' : 'eth_address,auction_id'
           });
         
         if (error) throw error;
@@ -323,6 +443,60 @@ export function useLinkVisitEligibility(auctionId: number, isWebContext: boolean
           });
         
         if (error) throw error;
+      } else if (worldUsername || worldWalletAddress) {
+        // World Mini App context - record World claim (prioritize username)
+        if ((!worldUsername && !worldWalletAddress) || !auctionId) throw new Error('Missing required data');
+        
+        const MiniKit = typeof window !== 'undefined' ? (window as unknown as { MiniKit: typeof import('@worldcoin/minikit-js').MiniKit }).MiniKit : null;
+        const username = worldUsername || MiniKit?.user?.username;
+        const walletAddress = worldWalletAddress || MiniKit?.user?.walletAddress;
+        
+        // Generate a unique negative FID for World users (use username hash if available)
+        let worldFid: number;
+        if (username) {
+          // Use username for FID generation (more stable than wallet address)
+          const usernameHash = username.toLowerCase();
+          const hashNumber = usernameHash.split('').reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
+          worldFid = -(hashNumber % 1000000000) - 2000000000;
+        } else if (walletAddress) {
+          // Fallback to wallet address hash
+          const addressHash = walletAddress.slice(2).toLowerCase();
+          const hashNumber = parseInt(addressHash.slice(0, 8), 16);
+          worldFid = -(hashNumber % 1000000000) - 2000000000;
+        } else {
+          throw new Error('No World user identifier available');
+        }
+        
+        // Record in link_visit_claims for consistency
+        const { error } = await supabase
+          .from('link_visit_claims')
+          .upsert({
+            fid: worldFid,
+            auction_id: auctionId,
+            eth_address: walletAddress || null,
+            claimed_at: new Date().toISOString(),
+            amount: 1, // 1 WLD for World users
+            tx_hash: txHash,
+            success: !!txHash,
+            claim_source: 'world',
+            username: username || null
+          }, {
+            onConflict: username ? 'username,auction_id' : 'eth_address,auction_id'
+          });
+        
+        if (error) throw error;
+        
+        // Also update worldcoin_claims if username is available (World ID = username)
+        if (username && txHash) {
+          await supabase
+            .from('worldcoin_claims')
+            .update({
+              status: 'completed',
+              updated_at: new Date().toISOString()
+            })
+            .eq('world_id', username) // World ID is the username
+            .eq('auction_id', auctionId);
+        }
       } else {
         if (!frameContext?.user?.fid || !effectiveWalletAddress || !auctionId) throw new Error('Missing required data');
         

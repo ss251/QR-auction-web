@@ -9,6 +9,7 @@ import { usePrivy, useConnectWallet } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { getFarcasterUser } from '@/utils/farcaster';
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
+import { useWorldcoinAuth } from '@/hooks/useWorldcoinAuth';
 
 // Initialize Supabase client once, outside the component
 const supabase = createClient(
@@ -149,17 +150,38 @@ export function LinkVisitProvider({
     return twitterAccount?.username || null;
   }, [authenticated, user?.linkedAccounts]);
   
+  // Import miniAppType to detect World Mini App
+  const [miniAppType, setMiniAppType] = useState<'farcaster' | 'world' | null>(null);
+  
+  // Import World authentication hook
+  const { isAuthenticated: isWorldAuthenticated } = useWorldcoinAuth();
+  
   // Detect if we're in web context vs mini-app context
   useEffect(() => {
     async function detectContext() {
       try {
-        // Check if we're in a mini app
+        // Check if we're in a Farcaster mini app
         const { frameSdk } = await import('@/lib/frame-sdk-singleton');
-        const isMiniApp = await frameSdk.isInMiniApp();
-        setIsWebContext(!isMiniApp);
+        const isFarcasterMiniApp = await frameSdk.isInMiniApp();
+        
+        // Check if we're in a World mini app
+        const { MiniKit } = await import('@worldcoin/minikit-js');
+        const isWorldMiniApp = MiniKit.isInstalled();
+        
+        if (isFarcasterMiniApp) {
+          setMiniAppType('farcaster');
+          setIsWebContext(false);
+        } else if (isWorldMiniApp) {
+          setMiniAppType('world');
+          setIsWebContext(false); // Treat World Mini App like Farcaster mini-app
+        } else {
+          setMiniAppType(null);
+          setIsWebContext(true);
+        }
       } catch {
         // If check fails, we're in web context
         setIsWebContext(true);
+        setMiniAppType(null);
       }
     }
     
@@ -180,7 +202,7 @@ export function LinkVisitProvider({
       
       return () => clearTimeout(timer);
     } else {
-      // For mini-app context, we don't rely on Privy auth
+      // For mini-app context, auth check is complete immediately
       setAuthCheckComplete(true);
     }
   }, [isWebContext, authenticated]);
@@ -202,7 +224,7 @@ export function LinkVisitProvider({
         setWalletStatusDetermined(true);
       }
     } else {
-      // For mini-app context, wallet status depends on frameContext
+      // For mini-app context, wallet status is determined immediately
       setWalletStatusDetermined(true);
     }
   }, [authCheckComplete, isWebContext, authenticated, effectiveWalletAddress]);
@@ -318,7 +340,12 @@ export function LinkVisitProvider({
       }
     } else {
       // Mini-app logic (existing)
-      if (!effectiveWalletAddress || !eligibilityFrameContext?.user?.fid || !latestWonAuctionId) {
+      // For World users, only need wallet address. For Farcaster, need FID.
+      const hasRequiredData = miniAppType === 'world' ? 
+        effectiveWalletAddress : 
+        (effectiveWalletAddress && eligibilityFrameContext?.user?.fid);
+        
+      if (!hasRequiredData || !latestWonAuctionId) {
         setManualHasClaimedLatest(false);
         setExplicitlyCheckedClaim(true);
         setIsCheckingDatabase(false);
@@ -327,9 +354,6 @@ export function LinkVisitProvider({
       
       try {
         
-        // Get the Farcaster username from frame context
-        const farcasterUsername = eligibilityFrameContext.user.username;
-        
         // Check for ANY claims by this wallet address for this auction (regardless of claim_source)
         const { data: allClaims, error } = await supabase
           .from('link_visit_claims')
@@ -337,9 +361,10 @@ export function LinkVisitProvider({
           .eq('eth_address', effectiveWalletAddress)
           .eq('auction_id', latestWonAuctionId);
         
-        // Also check for claims by the Farcaster username
+        // For Farcaster users, also check by username. For World users, skip username check.
         let usernameClaims: typeof allClaims = [];
-        if (farcasterUsername) {
+        if (miniAppType === 'farcaster' && eligibilityFrameContext?.user?.username) {
+          const farcasterUsername = eligibilityFrameContext.user.username;
           const { data: usernameClaimsData, error: usernameError } = await supabase
             .from('link_visit_claims')
             .select('*')
@@ -387,7 +412,7 @@ export function LinkVisitProvider({
         setIsCheckingLatestAuction(true);
         setExplicitlyCheckedClaim(false); // Reset claim check flag when getting new auction data
         
-        // Query the winners table to get the latest auction
+        // Query the winners table to get the latest auction (use service role to bypass RLS)
         const { data: latestWinner, error } = await supabase
           .from('winners')
           .select('token_id, url')
@@ -395,8 +420,11 @@ export function LinkVisitProvider({
           .limit(1);
         
         if (error) {
+          console.error('❌ Error fetching latest winner:', error);
           return;
         }
+        
+        console.log('✅ Latest winner query result:', latestWinner);
         
         if (latestWinner && latestWinner.length > 0) {
           const latestTokenId = parseInt(latestWinner[0].token_id);
@@ -463,12 +491,25 @@ export function LinkVisitProvider({
         }
       }
     } else {
-      // Mini-app context: check when we have frame context and wallet status is determined
-      if (latestWonAuctionId && eligibilityFrameContext?.user?.fid && !explicitlyCheckedClaim && walletStatusDetermined) {
-        checkClaimStatusForLatestAuction();
+      // Mini-app context: check when we have required data
+      // For World, just need wallet address. For Farcaster, need FID.
+      const hasRequiredData = miniAppType === 'world' ? 
+        effectiveWalletAddress : 
+        eligibilityFrameContext?.user?.fid;
+        
+      if (latestWonAuctionId && !explicitlyCheckedClaim && walletStatusDetermined) {
+        if (hasRequiredData) {
+          checkClaimStatusForLatestAuction();
+        } else {
+          // For World users without wallet address, assume no previous claim
+          setIsCheckingDatabase(true);
+          setManualHasClaimedLatest(false);
+          setExplicitlyCheckedClaim(true);
+          setIsCheckingDatabase(false);
+        }
       }
     }
-  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined]);
+  }, [latestWonAuctionId, effectiveWalletAddress, eligibilityFrameContext, explicitlyCheckedClaim, checkClaimStatusForLatestAuction, isWebContext, walletStatusDetermined, miniAppType]);
   
   // Reset eligibility check when hasClicked or hasClaimed or manualHasClaimedLatest changes
   useEffect(() => {
@@ -651,10 +692,16 @@ export function LinkVisitProvider({
         } else {
         }
       } else {
-        // Mini-app logic - use combined claim status
+        // Mini-app logic - simplified for World users
         const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
         
-        if (!combinedHasClaimed && latestWonAuctionId && !isLoading) {
+        // For World users, show popup if they haven't claimed (regardless of auth state)
+        // For Farcaster users, show popup if they haven't claimed
+        const shouldShowPopup = miniAppType === 'world' ? 
+          !combinedHasClaimed :
+          (!combinedHasClaimed && !isLoading);
+        
+        if (shouldShowPopup && latestWonAuctionId && !isLoading) {
           const granted = requestPopup('linkVisit');
           if (granted) {
             setShowClaimPopup(true);
@@ -667,7 +714,7 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, miniAppType, isWorldAuthenticated]);
   
   // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
@@ -737,13 +784,17 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     } else {
-      // Mini-app logic (existing)
+      // Mini-app logic - simplified for World users
       
       // Use combined claim status (same as context value)
       const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
       
-      // Only show popup if the user hasn't claimed for the latest won auction
-      if (!combinedHasClaimed && latestWonAuctionId) {
+      // For World users, always show popup if they haven't claimed. For Farcaster, check authentication.
+      const shouldShowMiniAppPopup = miniAppType === 'world' ? 
+        !combinedHasClaimed :
+        (!combinedHasClaimed && latestWonAuctionId);
+      
+      if (shouldShowMiniAppPopup && latestWonAuctionId) {
         
         const timer = setTimeout(() => {
           const granted = requestPopup('linkVisit');
@@ -755,13 +806,10 @@ export function LinkVisitProvider({
         
         return () => clearTimeout(timer);
       } else {
-        if (combinedHasClaimed) {
-        } else if (!latestWonAuctionId) {
-        }
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, requestPopup]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, requestPopup, miniAppType, isWorldAuthenticated]);
   
   // NEW: Track when Privy modal is active to prevent popup interference
   const [isPrivyModalActive, setIsPrivyModalActive] = useState(false);

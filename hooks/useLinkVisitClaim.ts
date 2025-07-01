@@ -4,11 +4,13 @@ import { frameSdk } from '@/lib/frame-sdk-singleton';
 import { usePrivy } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
+import { useIsMiniApp } from './useIsMiniApp';
 
 export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = false) {
   const [isClaimLoading, setIsClaimLoading] = useState(false);
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
+  const { miniAppType } = useIsMiniApp();
 
   // Web-specific hooks
   const { authenticated, user, getAccessToken } = usePrivy();
@@ -171,6 +173,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
 
   // Claim the tokens
   const claimTokens = async (captchaToken?: string): Promise<{ txHash?: string }> => {
+    const isWorldApp = miniAppType === 'world';
+    
     if (isWebContext) {
       // Web context: validate wallet connection
       if (!effectiveWalletAddress || !authenticated) {
@@ -186,8 +190,14 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         effectiveAddress: effectiveWalletAddress,
         isUsingSmartWallet: Boolean(smartWalletAddress || smartWalletClient?.account?.address)
       });
+    } else if (isWorldApp) {
+      // World Mini App context: validate wallet address
+      if (!effectiveWalletAddress) {
+        console.log('Cannot claim tokens: Missing World wallet address');
+        return {};
+      }
     } else {
-      // Mini-app context: validate FID and wallet
+      // Farcaster Mini-app context: validate FID and wallet
       if (!frameContext?.user?.fid || !effectiveWalletAddress) {
         console.log('Cannot claim tokens: Missing FID or wallet address');
         return {};
@@ -202,15 +212,28 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
       // Add final confirmation of the address being used for airdrop
       console.log('💰 AIRDROP TARGET ADDRESS:', effectiveWalletAddress, isWebContext ? '(web - should be smart wallet if available)' : '(mini-app)');
       
-      // Get Twitter username for web context
-      const twitterUsername = isWebContext ? getTwitterUsername() : frameContext?.user?.username;
+      // Get username based on context
+      const username = isWebContext 
+        ? getTwitterUsername() 
+        : isWorldApp 
+        ? (typeof window !== 'undefined' && (window as any).MiniKit?.username) 
+        : frameContext?.user?.username;
       
-      // Calculate FID for web context
-      const webFid = isWebContext ? (() => {
+      // Calculate FID based on context
+      const fid = isWebContext ? (() => {
         const addressHash = effectiveWalletAddress?.slice(2).toLowerCase();
         const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
         return -(hashNumber % 1000000000);
+      })() : isWorldApp ? (() => {
+        const addressHash = effectiveWalletAddress?.slice(2).toLowerCase();
+        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
+        return -(hashNumber % 1000000000) - 2000000000; // Add offset for World users
       })() : frameContext?.user?.fid;
+      
+      // Get World ID if available
+      const worldId = isWorldApp && user?.linkedAccounts?.find(
+        (account: any) => account.type === 'world_id'
+      )?.subject;
       
       // Get Privy auth token for web users to verify authentication
       let authToken: string | undefined;
@@ -232,13 +255,14 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
           ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
         },
         body: JSON.stringify({
-          fid: webFid,
+          fid: fid,
           address: effectiveWalletAddress,
           auction_id: auctionId,
-          username: twitterUsername,
+          username: username,
           winning_url: lastVisitedUrl || `https://qrcoin.fun/auction/${auctionId}`,
-          claim_source: isWebContext ? 'web' : 'mini_app',
-          captcha_token: captchaToken // Add captcha token
+          claim_source: isWebContext ? 'web' : isWorldApp ? 'world' : 'mini_app',
+          captcha_token: captchaToken, // Add captcha token
+          world_id: worldId // Add World ID for World users
         }),
       });
 
@@ -251,12 +275,9 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         return {};
       }
 
-      // Record the claim in our eligibility state
+      // Record successful claim
       await recordClaim(data.tx_hash);
-      
       console.log('Token claim successful, tx hash:', data.tx_hash);
-      
-      // Return the transaction hash
       return { txHash: data.tx_hash };
     } catch (error: unknown) {
       console.error('Token claim error:', error);

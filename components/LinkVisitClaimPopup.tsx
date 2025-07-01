@@ -18,6 +18,8 @@ import { Turnstile } from '@marsidev/react-turnstile';
 import { useXPixel } from "@/hooks/useXPixel";
 import { useAnalytics, ANALYTICS_EVENTS } from "@/hooks/useAnalytics";
 import { hapticActions } from "@/lib/haptics";
+import { useIsMiniApp } from '@/hooks/useIsMiniApp';
+import { useWorldcoinAuth } from '@/hooks/useWorldcoinAuth';
 
 interface LinkVisitClaimPopupProps {
   isOpen: boolean;
@@ -87,11 +89,13 @@ export function LinkVisitClaimPopup({
   isPrivyModalActive,
   isTwitterUserNeedsWallet
 }: LinkVisitClaimPopupProps) {
-  // Web context detection
+  // Context detection
   const [isWebContext, setIsWebContext] = useState(false);
   const [persistentToastId, setPersistentToastId] = useState<string | number | null>(null);
   const { authenticated } = usePrivy();
   const { connectWallet } = useConnectWallet();
+  const { miniAppType } = useIsMiniApp();
+  const { user: worldUser, authenticateWithWorldcoin, isAuthenticating: isWorldAuthenticating } = useWorldcoinAuth();
   
   // NEW: Track click state in localStorage
   const CLICK_STATE_KEY = 'qrcoin_link_clicked';
@@ -145,14 +149,15 @@ export function LinkVisitClaimPopup({
   useEffect(() => {
     async function detectContext() {
       try {
-        const isMiniApp = await frameSdk.isInMiniApp();
-        setIsWebContext(!isMiniApp);
+        const isFarcasterFrame = await frameSdk.isInMiniApp();
+        const isWorldMiniApp = miniAppType === 'world';
+        setIsWebContext(!isFarcasterFrame && !isWorldMiniApp);
       } catch {
         setIsWebContext(true);
       }
     }
     detectContext();
-  }, []);
+  }, [miniAppType]);
 
   // Three states for both web and mini-app: visit, connecting, captcha, claim, success, already_claimed
   // Web flow: visit -> captcha -> claim -> success
@@ -168,8 +173,10 @@ export function LinkVisitClaimPopup({
   const [showCaptcha, setShowCaptcha] = useState(false);
   
   // Use the claim hook and eligibility hook
-  const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
-  const { hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
+  // World Mini App should be treated as mini-app context (false), not web context
+  const effectiveIsWebContext = isWebContext && miniAppType !== 'world';
+  const { isClaimLoading } = useLinkVisitClaim(auctionId, effectiveIsWebContext);
+  const { hasClaimed, isLoading: isEligibilityLoading, recordClick } = useLinkVisitEligibility(auctionId, effectiveIsWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
   const { data: auctionImageData } = useAuctionImage(auctionId, winningUrl);
@@ -220,7 +227,10 @@ export function LinkVisitClaimPopup({
         // Don't reset if we're in captcha or claim state and user is authenticated
         if ((prevState === 'captcha' || prevState === 'claim') && authenticated) return prevState;
         
-        if (isWebContext) {
+        // Don't reset if we're already in claim state for mini-app users (prevent flip-flopping)
+        if (prevState === 'claim' && !effectiveIsWebContext) return prevState;
+        
+        if (effectiveIsWebContext) {
           // Web flow: visit -> (trigger wallet connection) -> claim -> success (skip captcha for authenticated users)
           if (!authenticated) {
             return 'visit'; // Will trigger wallet connection after visiting
@@ -247,11 +257,28 @@ export function LinkVisitClaimPopup({
         }
       });
     }
-  }, [isOpen, hasClicked, hasClickedAny, isWebContext, authenticated, claimState, hasClaimed, clearClickedFromStorage]);
+  }, [isOpen, hasClicked, hasClickedAny, effectiveIsWebContext, authenticated, claimState, hasClaimed, clearClickedFromStorage]);
 
   // Handle automatic state transition when authentication changes
   useEffect(() => {
-    if (isWebContext && authenticated && !isEligibilityLoading) {
+    if (miniAppType === 'world' && worldUser && !isEligibilityLoading) {
+      // World user authenticated
+      if (claimState === 'connecting' && !isConnecting) {
+        if (hasClaimed) {
+          setClaimState('already_claimed');
+        } else {
+          clearClickedFromStorage();
+          setClaimState('claim');
+        }
+      } else if (claimState === 'visit' && hasClickedAny) {
+        if (hasClaimed) {
+          setClaimState('already_claimed');
+        } else {
+          clearClickedFromStorage();
+          setClaimState('claim');
+        }
+      }
+    } else if (effectiveIsWebContext && authenticated && !isEligibilityLoading) {
       // If user is authenticated and we're in connecting state, move to claim (skip captcha)
       if (claimState === 'connecting' && !isConnecting) {
         
@@ -275,11 +302,11 @@ export function LinkVisitClaimPopup({
         }
       }
     }
-  }, [authenticated, hasClickedAny, hasClaimed, claimState, isWebContext, isConnecting, isEligibilityLoading, clearClickedFromStorage]);
+  }, [authenticated, worldUser, hasClickedAny, hasClaimed, claimState, effectiveIsWebContext, miniAppType, isConnecting, isEligibilityLoading, clearClickedFromStorage]);
 
   // Handle mini-app auto-transition when hasClickedAny changes
   useEffect(() => {
-    if (!isWebContext && hasClickedAny && claimState === 'visit') {
+    if (!effectiveIsWebContext && hasClickedAny && claimState === 'visit') {
       if (hasClaimed) {
         setClaimState('already_claimed');
       } else {
@@ -288,7 +315,7 @@ export function LinkVisitClaimPopup({
         setClaimState('claim');
       }
     }
-  }, [hasClickedAny, isWebContext, claimState, hasClaimed, clearClickedFromStorage]);
+  }, [hasClickedAny, effectiveIsWebContext, claimState, hasClaimed, clearClickedFromStorage]);
 
   // NEW: Handle real-time claim status changes when popup is already open
   useEffect(() => {
@@ -399,9 +426,9 @@ export function LinkVisitClaimPopup({
       return;
     }
     
-    // NEW: Skip captcha for authenticated users (Twitter provides verification)
-    // Only require captcha for non-authenticated web users
-    if (isWebContext && !authenticated && !captchaToken) {
+    // NEW: Skip captcha for authenticated users (Twitter/World provides verification)
+    // Only require captcha for non-authenticated web users (World is treated as mini-app)
+    if (effectiveIsWebContext && !authenticated && !captchaToken) {
       await hapticActions.error();
       toast.error('Please complete the verification first.');
       return;
@@ -419,16 +446,20 @@ export function LinkVisitClaimPopup({
       await hapticActions.claimSuccess();
       
       // Track successful token claim with X Pixel
+      const isWorldApp = miniAppType === 'world';
+      const tokenType = isWorldApp ? 'WLD' : 'QR';
+      const tokenAmount = isWorldApp ? '1' : '1,000';
+      
       trackEvent('Lead', {
-        value: 1000,
-        currency: 'QR',
+        value: isWorldApp ? 1 : 1000,
+        currency: tokenType,
         content_name: `Token Claim - Auction ${auctionId}`,
-        content_category: 'QR Token Claim',
+        content_category: `${tokenType} Token Claim`,
         auction_id: auctionId,
-        token_type: 'QR'
+        token_type: tokenType
       });
       
-      toast.success('1,000 $QR has been sent to your wallet.', {
+      toast.success(`${tokenAmount} $${tokenType} has been sent to your wallet.`, {
         style: {
           background: 'var(--primary)',
           color: 'var(--primary-foreground)',
@@ -499,29 +530,40 @@ export function LinkVisitClaimPopup({
           }
         }
       } else {
-        // Mini-app context: use frameSdk (existing logic)
+        // Mini-app context: different handling for Farcaster vs World
         const trackedUrl = `${process.env.NEXT_PUBLIC_HOST_URL}/redirect?source=${encodeURIComponent(CLICK_SOURCES.POPUP_IMAGE)}`;
         
-        try {
-          await frameSdk.redirectToUrl(trackedUrl);
-          setTimeout(() => {
-            if (hasClaimed) {
-              setClaimState('already_claimed');
-            } else {
-              // Clear the click state when transitioning to claim state
-              clearClickedFromStorage();
-              setClaimState('claim');
-            }
-          }, 1000);
-        } catch {
-          window.open(trackedUrl, '_blank', 'noopener,noreferrer');
-          setTimeout(() => {
-            if (hasClaimed) {
-              setClaimState('already_claimed');
-            } else {
-              setClaimState('claim');
-            }
-          }, 1000);
+        if (miniAppType === 'world') {
+          // World Mini App: record click in database then redirect
+          recordClick().then(() => {
+            window.location.href = trackedUrl;
+          }).catch(() => {
+            // Redirect anyway even if recording fails
+            window.location.href = trackedUrl;
+          });
+        } else {
+          // Farcaster Mini App: use frame SDK
+          try {
+            await frameSdk.redirectToUrl(trackedUrl);
+            setTimeout(() => {
+              if (hasClaimed) {
+                setClaimState('already_claimed');
+              } else {
+                // Clear the click state when transitioning to claim state
+                clearClickedFromStorage();
+                setClaimState('claim');
+              }
+            }, 1000);
+          } catch {
+            window.open(trackedUrl, '_blank', 'noopener,noreferrer');
+            setTimeout(() => {
+              if (hasClaimed) {
+                setClaimState('already_claimed');
+              } else {
+                setClaimState('claim');
+              }
+            }, 1000);
+          }
         }
       }
     } catch {
@@ -529,21 +571,59 @@ export function LinkVisitClaimPopup({
     }
   };
 
-  // Handle connect wallet (web only)
-  const handleConnectWallet = () => {
+  // Handle connect wallet (web and World app)
+  const handleConnectWallet = async () => {
     
     // Set connecting state to show appropriate UI
     setIsConnecting(true);
     setClaimState('connecting');
     
-    // Show persistent toast with updated message
-    const toastId = toast.info('Sign in with X (Twitter) to claim 1,000 $QR!', {
-      duration: Infinity, // Persistent until manually dismissed
-    });
-    setPersistentToastId(toastId);
-    
-    // Trigger Privy login modal
-    login();
+    if (miniAppType === 'world') {
+      // World Mini App authentication
+      const toastId = toast.info('Authenticating with World App...', {
+        duration: Infinity,
+      });
+      setPersistentToastId(toastId);
+      
+      try {
+        const user = await authenticateWithWorldcoin();
+        if (user) {
+          setIsConnecting(false);
+          if (persistentToastId) {
+            toast.dismiss(persistentToastId);
+            setPersistentToastId(null);
+          }
+          // Move to claim state after successful authentication
+          clearClickedFromStorage();
+          setClaimState('claim');
+        } else {
+          setIsConnecting(false);
+          if (persistentToastId) {
+            toast.dismiss(persistentToastId);
+            setPersistentToastId(null);
+          }
+          setClaimState('visit');
+          toast.error('Authentication failed. Please try again.');
+        }
+      } catch (error) {
+        console.error('World authentication error:', error);
+        setIsConnecting(false);
+        if (persistentToastId) {
+          toast.dismiss(persistentToastId);
+          setPersistentToastId(null);
+        }
+        setClaimState('visit');
+      }
+    } else {
+      // Show persistent toast with updated message
+      const toastId = toast.info('Sign in with X (Twitter) to claim 1,000 $QR!', {
+        duration: Infinity, // Persistent until manually dismissed
+      });
+      setPersistentToastId(toastId);
+      
+      // Trigger Privy login modal
+      login();
+    }
   };
 
   // Handle captcha verification
@@ -569,12 +649,12 @@ export function LinkVisitClaimPopup({
     setClaimState('captcha');
   };
 
-  // Show captcha when entering claim state (only for non-authenticated web users)
+  // Show captcha when entering claim state (only for non-authenticated web users, not World)
   useEffect(() => {
-    if (claimState === 'claim' && isWebContext && !authenticated && !showCaptcha && !captchaToken) {
+    if (claimState === 'claim' && effectiveIsWebContext && !authenticated && !showCaptcha && !captchaToken) {
       setShowCaptcha(true);
     }
-  }, [claimState, isWebContext, authenticated, showCaptcha, captchaToken]);
+  }, [claimState, effectiveIsWebContext, authenticated, showCaptcha, captchaToken]);
 
   // Handle share
   const handleShare = async () => {
@@ -585,9 +665,12 @@ export function LinkVisitClaimPopup({
       source: 'link_visit_claim_success'
     });
     
-    if (isWebContext) {
-      // Web context: Twitter/X share with quote tweet
-      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
+    const isWorldApp = miniAppType === 'world';
+    const tokenInfo = isWorldApp ? '1 $WLD' : '1,000 $QR';
+    
+    if (isWebContext || isWorldApp) {
+      // Web context or World App: Twitter/X share with quote tweet
+      const shareText = encodeURIComponent(`just got paid ${tokenInfo} to check out today's winner @qrcoindotfun`);
       
       // Use dynamic quote tweet URL from database
       const tweetToQuote = socialLinks.quoteTweetUrl;
@@ -596,7 +679,7 @@ export function LinkVisitClaimPopup({
       
       window.open(shareUrl, '_blank', 'noopener,noreferrer');
     } else {
-      // Mini-app context: Warpcast share (existing logic)
+      // Farcaster Mini-app context: Warpcast share (existing logic)
       const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
       const embedUrl = encodeURIComponent(`https://qrcoin.fun/86`);
       
@@ -631,7 +714,11 @@ export function LinkVisitClaimPopup({
     });
     
     if (isWebContext) {
-      // Web context: redirect to Uniswap
+      // Web context: redirect to Uniswap for QR token
+      const uniswapUrl = 'https://app.uniswap.org/swap?outputCurrency=0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF&chain=base';
+      window.open(uniswapUrl, '_blank', 'noopener,noreferrer');
+    } else if (miniAppType === 'world') {
+      // World Mini App: redirect to Uniswap for QR token (same as web)
       const uniswapUrl = 'https://app.uniswap.org/swap?outputCurrency=0x2b5050F01d64FBb3e4Ac44dc07f0732BFb5ecadF&chain=base';
       window.open(uniswapUrl, '_blank', 'noopener,noreferrer');
     } else {
@@ -675,6 +762,11 @@ export function LinkVisitClaimPopup({
       
       // NEW: Prevent closing if Twitter user is connecting wallet in claim state
       if (!open && claimState === 'claim' && isTwitterUserNeedsWallet && isAutoConnectingWallet) {
+        return;
+      }
+      
+      // Prevent closing if World user is authenticating
+      if (!open && claimState === 'connecting' && isWorldAuthenticating) {
         return;
       }
       
@@ -770,7 +862,7 @@ export function LinkVisitClaimPopup({
                 transition={{ delay: 0.2 }}
                 className="text-xl font-bold text-foreground"
               >
-                Click to claim 1,000 $QR!
+                Click to claim {miniAppType === 'world' ? '1 $WLD' : '1,000 $QR'}!
               </motion.h2>
             )}
             
@@ -782,7 +874,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Claim 1,000 $QR
+                  Claim {miniAppType === 'world' ? '1 $WLD' : '1,000 $QR'}
                 </motion.h2>
               </>
             )}
@@ -839,7 +931,7 @@ export function LinkVisitClaimPopup({
                   {isTwitterUserNeedsWallet && isAutoConnectingWallet ? 
                     'Connecting your wallet...' :
                     isTwitterUserNeedsWallet ? 
-                    'Connect a wallet to claim your $QR' :
+                    `Connect a wallet to claim your ${miniAppType === 'world' ? '$WLD' : '$QR'}` :
                     'Thanks for checking out today\'s winner!'}
                 </motion.p>
                 
@@ -872,7 +964,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  1,000 $QR sent to your wallet.
+                  {miniAppType === 'world' ? '1 $WLD' : '1,000 $QR'} sent to your wallet.
                 </motion.p>
                 
                 <motion.div
@@ -884,7 +976,7 @@ export function LinkVisitClaimPopup({
                   <Button 
                     variant="default" 
                     className={`${
-                      isWebContext 
+                      (isWebContext || miniAppType === 'world')
                         ? "bg-[#1DA1F2] hover:bg-[#0d8bd9]" 
                         : "bg-[#8A63D2] hover:bg-[#7952c4]"
                     } text-white px-6 py-2 rounded-md flex items-center justify-center focus:outline-none focus:ring-0 h-9 w-20`}
@@ -912,7 +1004,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  Come back tomorrow for more $QR!
+                  Come back tomorrow for more {miniAppType === 'world' ? '$WLD' : '$QR'}!
                 </motion.p>
                 
                 <motion.div

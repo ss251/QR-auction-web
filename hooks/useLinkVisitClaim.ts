@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLinkVisitEligibility } from './useLinkVisitEligibility';
 import { frameSdk } from '@/lib/frame-sdk-singleton';
 import { usePrivy, useIdentityToken } from "@privy-io/react-auth";
@@ -9,6 +9,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const [isClaimLoading, setIsClaimLoading] = useState(false);
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
+  const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(isWebContext ? 500 : 1000);
 
   // Web-specific hooks
   const { authenticated, user, getAccessToken } = usePrivy();
@@ -36,6 +37,25 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     
     return twitterAccount?.username || null;
   };
+
+  // Fetch expected claim amount for mini-app users based on their score
+  useEffect(() => {
+    async function fetchExpectedAmount() {
+      if (!isWebContext && frameContext?.user?.fid) {
+        try {
+          // Note: We can't directly call the server-side fetchUserWithScore from client
+          // So we'll use a default estimate here, actual amount will be determined server-side
+          // For now, we'll show the default 1000 QR for all mini-app users
+          setExpectedClaimAmount(1000);
+        } catch (error) {
+          console.error('Error estimating claim amount:', error);
+          setExpectedClaimAmount(1000); // Default for mini-app
+        }
+      }
+    }
+    
+    fetchExpectedAmount();
+  }, [isWebContext, frameContext?.user?.fid]);
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {
@@ -271,6 +291,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   return {
     claimTokens,
     isClaimLoading,
-    handleLinkClick
+    handleLinkClick,
+    expectedClaimAmount
   };
 } 

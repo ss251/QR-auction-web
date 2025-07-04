@@ -164,7 +164,7 @@ export function LinkVisitClaimPopup({
   const [showCaptcha, setShowCaptcha] = useState(false);
   
   // Use the claim hook and eligibility hook
-  const { isClaimLoading } = useLinkVisitClaim(auctionId, isWebContext);
+  const { isClaimLoading, expectedClaimAmount } = useLinkVisitClaim(auctionId, isWebContext);
   const { hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
@@ -435,7 +435,7 @@ export function LinkVisitClaimPopup({
       
       // Track successful token claim with X Pixel
       trackEvent('Lead', {
-        value: isWebContext ? 500 : 1000,
+        value: expectedClaimAmount,
         currency: 'QR',
         content_name: `Token Claim - Auction ${auctionId}`,
         content_category: 'QR Token Claim',
@@ -443,7 +443,7 @@ export function LinkVisitClaimPopup({
         token_type: 'QR'
       });
       
-      toast.success(`${isWebContext ? '500' : '1,000'} $QR has been sent to your wallet.`, {
+      toast.success(`${expectedClaimAmount.toLocaleString()} $QR has been sent to your wallet.`, {
         style: {
           background: 'var(--primary)',
           color: 'var(--primary-foreground)',
@@ -815,7 +815,7 @@ export function LinkVisitClaimPopup({
                 transition={{ delay: 0.2 }}
                 className="text-xl font-bold text-foreground"
               >
-                {isWebContext ? "Click to claim 500 $QR!" : "Click to claim 1,000 $QR!"}
+                {`Click to claim ${expectedClaimAmount.toLocaleString()} $QR!`}
               </motion.h2>
             )}
             
@@ -827,7 +827,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Claim {isWebContext ? '500' : '1,000'} $QR
+                  Claim {expectedClaimAmount.toLocaleString()} $QR
                 </motion.h2>
               </>
             )}
@@ -917,7 +917,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  {isWebContext ? '500' : '1,000'} $QR sent to your wallet.
+                  {expectedClaimAmount.toLocaleString()} $QR sent to your wallet.
                 </motion.p>
                 
                 <motion.div

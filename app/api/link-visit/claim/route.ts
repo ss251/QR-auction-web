@@ -7,6 +7,8 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
+import { fetchUserWithScore } from '@/lib/neynar';
+import { getClaimAmountByScore } from '@/lib/claim-amounts';
 
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
@@ -601,6 +603,7 @@ export async function POST(request: NextRequest) {
       let effectiveUsername: string | null = null;
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
       let verifiedTwitterUsername: string | null = null; // Declare here for broader scope
+      let privyUserId: string = ''; // Declare here for broader scope
     
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       // Verify auth token for web users (Twitter authentication)
@@ -621,7 +624,6 @@ export async function POST(request: NextRequest) {
                      request.cookies.get('privy-id-token')?.value;
       
       // Verify the Privy auth token and extract userId
-      let privyUserId: string;
       try {
         // First verify the auth token
         const verifiedClaims = await privyClient.verifyAuthToken(authToken);
@@ -702,13 +704,13 @@ export async function POST(request: NextRequest) {
       if (claim_source === 'web' && !verifiedTwitterUsername) {
         console.log(`🚫 WEB USERNAME REQUIRED: IP=${clientIP}, User ${privyUserId} attempted claim without username`);
         
-        const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
-        const hashNumber = parseInt(addressHash.slice(0, 8), 16);
+        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
         effectiveFid = -(hashNumber % 1000000000);
         
         await logFailedTransaction({
           fid: effectiveFid,
-          eth_address: address,
+          eth_address: address || 'unknown',
           auction_id: auction_id,
           username: null,
           user_id: privyUserId,
@@ -729,13 +731,13 @@ export async function POST(request: NextRequest) {
       if (verifiedTwitterUsername && verifiedTwitterUsername.toLowerCase() === 'anj_juan23582') {
         console.log(`🚫 SPECIFIC USERNAME BAN: IP=${clientIP}, Banned username "${verifiedTwitterUsername}" attempted to claim`);
         
-        const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
-        const hashNumber = parseInt(addressHash.slice(0, 8), 16);
+        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
         effectiveFid = -(hashNumber % 1000000000);
         
         await logFailedTransaction({
           fid: effectiveFid,
-          eth_address: address,
+          eth_address: address || 'unknown',
           auction_id: auction_id,
           username: verifiedTwitterUsername,
           user_id: privyUserId,
@@ -753,9 +755,13 @@ export async function POST(request: NextRequest) {
       }
       
       // Create a unique negative FID from wallet address hash for web users
-      const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
-      const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
-      effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
+      if (address) {
+        const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
+        effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
+      } else {
+        effectiveFid = -1; // Fallback for missing address
+      }
       effectiveUsername = verifiedTwitterUsername; // Use verified Twitter username from Privy
       effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
       
@@ -1150,12 +1156,32 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
     
-    // Define airdrop amount based on claim source
-    // Web users get 500 QR, mini app users get 1000 QR
-    // Assuming 18 decimals for the QR token
-    const claimAmount = claim_source === 'web' ? '500' : '1000';
-    const airdropAmount = ethers.parseUnits(claimAmount, 18);
+    // Define airdrop amount based on claim source and user score
+    let claimAmount: string;
+    let neynarScore: number | undefined;
     
+    if (claim_source === 'web') {
+      // Web users always get 500 QR
+      claimAmount = '500';
+    } else {
+      // Mini-app users: fetch Neynar score and determine amount
+      if (effectiveFid > 0) {
+        const userData = await fetchUserWithScore(effectiveFid);
+        neynarScore = userData.neynarScore;
+        
+        // Get claim amount based on score
+        const claimConfig = getClaimAmountByScore(neynarScore);
+        claimAmount = claimConfig.amount.toString();
+        
+        console.log(`Neynar score for FID ${effectiveFid}: ${neynarScore} (${claimConfig.description}) - ${claimAmount} QR`);
+      } else {
+        // Fallback for invalid FIDs
+        claimAmount = '100';
+        console.log(`Invalid FID ${effectiveFid}, using default claim amount: ${claimAmount} QR`);
+      }
+    }
+    
+    const airdropAmount = ethers.parseUnits(claimAmount, 18);
     console.log(`Preparing airdrop of ${claimAmount} QR tokens to ${address}`);
     
       // Create contract instances using the dynamic contract from wallet pool
@@ -1446,14 +1472,15 @@ export async function POST(request: NextRequest) {
           eth_address: address, 
           link_visited_at: new Date().toISOString(), // Ensure we mark it as visited
           claimed_at: new Date().toISOString(),
-          amount: parseInt(claimAmount), // 500 or 1000 QR tokens based on source
+          amount: parseInt(claimAmount), // Variable QR tokens based on source and score
           tx_hash: receipt.hash,
           success: true,
           username: effectiveUsername, // Display username (from request for mini-app, null for web)
           user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
           winning_url: winningUrl,
           claim_source: claim_source || 'mini_app',
-          client_ip: clientIP // Track IP for successful claims
+          client_ip: clientIP, // Track IP for successful claims
+          neynar_user_score: neynarScore !== undefined ? neynarScore : null // Store the Neynar score
         });
         
       if (insertError) {
@@ -1540,14 +1567,15 @@ export async function POST(request: NextRequest) {
           .update({
             eth_address: address,
             claimed_at: new Date().toISOString(),
-            amount: parseInt(claimAmount), // 500 or 1000 QR tokens based on source
+            amount: parseInt(claimAmount), // Variable QR tokens based on source and score
             tx_hash: receipt.hash,
             success: true,
             username: effectiveUsername, // Display username (from request for mini-app, null for web)
             user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
             winning_url: winningUrl,
             claim_source: claim_source || 'mini_app',
-            client_ip: clientIP // Track IP for successful claims
+            client_ip: clientIP, // Track IP for successful claims
+            neynar_user_score: neynarScore !== undefined ? neynarScore : null // Store the Neynar score
           })
           .match({
             fid: effectiveFid,

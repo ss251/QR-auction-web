@@ -265,7 +265,7 @@ export function LinkVisitProvider({
   // ALWAYS use the latestWonAuctionId for claim operations - never fall back to current auction
   // This prevents gaming by manually visiting future auction URLs
   const claimAuctionId = latestWonAuctionId;
-  const { claimTokens } = useLinkVisitClaim(claimAuctionId || 0, isWebContext);
+  const { claimTokens, expectedClaimAmount, isCheckingAmount } = useLinkVisitClaim(claimAuctionId || 0, isWebContext);
 
   // Explicit function to check claim status directly from database
   const checkClaimStatusForLatestAuction = useCallback(async () => {
@@ -910,6 +910,8 @@ export function LinkVisitProvider({
           onClaim={handleClaim}
           isPrivyModalActive={isPrivyModalActive}
           isTwitterUserNeedsWallet={isTwitterUserNeedsWallet}
+          expectedClaimAmount={expectedClaimAmount}
+          isCheckingAmount={isCheckingAmount}
         />
       )
     </LinkVisitContext.Provider>

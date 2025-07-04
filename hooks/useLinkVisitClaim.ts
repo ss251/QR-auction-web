@@ -9,8 +9,9 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const [isClaimLoading, setIsClaimLoading] = useState(false);
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
-  const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(isWebContext ? 500 : 1000);
+  const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(0);
   const [isCheckingAmount, setIsCheckingAmount] = useState(false);
+  const [hasCheckedAmount, setHasCheckedAmount] = useState(false);
 
   // Web-specific hooks
   const { authenticated, user, getAccessToken } = usePrivy();
@@ -44,6 +45,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     async function fetchExpectedAmount() {
       // Skip if no wallet address
       if (!effectiveWalletAddress) {
+        setExpectedClaimAmount(0);
+        setHasCheckedAmount(false);
         return;
       }
       
@@ -66,6 +69,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
           const data = await response.json();
           if (data.success && data.amount) {
             setExpectedClaimAmount(data.amount);
+            setHasCheckedAmount(true);
             console.log(`💰 Dynamic claim amount for ${effectiveWalletAddress}: ${data.amount} QR`);
           }
         } catch (error) {
@@ -93,6 +97,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
           const data = await response.json();
           if (data.success && data.amount) {
             setExpectedClaimAmount(data.amount);
+            setHasCheckedAmount(true);
             console.log(`💰 Dynamic claim amount for FID ${frameContext.user.fid}: ${data.amount} QR`);
           }
         } catch (error) {
@@ -344,6 +349,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     isClaimLoading,
     handleLinkClick,
     expectedClaimAmount,
-    isCheckingAmount
+    isCheckingAmount,
+    hasCheckedAmount
   };
 } 

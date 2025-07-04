@@ -582,7 +582,7 @@ export function LinkVisitClaimPopup({
     setClaimState('connecting');
     
     // Show persistent toast with dynamic amount
-    const toastId = toast.info(`Sign in with X (Twitter) to claim ${expectedClaimAmount.toLocaleString()} $QR!`, {
+    const toastId = toast.info(expectedClaimAmount > 0 ? `Sign in with X (Twitter) to claim ${expectedClaimAmount.toLocaleString()} $QR!` : 'Sign in with X (Twitter) to claim $QR!', {
       duration: Infinity, // Persistent until manually dismissed
     });
     setPersistentToastId(toastId);
@@ -815,7 +815,7 @@ export function LinkVisitClaimPopup({
                 transition={{ delay: 0.2 }}
                 className="text-xl font-bold text-foreground"
               >
-                {isCheckingAmount ? 
+                {isCheckingAmount || expectedClaimAmount === 0 ? 
                   'Click to claim $QR!' : 
                   `Click to claim ${expectedClaimAmount.toLocaleString()} $QR!`
                 }
@@ -830,7 +830,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  {isCheckingAmount ? 
+                  {isCheckingAmount || expectedClaimAmount === 0 ? 
                     'Claim $QR' : 
                     `Claim ${expectedClaimAmount.toLocaleString()} $QR`
                   }

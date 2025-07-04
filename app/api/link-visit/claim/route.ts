@@ -126,6 +126,7 @@ async function logFailedTransaction(params: {
   network_status?: string;
   retry_count?: number;
   client_ip?: string;
+  claim_source?: string;
 }) {
   try {
     // Check if this error is retryable BEFORE logging to database
@@ -288,7 +289,8 @@ async function logFailedTransaction(params: {
         gas_limit: params.gas_limit || null,
         network_status: params.network_status || null,
         retry_count: params.retry_count || 0,
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source: params.claim_source || 'mini_app'
       })
       .select('id')
       .single();
@@ -309,6 +311,7 @@ async function logFailedTransaction(params: {
       username: params.username as string | null,
       user_id: params.user_id as string | null,
       winning_url: params.winning_url as string | null,
+      claim_source: params.claim_source || 'mini_app',
     });
     console.log(`📋 QUEUED FOR RETRY: Failure ID=${data.id}`);
   } catch (logError) {
@@ -447,7 +450,8 @@ export async function POST(request: NextRequest) {
           error_message: `IP ${clientIP} exceeded per-auction limit: ${ipClaimsThisAuction.length}/3 claims`,
           error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ 
@@ -484,7 +488,8 @@ export async function POST(request: NextRequest) {
           error_message: `IP ${clientIP} exceeded daily limit (${ipClaimsDaily.length}/5 claims in 24h)`,
           error_code: 'IP_DAILY_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ 
@@ -695,7 +700,8 @@ export async function POST(request: NextRequest) {
           error_message: 'Missing required parameters for web user (address or auction_id)',
           error_code: 'WEB_VALIDATION_ERROR',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
@@ -1757,7 +1763,8 @@ export async function POST(request: NextRequest) {
         error_code: errorCode,
         request_data: requestData as Record<string, unknown>,
         network_status: 'failed',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source
       });
       
       return NextResponse.json({ 
@@ -1791,7 +1798,8 @@ export async function POST(request: NextRequest) {
         error_code: 'WALLET_OPERATION_ERROR',
         request_data: requestData as Record<string, unknown>,
         network_status: 'wallet_error',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source
       });
       
       return NextResponse.json({ 
@@ -1847,7 +1855,8 @@ export async function POST(request: NextRequest) {
         error_code: errorCode,
         request_data: requestData as Record<string, unknown>,
         network_status: 'unexpected_error',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source: requestData.claim_source || 'mini_app'
       });
     } catch (logError) {
       console.error('Failed to log unexpected error:', logError);

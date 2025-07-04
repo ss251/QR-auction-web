@@ -47,8 +47,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         return;
       }
       
-      // For web/mobile users, check wallet balance to determine amount
-      if (isWebContext || frameContext?.claimSource === 'mobile') {
+      // For web/mobile users, check wallet balance to determine amount  
+      if (isWebContext) {
         setIsCheckingAmount(true);
         try {
           const response = await fetch('/api/link-visit/check-amount', {
@@ -58,7 +58,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
             },
             body: JSON.stringify({
               address: effectiveWalletAddress,
-              claimSource: frameContext?.claimSource || 'web'
+              claimSource: 'web',
+              fid: frameContext?.user?.fid
             })
           });
           
@@ -74,13 +75,38 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
           setIsCheckingAmount(false);
         }
       } else if (frameContext?.user?.fid) {
-        // Mini-app users: Keep existing behavior (1000 QR default, actual amount determined server-side)
-        setExpectedClaimAmount(1000);
+        // Mini-app users: Also check amount dynamically based on Neynar score
+        setIsCheckingAmount(true);
+        try {
+          const response = await fetch('/api/link-visit/check-amount', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              address: effectiveWalletAddress || '',
+              claimSource: 'mini_app',
+              fid: frameContext.user.fid
+            })
+          });
+          
+          const data = await response.json();
+          if (data.success && data.amount) {
+            setExpectedClaimAmount(data.amount);
+            console.log(`💰 Dynamic claim amount for FID ${frameContext.user.fid}: ${data.amount} QR`);
+          }
+        } catch (error) {
+          console.error('Error fetching dynamic claim amount:', error);
+          // Keep default amount on error
+          setExpectedClaimAmount(100);
+        } finally {
+          setIsCheckingAmount(false);
+        }
       }
     }
     
     fetchExpectedAmount();
-  }, [isWebContext, frameContext?.user?.fid, frameContext?.claimSource, effectiveWalletAddress]);
+  }, [isWebContext, frameContext?.user?.fid, effectiveWalletAddress]);
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {

@@ -1,4 +1,6 @@
 import { ethers } from 'ethers';
+import { fetchUserWithScore } from './neynar';
+import { getClaimAmountByScore } from './claim-amounts';
 
 // Chain configurations - Only Base chain
 const CHAIN_CONFIGS = {
@@ -185,18 +187,36 @@ export async function determineClaimAmount(
 /**
  * Get claim amount for a specific claim source and address
  * This is a wrapper that handles the claim source logic
+ * Now with Neynar score override for all users
  */
 export async function getClaimAmountForAddress(
   address: string,
   claimSource: string,
-  alchemyApiKey: string
+  alchemyApiKey: string,
+  fid?: number
 ): Promise<number> {
-  // Web and mobile users always get the dynamic amount based on holdings
+  // First, check if we have a FID and can get Neynar score
+  if (fid && fid > 0) {
+    try {
+      const userData = await fetchUserWithScore(fid);
+      if (userData.neynarScore !== undefined && !userData.error) {
+        // Use Neynar score to determine amount
+        const claimConfig = getClaimAmountByScore(userData.neynarScore);
+        console.log(`🎯 Using Neynar score for FID ${fid}: ${userData.neynarScore} (${claimConfig.tier}) = ${claimConfig.amount} QR`);
+        return claimConfig.amount;
+      }
+    } catch (error) {
+      console.error('Error fetching Neynar score, falling back to wallet balance check:', error);
+    }
+  }
+  
+  // Fallback to wallet balance check for web and mobile users
   if (['web', 'mobile'].includes(claimSource)) {
     const { amount } = await determineClaimAmount(address, alchemyApiKey);
+    console.log(`💰 Fallback to wallet balance check: ${amount} QR`);
     return amount;
   }
   
-  // Mini-app users get fixed 1000 QR (existing behavior)
-  return 1000;
+  // Mini-app users without Neynar score get default 100 QR
+  return 100;
 }

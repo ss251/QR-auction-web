@@ -7,8 +7,6 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
-import { fetchUserWithScore } from '@/lib/neynar';
-import { getClaimAmountByScore } from '@/lib/claim-amounts';
 
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
@@ -1168,34 +1166,40 @@ export async function POST(request: NextRequest) {
     let neynarScore: number | undefined;
     
     if (claim_source === 'web' || claim_source === 'mobile') {
-      // Web/mobile users: dynamic amount based on wallet holdings
+      // Web/mobile users: check Neynar score first if FID available, then wallet holdings
       try {
+        // For web users, we might have a FID if they've linked Farcaster
+        let fidForScore: number | undefined;
+        if (effectiveFid && effectiveFid > 0) {
+          fidForScore = effectiveFid;
+        }
+        
         const dynamicAmount = await getClaimAmountForAddress(
           address,
           claim_source,
-          ALCHEMY_API_KEY
+          ALCHEMY_API_KEY,
+          fidForScore
         );
         claimAmount = dynamicAmount.toString();
         console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
       } catch (error) {
-        console.error('Error checking wallet balances, using default:', error);
+        console.error('Error checking claim amount, using default:', error);
         claimAmount = '500'; // Fallback to original amount
       }
     } else {
-      // Mini-app users: fetch Neynar score and determine amount
-      if (effectiveFid > 0) {
-        const userData = await fetchUserWithScore(effectiveFid);
-        neynarScore = userData.neynarScore;
-        
-        // Get claim amount based on score
-        const claimConfig = getClaimAmountByScore(neynarScore);
-        claimAmount = claimConfig.amount.toString();
-        
-        console.log(`Neynar score for FID ${effectiveFid}: ${neynarScore} (${claimConfig.description}) - ${claimAmount} QR`);
-      } else {
-        // Fallback for invalid FIDs
-        claimAmount = '100';
-        console.log(`Invalid FID ${effectiveFid}, using default claim amount: ${claimAmount} QR`);
+      // Mini-app users: use unified function that checks Neynar score
+      try {
+        const dynamicAmount = await getClaimAmountForAddress(
+          address || '',
+          claim_source || 'mini_app',
+          ALCHEMY_API_KEY,
+          effectiveFid
+        );
+        claimAmount = dynamicAmount.toString();
+        console.log(`💰 Mini-app claim amount for FID ${effectiveFid}: ${claimAmount} QR`);
+      } catch (error) {
+        console.error('Error determining mini-app claim amount:', error);
+        claimAmount = '100'; // Fallback to default
       }
     }
     

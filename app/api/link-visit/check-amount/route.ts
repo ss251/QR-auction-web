@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   }
   
   try {
-    const { address, claimSource } = await request.json();
+    const { address, claimSource, fid } = await request.json();
     
     // Validate required parameters
     if (!address) {
@@ -28,11 +28,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid address format' }, { status: 400 });
     }
     
-    // Get the claim amount based on wallet holdings
+    // Get the claim amount based on Neynar score (if FID provided) or wallet holdings
     const amount = await getClaimAmountForAddress(
       address,
       claimSource || 'web',
-      ALCHEMY_API_KEY
+      ALCHEMY_API_KEY,
+      fid
     );
     
     return NextResponse.json({ 

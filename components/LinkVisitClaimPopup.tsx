@@ -164,7 +164,7 @@ export function LinkVisitClaimPopup({
   const [showCaptcha, setShowCaptcha] = useState(false);
   
   // Use the claim hook and eligibility hook
-  const { isClaimLoading, expectedClaimAmount } = useLinkVisitClaim(auctionId, isWebContext);
+  const { isClaimLoading, expectedClaimAmount, isCheckingAmount } = useLinkVisitClaim(auctionId, isWebContext);
   const { hasClaimed, isLoading: isEligibilityLoading } = useLinkVisitEligibility(auctionId, isWebContext);
   
   // Use the auction image hook to check if it's a video with URL fallback
@@ -581,8 +581,8 @@ export function LinkVisitClaimPopup({
     setIsConnecting(true);
     setClaimState('connecting');
     
-    // Show persistent toast with updated message
-    const toastId = toast.info('Sign in with X (Twitter) to claim 500 $QR!', {
+    // Show persistent toast with dynamic amount
+    const toastId = toast.info(`Sign in with X (Twitter) to claim ${expectedClaimAmount.toLocaleString()} $QR!`, {
       duration: Infinity, // Persistent until manually dismissed
     });
     setPersistentToastId(toastId);
@@ -632,7 +632,7 @@ export function LinkVisitClaimPopup({
     
     if (isWebContext) {
       // Web context: Twitter/X share with quote tweet
-      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
+      const shareText = encodeURIComponent(`just got paid ${expectedClaimAmount.toLocaleString()} $QR to check out today's winner @qrcoindotfun`);
       
       // Use dynamic quote tweet URL from database
       const tweetToQuote = socialLinks.quoteTweetUrl;
@@ -642,7 +642,7 @@ export function LinkVisitClaimPopup({
       window.open(shareUrl, '_blank', 'noopener,noreferrer');
     } else {
       // Mini-app context: Warpcast share (existing logic)
-      const shareText = encodeURIComponent(`just got paid 1,000 $QR to check out today's winner @qrcoindotfun`);
+      const shareText = encodeURIComponent(`just got paid ${expectedClaimAmount.toLocaleString()} $QR to check out today's winner @qrcoindotfun`);
       const embedUrl = encodeURIComponent(`https://qrcoin.fun/86`);
       
       let shareUrl = `https://warpcast.com/~/compose?text=${shareText}&embeds[]=${embedUrl}`;
@@ -815,7 +815,10 @@ export function LinkVisitClaimPopup({
                 transition={{ delay: 0.2 }}
                 className="text-xl font-bold text-foreground"
               >
-                {`Click to claim ${expectedClaimAmount.toLocaleString()} $QR!`}
+                {isCheckingAmount ? 
+                  'Click to claim $QR!' : 
+                  `Click to claim ${expectedClaimAmount.toLocaleString()} $QR!`
+                }
               </motion.h2>
             )}
             
@@ -827,7 +830,10 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.2 }}
                   className="text-xl font-bold text-foreground"
                 >
-                  Claim {expectedClaimAmount.toLocaleString()} $QR
+                  {isCheckingAmount ? 
+                    'Claim $QR' : 
+                    `Claim ${expectedClaimAmount.toLocaleString()} $QR`
+                  }
                 </motion.h2>
               </>
             )}

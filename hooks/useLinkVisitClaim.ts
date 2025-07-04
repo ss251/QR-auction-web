@@ -10,6 +10,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
   const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(isWebContext ? 500 : 1000);
+  const [isCheckingAmount, setIsCheckingAmount] = useState(false);
 
   // Web-specific hooks
   const { authenticated, user, getAccessToken } = usePrivy();
@@ -38,24 +39,48 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     return twitterAccount?.username || null;
   };
 
-  // Fetch expected claim amount for mini-app users based on their score
+  // Fetch expected claim amount based on wallet holdings (web) or score (mini-app)
   useEffect(() => {
     async function fetchExpectedAmount() {
-      if (!isWebContext && frameContext?.user?.fid) {
+      // Skip if no wallet address
+      if (!effectiveWalletAddress) {
+        return;
+      }
+      
+      // For web/mobile users, check wallet balance to determine amount
+      if (isWebContext || frameContext?.claimSource === 'mobile') {
+        setIsCheckingAmount(true);
         try {
-          // Note: We can't directly call the server-side fetchUserWithScore from client
-          // So we'll use a default estimate here, actual amount will be determined server-side
-          // For now, we'll show the default 1000 QR for all mini-app users
-          setExpectedClaimAmount(1000);
+          const response = await fetch('/api/link-visit/check-amount', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              address: effectiveWalletAddress,
+              claimSource: frameContext?.claimSource || 'web'
+            })
+          });
+          
+          const data = await response.json();
+          if (data.success && data.amount) {
+            setExpectedClaimAmount(data.amount);
+            console.log(`💰 Dynamic claim amount for ${effectiveWalletAddress}: ${data.amount} QR`);
+          }
         } catch (error) {
-          console.error('Error estimating claim amount:', error);
-          setExpectedClaimAmount(1000); // Default for mini-app
+          console.error('Error fetching dynamic claim amount:', error);
+          // Keep default amount on error
+        } finally {
+          setIsCheckingAmount(false);
         }
+      } else if (frameContext?.user?.fid) {
+        // Mini-app users: Keep existing behavior (1000 QR default, actual amount determined server-side)
+        setExpectedClaimAmount(1000);
       }
     }
     
     fetchExpectedAmount();
-  }, [isWebContext, frameContext?.user?.fid]);
+  }, [isWebContext, frameContext?.user?.fid, frameContext?.claimSource, effectiveWalletAddress]);
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {
@@ -292,6 +317,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     claimTokens,
     isClaimLoading,
     handleLinkClick,
-    expectedClaimAmount
+    expectedClaimAmount,
+    isCheckingAmount
   };
 } 

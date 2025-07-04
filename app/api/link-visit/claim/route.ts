@@ -108,6 +108,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import queue functionality
 import { queueFailedClaim, redis } from '@/lib/queue/failedClaims';
+import { getClaimAmountForAddress } from '@/lib/wallet-balance-checker';
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {
@@ -1166,9 +1167,20 @@ export async function POST(request: NextRequest) {
     let claimAmount: string;
     let neynarScore: number | undefined;
     
-    if (claim_source === 'web') {
-      // Web users always get 500 QR
-      claimAmount = '500';
+    if (claim_source === 'web' || claim_source === 'mobile') {
+      // Web/mobile users: dynamic amount based on wallet holdings
+      try {
+        const dynamicAmount = await getClaimAmountForAddress(
+          address,
+          claim_source,
+          ALCHEMY_API_KEY
+        );
+        claimAmount = dynamicAmount.toString();
+        console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
+      } catch (error) {
+        console.error('Error checking wallet balances, using default:', error);
+        claimAmount = '500'; // Fallback to original amount
+      }
     } else {
       // Mini-app users: fetch Neynar score and determine amount
       if (effectiveFid > 0) {

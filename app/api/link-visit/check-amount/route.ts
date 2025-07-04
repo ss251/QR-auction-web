@@ -6,6 +6,9 @@ import { isRateLimited } from '@/lib/simple-rate-limit';
 // Get Alchemy API key from environment
 const ALCHEMY_API_KEY = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || '';
 
+// Simple in-memory deduplication cache
+const pendingRequests = new Map<string, Promise<number>>();
+
 export async function POST(request: NextRequest) {
   // Get client IP for rate limiting
   const clientIP = getClientIP(request);
@@ -28,13 +31,42 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid address format' }, { status: 400 });
     }
     
-    // Get the claim amount based on Neynar score (if FID provided) or wallet holdings
-    const amount = await getClaimAmountForAddress(
+    // Create a cache key based on the request parameters
+    const cacheKey = `${address}-${claimSource || 'web'}-${fid || 'none'}`;
+    
+    // Check if we already have a pending request for this exact combination
+    if (pendingRequests.has(cacheKey)) {
+      console.log(`🔄 Deduplicating request for ${cacheKey}`);
+      const amount = await pendingRequests.get(cacheKey)!;
+      return NextResponse.json({ 
+        success: true, 
+        amount,
+        source: claimSource || 'web',
+        deduplicated: true
+      });
+    }
+    
+    // Create a new promise for this request
+    const amountPromise = getClaimAmountForAddress(
       address,
       claimSource || 'web',
       ALCHEMY_API_KEY,
       fid
     );
+    
+    // Store the promise in our cache
+    pendingRequests.set(cacheKey, amountPromise);
+    
+    // Clean up the cache after the request completes
+    amountPromise.finally(() => {
+      // Remove from cache after a short delay to catch immediate duplicates
+      setTimeout(() => {
+        pendingRequests.delete(cacheKey);
+      }, 100);
+    });
+    
+    // Wait for the amount
+    const amount = await amountPromise;
     
     return NextResponse.json({ 
       success: true, 

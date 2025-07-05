@@ -1,6 +1,14 @@
 import { ethers } from 'ethers';
 import { fetchUserWithScore } from './neynar';
-import { getClaimAmountByScore } from './claim-amounts';
+import { getClaimAmountByScoreAsync } from './claim-amounts';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase client
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
 
 // Chain configurations - Only Base chain
 const CHAIN_CONFIGS = {
@@ -147,8 +155,37 @@ async function checkWalletBalancesOnBase(
 }
 
 /**
+ * Get wallet-based claim amounts from database
+ */
+async function getWalletClaimAmounts(): Promise<{ emptyAmount: number; valueAmount: number }> {
+  try {
+    const { data, error } = await supabase
+      .from('claim_amount_configs')
+      .select('category, amount')
+      .eq('is_active', true)
+      .in('category', ['wallet_empty', 'wallet_has_value']);
+
+    if (error) {
+      console.error('Error fetching wallet claim amounts:', error);
+      return { emptyAmount: 100, valueAmount: 500 }; // Fallback values
+    }
+
+    const emptyConfig = data?.find(row => row.category === 'wallet_empty');
+    const valueConfig = data?.find(row => row.category === 'wallet_has_value');
+
+    return {
+      emptyAmount: emptyConfig?.amount || 100,
+      valueAmount: valueConfig?.amount || 500
+    };
+  } catch (error) {
+    console.error('Error fetching wallet claim amounts:', error);
+    return { emptyAmount: 100, valueAmount: 500 }; // Fallback values
+  }
+}
+
+/**
  * Determine claim amount based on wallet holdings
- * @returns 100 if wallet is empty or only has QR tokens, 500 otherwise
+ * @returns Configured amount based on wallet status
  */
 export async function determineClaimAmount(
   address: string,
@@ -163,6 +200,9 @@ export async function determineClaimAmount(
     balance.hasNativeBalance || balance.hasNonQRTokens
   );
   
+  // Get claim amounts from database
+  const { emptyAmount, valueAmount } = await getWalletClaimAmounts();
+  
   // Log detailed results
   console.log(`📊 Base Chain Balance:`);
   balances.forEach(balance => {
@@ -174,7 +214,7 @@ export async function determineClaimAmount(
     }
   });
   
-  const amount = hasValue ? 500 : 100;
+  const amount = hasValue ? valueAmount : emptyAmount;
   const reason = hasValue 
     ? 'Wallet has ETH or other tokens on Base' 
     : 'Wallet is empty or only contains QR tokens on Base';
@@ -200,8 +240,8 @@ export async function getClaimAmountForAddress(
     try {
       const userData = await fetchUserWithScore(fid);
       if (userData.neynarScore !== undefined && !userData.error) {
-        // Use Neynar score to determine amount
-        const claimConfig = getClaimAmountByScore(userData.neynarScore);
+        // Use Neynar score to determine amount (async version for database)
+        const claimConfig = await getClaimAmountByScoreAsync(userData.neynarScore);
         console.log(`🎯 Using Neynar score for FID ${fid}: ${userData.neynarScore} (${claimConfig.tier}) = ${claimConfig.amount} QR`);
         return claimConfig.amount;
       }
@@ -217,6 +257,17 @@ export async function getClaimAmountForAddress(
     return amount;
   }
   
-  // Mini-app users without Neynar score get default 100 QR
-  return 100;
+  // Mini-app users without Neynar score get default amount from database
+  try {
+    const { data } = await supabase
+      .from('claim_amount_configs')
+      .select('amount')
+      .eq('category', 'default')
+      .eq('is_active', true)
+      .single();
+    
+    return data?.amount || 100;
+  } catch {
+    return 100;
+  }
 }

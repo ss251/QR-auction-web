@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-export default async function GET() {
+export async function GET() {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!

@@ -22,7 +22,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ auct
 		process.env.SUPABASE_SERVICE_ROLE_KEY!
 	);
 	
-	const { data: auctionImageData, error } = await supabase
+	const { data: auctionImageData } = await supabase
 		.from('auction_image_overrides')
 		.select('auction_id, image_url, is_video')
 		.eq('auction_id', auctionId)

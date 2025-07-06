@@ -234,7 +234,7 @@ export async function getClaimAmountForAddress(
   claimSource: string,
   alchemyApiKey: string,
   fid?: number
-): Promise<number> {
+): Promise<{ amount: number; neynarScore?: number }> {
   // First, check if we have a FID and can get Neynar score
   if (fid && fid > 0) {
     try {
@@ -243,7 +243,7 @@ export async function getClaimAmountForAddress(
         // Use Neynar score to determine amount (async version for database)
         const claimConfig = await getClaimAmountByScoreAsync(userData.neynarScore);
         console.log(`🎯 Using Neynar score for FID ${fid}: ${userData.neynarScore} (${claimConfig.tier}) = ${claimConfig.amount} QR`);
-        return claimConfig.amount;
+        return { amount: claimConfig.amount, neynarScore: userData.neynarScore };
       }
     } catch (error) {
       console.error('Error fetching Neynar score, falling back to wallet balance check:', error);
@@ -254,7 +254,7 @@ export async function getClaimAmountForAddress(
   if (['web', 'mobile'].includes(claimSource)) {
     const { amount } = await determineClaimAmount(address, alchemyApiKey);
     console.log(`💰 Fallback to wallet balance check: ${amount} QR`);
-    return amount;
+    return { amount };
   }
   
   // Mini-app users without Neynar score get default amount from database

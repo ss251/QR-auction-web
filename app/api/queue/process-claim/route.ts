@@ -384,47 +384,6 @@ export async function POST(req: NextRequest) {
           return fallback;
         }
       };
-
-      // Determine claim amount based on claim source FIRST (before any token checks)
-      let claimAmount: string;
-      let neynarScore: number | undefined;
-      
-      // Determine claim amount based on claim source (same logic as main claim route)
-      if (claimSource === 'web' || claimSource === 'mobile') {
-        // Web/mobile users: wallet holdings only (no Neynar scores)
-        try {
-          const claimResult = await getClaimAmountForAddress(
-            failure.eth_address,
-            claimSource,
-            ALCHEMY_API_KEY,
-            undefined // No FID for web users - they don't get Neynar scores
-          );
-          claimAmount = claimResult.amount.toString();
-          neynarScore = undefined; // Web users don't get Neynar scores
-          console.log(`💰 QUEUE: Dynamic claim amount for ${claimSource} user ${failure.eth_address}: ${claimAmount} QR`);
-        } catch (error) {
-          console.error('QUEUE: Error checking claim amount, using default:', error);
-          const defaultAmount = await getDefaultAmount('wallet_has_balance', 500);
-          claimAmount = defaultAmount.toString();
-        }
-      } else {
-        // Mini-app users: use unified function that checks Neynar score
-        try {
-          const claimResult = await getClaimAmountForAddress(
-            failure.eth_address || '',
-            claimSource || 'mini_app',
-            ALCHEMY_API_KEY,
-            failure.fid
-          );
-          claimAmount = claimResult.amount.toString();
-          neynarScore = claimResult.neynarScore;
-          console.log(`💰 QUEUE: Mini-app claim amount for FID ${failure.fid}: ${claimAmount} QR, Neynar score: ${neynarScore}`);
-        } catch (error) {
-          console.error('QUEUE: Error determining mini-app claim amount:', error);
-          const defaultAmount = await getDefaultAmount('default', 100);
-          claimAmount = defaultAmount.toString();
-        }
-      }
       
       // Determine claim amount based on claim source FIRST (before any token checks)
       let claimAmount: string;

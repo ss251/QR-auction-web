@@ -6,6 +6,7 @@ import AirdropABI from '@/abi/Airdrop.json';
 import { updateRetryStatus, redis } from '@/lib/queue/failedClaims';
 import { Receiver } from '@upstash/qstash';
 import { getWalletPool } from '@/lib/wallet-pool';
+import { getClaimAmountForAddress } from '@/lib/wallet-balance-checker';
 
 // Setup Supabase clients
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -368,6 +369,62 @@ export async function POST(req: NextRequest) {
         processingStarted: new Date().toISOString(),
         currentAttempt: attempt
       });
+
+      // Helper function to get database default
+      const getDefaultAmount = async (category: string, fallback: number): Promise<number> => {
+        try {
+          const { data } = await supabase
+            .from('claim_amount_configs')
+            .select('amount')
+            .eq('category', category)
+            .eq('is_active', true)
+            .single();
+          return data?.amount || fallback;
+        } catch {
+          return fallback;
+        }
+      };
+
+      // Determine claim amount based on claim source FIRST (before any token checks)
+      let claimAmount: string;
+      let neynarScore: number | undefined;
+      
+      // Determine claim amount based on claim source (same logic as main claim route)
+      if (claimSource === 'web' || claimSource === 'mobile') {
+        // Web/mobile users: wallet holdings only (no Neynar scores)
+        try {
+          const claimResult = await getClaimAmountForAddress(
+            failure.eth_address,
+            claimSource,
+            ALCHEMY_API_KEY,
+            undefined // No FID for web users - they don't get Neynar scores
+          );
+          claimAmount = claimResult.amount.toString();
+          neynarScore = undefined; // Web users don't get Neynar scores
+          console.log(`💰 QUEUE: Dynamic claim amount for ${claimSource} user ${failure.eth_address}: ${claimAmount} QR`);
+        } catch (error) {
+          console.error('QUEUE: Error checking claim amount, using default:', error);
+          const defaultAmount = await getDefaultAmount('wallet_has_balance', 500);
+          claimAmount = defaultAmount.toString();
+        }
+      } else {
+        // Mini-app users: use unified function that checks Neynar score
+        try {
+          const claimResult = await getClaimAmountForAddress(
+            failure.eth_address || '',
+            claimSource || 'mini_app',
+            ALCHEMY_API_KEY,
+            failure.fid
+          );
+          claimAmount = claimResult.amount.toString();
+          neynarScore = claimResult.neynarScore;
+          console.log(`💰 QUEUE: Mini-app claim amount for FID ${failure.fid}: ${claimAmount} QR, Neynar score: ${neynarScore}`);
+        } catch (error) {
+          console.error('QUEUE: Error determining mini-app claim amount:', error);
+          const defaultAmount = await getDefaultAmount('default', 100);
+          claimAmount = defaultAmount.toString();
+        }
+      }
       
       // Check wallet balances
       const ethBalance = await provider.getBalance(adminWallet.address);
@@ -399,24 +456,25 @@ export async function POST(req: NextRequest) {
       );
       
       // Check token balance
+      const requiredTokenAmount = ethers.parseUnits(claimAmount, 18);
       const tokenBalance = await qrTokenContract.balanceOf(adminWallet.address);
-      if (tokenBalance < ethers.parseUnits('1000', 18)) {
+      if (tokenBalance < requiredTokenAmount) {
         // Update retry status
         await updateRetryStatus(failureId, {
           status: 'failed',
-          error: 'Insufficient QR tokens',
+          error: `Insufficient QR tokens (need ${claimAmount}, have ${ethers.formatUnits(tokenBalance, 18)})`,
           completedAt: new Date().toISOString()
         });
         
         return NextResponse.json({ 
           success: false, 
-          error: 'Insufficient QR tokens' 
+          error: `Insufficient QR tokens (need ${claimAmount})` 
         });
       }
       
       // Check allowance
       const allowance = await qrTokenContract.allowance(adminWallet.address, DYNAMIC_AIRDROP_CONTRACT);
-      if (allowance < ethers.parseUnits('1000', 18)) {
+      if (allowance < requiredTokenAmount) {
         console.log('Approving tokens for airdrop contract...');
         
         // Increase gas price by 30%
@@ -435,7 +493,7 @@ export async function POST(req: NextRequest) {
       }
       
       // Prepare airdrop data
-      const airdropAmount = ethers.parseUnits('1000', 18);
+      const airdropAmount = ethers.parseUnits(claimAmount, 18);
       const airdropContent = [{
         recipient: failure.eth_address,
         amount: airdropAmount
@@ -571,7 +629,7 @@ export async function POST(req: NextRequest) {
           eth_address: failure.eth_address,
           link_visited_at: new Date().toISOString(),
           claimed_at: new Date().toISOString(),
-          amount: 1000,
+          amount: parseInt(claimAmount),
           tx_hash: txReceipt.hash,
           success: true,
           username: failure.username || null,
@@ -618,7 +676,7 @@ export async function POST(req: NextRequest) {
                   auto_banned: true,
                   total_claims_attempted: duplicateTxs.length, // Only count the duplicate transactions for THIS auction
                   duplicate_transactions: duplicateTxs,
-                  total_tokens_received: duplicateTxs.length * 1000,
+                  total_tokens_received: duplicateTxs.length * parseInt(claimAmount),
                   ban_metadata: {
                     trigger: 'queue_duplicate_tx',
                     auction_id: failure.auction_id,
@@ -662,7 +720,7 @@ export async function POST(req: NextRequest) {
           .update({
             eth_address: failure.eth_address,
             claimed_at: new Date().toISOString(),
-            amount: 1000,
+            amount: parseInt(claimAmount),
             tx_hash: txReceipt.hash,
             success: true,
             username: failure.username || null,

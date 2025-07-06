@@ -266,7 +266,7 @@ export async function getClaimAmountForAddress(
       .eq('is_active', true)
       .single();
     
-    return data?.amount || 100;
+    return { amount: data?.amount || 100 };
   } catch {
     return { amount: 100 };
   }

@@ -163,23 +163,30 @@ async function getWalletClaimAmounts(): Promise<{ emptyAmount: number; valueAmou
       .from('claim_amount_configs')
       .select('category, amount')
       .eq('is_active', true)
-      .in('category', ['wallet_empty', 'wallet_has_value']);
+      .in('category', ['wallet_empty', 'wallet_has_balance']);
 
     if (error) {
       console.error('Error fetching wallet claim amounts:', error);
-      return { emptyAmount: 100, valueAmount: 500 }; // Fallback values
+      throw new Error(`Failed to fetch wallet claim amounts: ${error.message}`);
     }
 
     const emptyConfig = data?.find(row => row.category === 'wallet_empty');
-    const valueConfig = data?.find(row => row.category === 'wallet_has_value');
+    const valueConfig = data?.find(row => row.category === 'wallet_has_balance');
+
+    if (!emptyConfig) {
+      throw new Error('Missing wallet_empty configuration in database');
+    }
+    if (!valueConfig) {
+      throw new Error('Missing wallet_has_balance configuration in database');
+    }
 
     return {
-      emptyAmount: emptyConfig?.amount || 100,
-      valueAmount: valueConfig?.amount || 500
+      emptyAmount: emptyConfig.amount,
+      valueAmount: valueConfig.amount
     };
   } catch (error) {
     console.error('Error fetching wallet claim amounts:', error);
-    return { emptyAmount: 100, valueAmount: 500 }; // Fallback values
+    throw error; // Re-throw to force proper error handling upstream
   }
 }
 
@@ -259,15 +266,24 @@ export async function getClaimAmountForAddress(
   
   // Mini-app users without Neynar score get default amount from database
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('claim_amount_configs')
       .select('amount')
       .eq('category', 'default')
       .eq('is_active', true)
       .single();
     
-    return { amount: data?.amount || 100 };
-  } catch {
-    return { amount: 100 };
+    if (error) {
+      throw new Error(`Failed to fetch default claim amount: ${error.message}`);
+    }
+    
+    if (!data) {
+      throw new Error('Missing default configuration in database');
+    }
+    
+    return { amount: data.amount };
+  } catch (error) {
+    console.error('Error fetching default claim amount:', error);
+    throw error; // Re-throw to force proper error handling upstream
   }
 }

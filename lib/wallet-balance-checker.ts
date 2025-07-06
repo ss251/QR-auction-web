@@ -268,6 +268,6 @@ export async function getClaimAmountForAddress(
     
     return data?.amount || 100;
   } catch {
-    return 100;
+    return { amount: 100 };
   }
 }

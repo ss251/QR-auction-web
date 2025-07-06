@@ -1,18 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { verifyAdmin } from '@/lib/auth';
+
+// Admin addresses (should match the ones in other admin endpoints)
+const ADMIN_ADDRESSES = [
+  "0xa8bea5bbf5fefd4bf455405be4bb46ef25f33467",
+  "0x09928cebb4c977c5e5db237a2a2ce5cd10497cb8",
+  "0x5b759ef9085c80cca14f6b54ee24373f8c765474",
+  "0xf7d4041e751e0b4f6ea72eb82f2b200d278704a4"
+];
 
 // Initialize Supabase client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+);
+
+function isAdmin(address: string): boolean {
+  return ADMIN_ADDRESSES.includes(address.toLowerCase());
+}
 
 // GET: Fetch all claim amount configurations
 export async function GET(request: NextRequest) {
   try {
-    // Verify admin authentication
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
+    // Check authorization
+    const authHeader = request.headers.get('authorization');
+    const address = authHeader?.replace('Bearer ', '');
+    
+    if (!address || !isAdmin(address)) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -37,9 +57,11 @@ export async function GET(request: NextRequest) {
 // POST: Update claim amount configurations
 export async function POST(request: NextRequest) {
   try {
-    // Verify admin authentication
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
+    // Check authorization
+    const authHeader = request.headers.get('authorization');
+    const address = authHeader?.replace('Bearer ', '');
+    
+    if (!address || !isAdmin(address)) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -78,7 +100,13 @@ export async function POST(request: NextRequest) {
       }
 
       // Build update object
-      const updateData: any = {};
+      const updateData: {
+        amount?: number;
+        description?: string;
+        is_active?: boolean;
+        min_score?: number;
+        max_score?: number;
+      } = {};
       if (amount !== undefined) updateData.amount = amount;
       if (description !== undefined) updateData.description = description;
       if (is_active !== undefined) updateData.is_active = is_active;
@@ -109,9 +137,11 @@ export async function POST(request: NextRequest) {
 // PUT: Create a new claim amount configuration
 export async function PUT(request: NextRequest) {
   try {
-    // Verify admin authentication
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
+    // Check authorization
+    const authHeader = request.headers.get('authorization');
+    const address = authHeader?.replace('Bearer ', '');
+    
+    if (!address || !isAdmin(address)) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -144,9 +174,11 @@ export async function PUT(request: NextRequest) {
 // DELETE: Delete a claim amount configuration
 export async function DELETE(request: NextRequest) {
   try {
-    // Verify admin authentication
-    const isAdmin = await verifyAdmin(request);
-    if (!isAdmin) {
+    // Check authorization
+    const authHeader = request.headers.get('authorization');
+    const address = authHeader?.replace('Bearer ', '');
+    
+    if (!address || !isAdmin(address)) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 

@@ -263,45 +263,47 @@ export function ClaimAmountsManager() {
               const displayDescription = editedValues[config.id]?.description ?? config.description;
               
               return (
-                <div key={config.id} className="flex items-center justify-between p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
-                  <div className="flex-1 space-y-2">
-                    <input
-                      type="text"
-                      value={displayDescription}
-                      onChange={(e) => handleValueChange(config.id, 'description', e.target.value)}
-                      className={`w-full p-2 border rounded-md ${
-                        hasChanges ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
-                      } bg-white dark:bg-gray-800 font-medium`}
-                      placeholder="Description"
-                    />
-                    <p className="text-sm text-gray-500">
-                      {config.category === 'wallet_empty' ? 'Empty wallets' : 'Wallets with ETH/tokens'}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
+                <div key={config.id} className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 space-y-2">
                       <input
-                        type="number"
-                        value={displayAmount}
-                        onChange={(e) => handleValueChange(config.id, 'amount', e.target.value)}
-                        className={`w-24 p-2 border rounded-md ${
+                        type="text"
+                        value={displayDescription}
+                        onChange={(e) => handleValueChange(config.id, 'description', e.target.value)}
+                        className={`w-full p-2 border rounded-md ${
                           hasChanges ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
-                        } bg-white dark:bg-gray-800`}
-                        min="0"
-                        step="100"
+                        } bg-white dark:bg-gray-800 font-medium`}
+                        placeholder="Description"
                       />
-                      <span className="text-sm text-gray-500">QR</span>
+                      <p className="text-sm text-gray-500">
+                        {config.category === 'wallet_empty' ? 'Empty wallets' : 'Wallets with ETH/tokens'}
+                      </p>
                     </div>
-                    <button
-                      onClick={() => toggleActive(config.id, config.is_active)}
-                      className={`px-3 py-1 rounded text-sm ${
-                        config.is_active
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-                          : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
-                      }`}
-                    >
-                      {config.is_active ? 'Active' : 'Inactive'}
-                    </button>
+                    <div className="flex items-center space-x-4 ml-4">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="number"
+                          value={displayAmount}
+                          onChange={(e) => handleValueChange(config.id, 'amount', e.target.value)}
+                          className={`w-24 p-2 border rounded-md ${
+                            hasChanges ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
+                          } bg-white dark:bg-gray-800`}
+                          min="0"
+                          step="100"
+                        />
+                        <span className="text-sm text-gray-500">QR</span>
+                      </div>
+                      <button
+                        onClick={() => toggleActive(config.id, config.is_active)}
+                        className={`px-3 py-1 rounded text-sm ${
+                          config.is_active
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400'
+                        }`}
+                      >
+                        {config.is_active ? 'Active' : 'Inactive'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

@@ -64,7 +64,7 @@ const RPC_URL = ALCHEMY_API_KEY ?
   'https://mainnet.base.org';
 
 // World Chain RPC URL
-const WORLD_CHAIN_RPC_URL = 'https://worldchain-mainnet.g.alchemy.com/public';
+const WORLD_CHAIN_RPC_URL = `https://worldchain-mainnet.g.alchemy.com/public/${ALCHEMY_API_KEY}`;
 
 // ERC20 ABI for approval
 const ERC20_ABI = [

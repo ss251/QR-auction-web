@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLinkVisitEligibility } from './useLinkVisitEligibility';
 import { frameSdk } from '@/lib/frame-sdk-singleton';
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useIdentityToken } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useIsMiniApp } from './useIsMiniApp';
@@ -11,9 +11,13 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
   const { miniAppType } = useIsMiniApp();
+  const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(0);
+  const [isCheckingAmount, setIsCheckingAmount] = useState(false);
+  const [hasCheckedAmount, setHasCheckedAmount] = useState(false);
 
   // Web-specific hooks
   const { authenticated, user, getAccessToken } = usePrivy();
+  const { identityToken } = useIdentityToken();
   const { address } = useAccount();
   const { client: smartWalletClient } = useSmartWallets();
   
@@ -37,6 +41,79 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     
     return twitterAccount?.username || null;
   };
+
+  // Fetch expected claim amount based on wallet holdings (web) or score (mini-app)
+  useEffect(() => {
+    async function fetchExpectedAmount() {
+      // Skip if no wallet address
+      if (!effectiveWalletAddress) {
+        setExpectedClaimAmount(0);
+        setHasCheckedAmount(false);
+        return;
+      }
+      
+      // For web/mobile users, check wallet balance to determine amount  
+      if (isWebContext) {
+        setIsCheckingAmount(true);
+        try {
+          const response = await fetch('/api/link-visit/check-amount', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              address: effectiveWalletAddress,
+              claimSource: 'web',
+              fid: frameContext?.user?.fid
+            })
+          });
+          
+          const data = await response.json();
+          if (data.success && data.amount) {
+            setExpectedClaimAmount(data.amount);
+            setHasCheckedAmount(true);
+            console.log(`💰 Dynamic claim amount for ${effectiveWalletAddress}: ${data.amount} QR`);
+          }
+        } catch (error) {
+          console.error('Error fetching dynamic claim amount:', error);
+          // Keep default amount on error
+        } finally {
+          setIsCheckingAmount(false);
+        }
+      } else if (frameContext?.user?.fid) {
+        // Mini-app users: Also check amount dynamically based on Neynar score
+        setIsCheckingAmount(true);
+        try {
+          const response = await fetch('/api/link-visit/check-amount', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              address: effectiveWalletAddress || '',
+              claimSource: miniAppType === 'world' ? 'world' : 'mini_app',
+              fid: frameContext.user.fid
+            })
+          });
+          
+          const data = await response.json();
+          if (data.success && data.amount) {
+            setExpectedClaimAmount(data.amount);
+            setHasCheckedAmount(true);
+            console.log(`💰 Dynamic claim amount for FID ${frameContext.user.fid}: ${data.amount} QR`);
+          }
+        } catch (error) {
+          console.error('Error fetching dynamic claim amount:', error);
+          // Keep default amount on error
+          setExpectedClaimAmount(100);
+        } finally {
+          setIsCheckingAmount(false);
+        }
+      }
+    }
+    
+    fetchExpectedAmount();
+  }, [isWebContext, frameContext?.user?.fid, effectiveWalletAddress]);
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {
@@ -130,7 +207,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
             winningUrl: winningUrl,
             address: effectiveWalletAddress,
             username: frameContext.user.username || null,
-            claimSource: 'mini_app'
+            claimSource: miniAppType === 'world' ? 'world' : 'mini_app'
           })
         });
 
@@ -252,7 +329,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         headers: {
           'Content-Type': 'application/json',
           'x-api-key': process.env.NEXT_PUBLIC_LINK_CLICK_API_KEY || '',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+          ...(identityToken ? { 'x-privy-id-token': identityToken } : {})
         },
         body: JSON.stringify({
           fid: fid,
@@ -290,6 +368,9 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   return {
     claimTokens,
     isClaimLoading,
-    handleLinkClick
+    handleLinkClick,
+    expectedClaimAmount,
+    isCheckingAmount,
+    hasCheckedAmount
   };
 } 

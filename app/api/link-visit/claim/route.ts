@@ -7,6 +7,7 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
+import { getClaimAmountForAddress } from '@/lib/wallet-balance-checker';
 
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
@@ -108,7 +109,7 @@ interface LinkVisitRequestData {
   winning_url?: string;
   claim_source?: string;
   captcha_token?: string; // Add captcha token
-  world_id?: string; // Add World ID for World users
+  world_id?: string; // Add world_id for World users
   [key: string]: unknown; // Allow other properties
 }
 
@@ -135,9 +136,11 @@ async function logFailedTransaction(params: {
   network_status?: string;
   retry_count?: number;
   client_ip?: string;
+  claim_source?: string;
 }) {
   try {
     // Check if this error is retryable BEFORE logging to database
+    // These errors will NOT be logged to the failure table or queued for retry
     const nonRetryableErrors = [
       'DUPLICATE_CLAIM', 
       'DUPLICATE_CLAIM_FID', 
@@ -151,7 +154,10 @@ async function logFailedTransaction(params: {
       'WEB_VALIDATION_ERROR',      // Missing parameters for web users
       'MINIAPP_VALIDATION_ERROR',  // Missing parameters for mini-app users
       'INVALID_MINIAPP_FID',       // Invalid FID values
-      'WEB_AUTH_ERROR'             // Invalid Privy authentication tokens
+      'WEB_AUTH_ERROR',            // Invalid Privy authentication tokens
+      'WEB_USERNAME_REQUIRED',     // Missing username for web claims
+      'BANNED_USERNAME_ATTEMPT',   // Banned username attempted claim
+      'BANNED_USER'                // User is banned
     ];
     
     // Only log to database if this will be queued for retry
@@ -293,7 +299,8 @@ async function logFailedTransaction(params: {
         gas_limit: params.gas_limit || null,
         network_status: params.network_status || null,
         retry_count: params.retry_count || 0,
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source: params.claim_source || 'mini_app'
       })
       .select('id')
       .single();
@@ -314,6 +321,7 @@ async function logFailedTransaction(params: {
       username: params.username as string | null,
       user_id: params.user_id as string | null,
       winning_url: params.winning_url as string | null,
+      claim_source: params.claim_source || 'mini_app',
     });
     console.log(`📋 QUEUED FOR RETRY: Failure ID=${data.id}`);
   } catch (logError) {
@@ -325,16 +333,26 @@ async function logFailedTransaction(params: {
 async function executeWithRetry<T>(
   operation: (attempt: number) => Promise<T>,
   maxRetries: number = 3,
-  initialDelayMs: number = 1000
+  initialDelayMs: number = 1000,
+  txHashCallback?: (hash: string) => void
 ): Promise<T> {
   let attempt = 0;
   let lastError: Error | unknown;
+  let lastTxHash: string | undefined;
 
   while (attempt <= maxRetries) {
     try {
       return await operation(attempt);
     } catch (error) {
       lastError = error;
+      
+      // Extract transaction hash if available for tracking
+      if (error && typeof error === 'object' && 'hash' in error) {
+        lastTxHash = (error as { hash?: string }).hash;
+        if (txHashCallback && lastTxHash) {
+          txHashCallback(lastTxHash);
+        }
+      }
       
       // Check if this is a retryable error
       const isRetryable = error instanceof Error && (
@@ -345,6 +363,21 @@ async function executeWithRetry<T>(
         error.message?.includes('network error') ||
         error.message?.includes('transaction execution reverted')
       );
+      
+      // For timeout errors, check if the transaction actually succeeded
+      if (error instanceof Error && error.message?.includes('timeout') && lastTxHash) {
+        console.log(`Transaction timed out, checking on-chain status for tx: ${lastTxHash}`);
+        try {
+          const provider = new ethers.JsonRpcProvider(RPC_URL);
+          const txReceipt = await provider.getTransactionReceipt(lastTxHash);
+          if (txReceipt && txReceipt.status === 1) {
+            console.log(`Transaction ${lastTxHash} actually succeeded on-chain despite timeout`);
+            return txReceipt as T;
+          }
+        } catch (checkError) {
+          console.error('Error checking transaction status:', checkError);
+        }
+      }
       
       // Don't retry if error is not retryable
       if (!isRetryable || attempt >= maxRetries) {
@@ -395,16 +428,16 @@ export async function POST(request: NextRequest) {
     const rateLimitWindow = 60000; // 1 minute
     
     if (isRateLimited(clientIP, rateLimit, rateLimitWindow)) {
-      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 'web/mobile' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
+      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 'web/mobile/world' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
       return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
     }
     
     // Log all requests with IP
     console.log(`💰 LINK VISIT CLAIM: IP=${clientIP}, FID=${fid || 'none'}, auction=${auction_id}, address=${address || 'none'}, username=${username || 'none'}, source=${claim_source || 'mini_app'}`);
     
-    // IP-based anti-bot validation (WEB USERS ONLY)
+    // IP-based anti-bot validation (WEB/WORLD USERS ONLY)
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for web claim protection`);
+      console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for ${claim_source} claim protection`);
       
       // Check 1: Max 3 claims per IP per auction
       const { data: ipClaimsThisAuction } = await supabase
@@ -427,7 +460,8 @@ export async function POST(request: NextRequest) {
           error_message: `IP ${clientIP} exceeded per-auction limit: ${ipClaimsThisAuction.length}/3 claims`,
           error_code: 'IP_AUCTION_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ 
@@ -464,7 +498,8 @@ export async function POST(request: NextRequest) {
           error_message: `IP ${clientIP} exceeded daily limit (${ipClaimsDaily.length}/5 claims in 24h)`,
           error_code: 'IP_DAILY_LIMIT_EXCEEDED',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ 
@@ -476,59 +511,7 @@ export async function POST(request: NextRequest) {
       console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/3, daily: ${ipClaimsDaily?.length || 0}/5)`);
     }
     
-    // CHECK BANNED USERS TABLE - applies to both web and mini-app users
-    // Check by FID (mini-app) or address (both)
-    const banCheckConditions = [];
-    
-    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
-      banCheckConditions.push(`fid.eq.${fid}`);
-    }
-    
-    if (address) {
-      banCheckConditions.push(`eth_address.ilike.${address}`);
-    }
-    
-    if (username && !NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      banCheckConditions.push(`username.ilike.${username}`);
-    }
-    
-    if (banCheckConditions.length > 0) {
-      const { data: bannedUser, error: banCheckError } = await supabase
-        .from('banned_users')
-        .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
-        .or(banCheckConditions.join(','))
-        .single();
-      
-      if (banCheckError && banCheckError.code !== 'PGRST116') { // PGRST116 = no rows found
-        console.error('Error checking banned users:', banCheckError);
-      }
-      
-      if (bannedUser) {
-        console.log(`🚫 BANNED USER BLOCKED: IP=${clientIP}, FID=${fid || bannedUser.fid}, username=${username || bannedUser.username}, address=${address || bannedUser.eth_address}, reason=${bannedUser.reason}`);
-        
-        // Update last attempt and increment counter
-        const currentAttempts = bannedUser.total_claims_attempted || 0;
-        await supabase
-          .from('banned_users')
-          .update({
-            last_attempt_at: new Date().toISOString(),
-            total_claims_attempted: currentAttempts + 1
-          })
-          .eq('fid', bannedUser.fid);
-        
-        // Also update IP addresses with raw SQL
-        await supabase.rpc('add_ip_to_banned_user', {
-          banned_fid: bannedUser.fid,
-          new_ip: clientIP
-        });
-        
-        return NextResponse.json({ 
-          success: false, 
-          error: 'This account has been banned due to policy violations',
-          code: 'BANNED_USER'
-        }, { status: 403 });
-      }
-    }
+    // Ban check moved to after authentication to access verified usernames
     
     // For mini-app claims, acquire FID lock first to prevent same FID claiming with multiple addresses
     if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
@@ -634,6 +617,8 @@ export async function POST(request: NextRequest) {
       let effectiveFid: number;
       let effectiveUsername: string | null = null;
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
+      let verifiedTwitterUsername: string | null = null; // Declare here for broader scope
+      let privyUserId: string = ''; // Declare here for broader scope
     
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       // Verify auth token for web/world users
@@ -642,17 +627,21 @@ export async function POST(request: NextRequest) {
         console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Missing or invalid authorization header`);
         return NextResponse.json({ 
           success: false, 
-          error: claim_source === 'world' ? 'Authentication required. Please sign in with World ID.' : 'Authentication required. Please sign in with Twitter.' 
+          error: 'Authentication required. Please sign in with Twitter.' 
         }, { status: 401 });
       }
       
       const authToken = authHeader.substring(7); // Remove 'Bearer ' prefix
       
+      // Check if we have an ID token in the request headers or cookies
+      // ID token is required to avoid rate limits when fetching user data
+      const idToken = request.headers.get('x-privy-id-token') || 
+                     request.cookies.get('privy-id-token')?.value;
+      
       // Verify the Privy auth token and extract userId
-      let privyUserId: string;
       let hasWorldId = false;
       try {
-        // Verify the auth token with Privy's API
+        // First verify the auth token
         const verifiedClaims = await privyClient.verifyAuthToken(authToken);
         
         // Check if the token is valid and user is authenticated
@@ -663,7 +652,7 @@ export async function POST(request: NextRequest) {
         // Check if user has World ID linked for World claims
         if (claim_source === 'world') {
           // For World users, we check if they have a World ID in their claims
-          const user = await privyClient.getUser(verifiedClaims.userId);
+          const user = await privyClient.getUser({ idToken: idToken! });
           hasWorldId = user.linkedAccounts?.some((account: { type: string }) => account.type === 'world_id');
           
           if (!hasWorldId) {
@@ -675,8 +664,45 @@ export async function POST(request: NextRequest) {
           }
         }
         
-        // Use the verified Privy userId instead of untrusted username input
+        // Use the verified Privy userId
         privyUserId = verifiedClaims.userId;
+        
+        // Try to get full user data using idToken (to avoid rate limits) - only for web users
+        if (claim_source === 'web') {
+          try {
+            if (!idToken) {
+              console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, No ID token provided - cannot verify Twitter username`);
+              // NO FALLBACK - we require verified Twitter username from Privy
+              verifiedTwitterUsername = null;
+            } else {
+              // This method verifies the token and returns the user object without rate limits
+              const user = await privyClient.getUser({ idToken });
+              
+              // Extract Twitter username from linked accounts
+              if (user && user.linkedAccounts) {
+                const twitterAccount = user.linkedAccounts.find((account) => 
+                  account.type === 'twitter_oauth'
+                );
+                
+                if (twitterAccount && 'username' in twitterAccount) {
+                  verifiedTwitterUsername = twitterAccount.username;
+                  console.log(`✅ WEB AUTH: IP=${clientIP}, Verified Privy User: ${privyUserId}, Twitter: @${verifiedTwitterUsername}`);
+                } else {
+                  console.log(`⚠️ WEB AUTH: IP=${clientIP}, User ${privyUserId} has no Twitter account linked`);
+                  verifiedTwitterUsername = null;
+                }
+              } else {
+                console.log(`⚠️ WEB AUTH: IP=${clientIP}, Could not retrieve user data from ID token`);
+                verifiedTwitterUsername = null;
+              }
+            }
+          } catch (getUserError) {
+            console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Failed to verify user with ID token:`, getUserError);
+            // NO FALLBACK - username must be verified through Privy to prevent duplicates
+            verifiedTwitterUsername = null;
+          }
+        }
+        
         console.log(`✅ AUTH SUCCESS: IP=${clientIP}, claim_source=${claim_source}, Verified User: ${privyUserId}${hasWorldId ? ' (has World ID)' : ''}`);
       } catch (error) {
         console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Invalid auth token:`, error);
@@ -688,7 +714,7 @@ export async function POST(request: NextRequest) {
       
       // Web/World users need address and auction_id
       if (!address || !auction_id) {
-        console.log(`🚫 VALIDATION ERROR: IP=${clientIP}, claim_source=${claim_source}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
+        console.log(`🚫 WEB/WORLD VALIDATION ERROR: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
 
         const addressHash = address?.slice(2).toLowerCase(); // Remove 0x and lowercase
         const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
@@ -699,19 +725,75 @@ export async function POST(request: NextRequest) {
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
           username: privyUserId, // Use verified Privy userId
-          user_id: privyUserId, // For web claims, store the verified userId
+          user_id: privyUserId, // For web/world claims, store the verified userId
           winning_url: null,
-          error_message: 'Missing required parameters for web user (address or auction_id)',
+          error_message: `Missing required parameters for ${claim_source} user (address or auction_id)`,
           error_code: 'WEB_VALIDATION_ERROR',
           request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
+          client_ip: clientIP,
+          claim_source
         });
         
         return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
       }
+      
+      // NEW: Enforce username requirement for web claims (not for World users)
+      if (claim_source === 'web' && !verifiedTwitterUsername) {
+        console.log(`🚫 WEB USERNAME REQUIRED: IP=${clientIP}, User ${privyUserId} attempted claim without username`);
+        
+        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
+        effectiveFid = -(hashNumber % 1000000000);
+        
+        await logFailedTransaction({
+          fid: effectiveFid,
+          eth_address: address || 'unknown',
+          auction_id: auction_id,
+          username: null,
+          user_id: privyUserId,
+          winning_url: null,
+          error_message: 'Username required for web claims to prevent exploitation',
+          error_code: 'WEB_USERNAME_REQUIRED',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Username is required to claim $QR. Please ensure your account username is included in the request.' 
+        }, { status: 400 });
+      }
+
+      // NEW: Specific ban on "anj_juan23582" username
+      if (verifiedTwitterUsername && verifiedTwitterUsername.toLowerCase() === 'anj_juan23582') {
+        console.log(`🚫 SPECIFIC USERNAME BAN: IP=${clientIP}, Banned username "${verifiedTwitterUsername}" attempted to claim`);
+        
+        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
+        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
+        effectiveFid = -(hashNumber % 1000000000);
+        
+        await logFailedTransaction({
+          fid: effectiveFid,
+          eth_address: address || 'unknown',
+          auction_id: auction_id,
+          username: verifiedTwitterUsername,
+          user_id: privyUserId,
+          winning_url: null,
+          error_message: `Banned username attempted claim: ${verifiedTwitterUsername}`,
+          error_code: 'BANNED_USERNAME_ATTEMPT',
+          request_data: { ...requestData, clientIP } as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'This account is not eligible to claim $QR.' 
+        }, { status: 403 });
+      }
+      
       // Create a unique negative FID from wallet address hash
-      const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
-      const hashNumber = parseInt(addressHash.slice(0, 8), 16); // Take first 8 hex chars
+      const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
+      const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16); // Take first 8 hex chars
       
       if (claim_source === 'world') {
         // World users get a different FID range
@@ -722,9 +804,9 @@ export async function POST(request: NextRequest) {
       } else {
         // Web users (Twitter)
         effectiveFid = -(hashNumber % 1000000000); // Make it negative and limit size
-        effectiveUsername = username || null; // Keep original username from request for display/logging
+        effectiveUsername = verifiedTwitterUsername; // Use verified Twitter username from Privy
         effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
-        console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Display username=${username || 'none'}`);
+        console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Username=@${verifiedTwitterUsername}`);
       }
     } else {
       // Mini-app users need fid, address, auction_id, and username
@@ -771,6 +853,141 @@ export async function POST(request: NextRequest) {
       effectiveUsername = username; // Use actual username for mini-app users
       effectiveUserId = null; // Mini-app users don't have Privy userId
     }
+    
+    // CHECK BANNED USERS TABLE - applies to both web and mini-app users
+    // Enhanced username checking with multiple approaches for better coverage
+    console.log(`🔍 BAN CHECK: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address}`);
+    
+    // Check 1: By FID (only for mini-app users with real Farcaster FIDs)
+    if (effectiveFid && effectiveFid > 0) {
+      const { data: bannedByFid, error: fidBanError } = await supabase
+        .from('banned_users')
+        .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
+        .eq('fid', effectiveFid)
+        .maybeSingle();
+      
+      if (fidBanError) {
+        console.error('Error checking banned users by FID:', fidBanError);
+      }
+      
+      if (bannedByFid) {
+        console.log(`🚫 BANNED USER BLOCKED BY FID: IP=${clientIP}, FID=${effectiveFid}, banned_username=${bannedByFid.username}, reason=${bannedByFid.reason}`);
+        
+        // Update last attempt and increment counter
+        const currentAttempts = bannedByFid.total_claims_attempted || 0;
+        await supabase
+          .from('banned_users')
+          .update({
+            last_attempt_at: new Date().toISOString(),
+            total_claims_attempted: currentAttempts + 1
+          })
+          .eq('fid', bannedByFid.fid);
+        
+        // Also update IP addresses with raw SQL
+        await supabase.rpc('add_ip_to_banned_user', {
+          banned_fid: bannedByFid.fid,
+          new_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'This account has been banned due to policy violations',
+          code: 'BANNED_USER'
+        }, { status: 403 });
+      }
+    }
+    
+    // Check 2: By Username (case-insensitive, with and without @ prefix)
+    if (effectiveUsername) {
+      const usernameVariants = [
+        effectiveUsername.toLowerCase(),
+        effectiveUsername.toLowerCase().replace(/^@/, ''), // Remove @ if present
+        `@${effectiveUsername.toLowerCase().replace(/^@/, '')}`, // Add @ if not present
+        effectiveUsername // Original case
+      ];
+      
+      console.log(`🔍 Checking username variants: ${usernameVariants.join(', ')}`);
+      
+      for (const usernameVariant of usernameVariants) {
+        const { data: bannedByUsername, error: usernameBanError } = await supabase
+          .from('banned_users')
+          .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
+          .ilike('username', usernameVariant)
+          .maybeSingle();
+        
+        if (usernameBanError) {
+          console.error(`Error checking banned users by username "${usernameVariant}":`, usernameBanError);
+          continue;
+        }
+        
+        if (bannedByUsername) {
+          console.log(`🚫 BANNED USER BLOCKED BY USERNAME: IP=${clientIP}, username=${effectiveUsername}, banned_as=${bannedByUsername.username}, FID=${bannedByUsername.fid}, reason=${bannedByUsername.reason}`);
+          
+          // Update last attempt and increment counter
+          const currentAttempts = bannedByUsername.total_claims_attempted || 0;
+          await supabase
+            .from('banned_users')
+            .update({
+              last_attempt_at: new Date().toISOString(),
+              total_claims_attempted: currentAttempts + 1
+            })
+            .eq('fid', bannedByUsername.fid);
+          
+          // Also update IP addresses with raw SQL
+          await supabase.rpc('add_ip_to_banned_user', {
+            banned_fid: bannedByUsername.fid,
+            new_ip: clientIP
+          });
+          
+          return NextResponse.json({ 
+            success: false, 
+            error: 'This account has been banned due to policy violations',
+            code: 'BANNED_USER'
+          }, { status: 403 });
+        }
+      }
+    }
+    
+    // Check 3: By ETH Address (case-insensitive)
+    if (address) {
+      const { data: bannedByAddress, error: addressBanError } = await supabase
+        .from('banned_users')
+        .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
+        .ilike('eth_address', address)
+        .maybeSingle();
+      
+      if (addressBanError) {
+        console.error('Error checking banned users by address:', addressBanError);
+      }
+      
+      if (bannedByAddress) {
+        console.log(`🚫 BANNED USER BLOCKED BY ADDRESS: IP=${clientIP}, address=${address}, banned_username=${bannedByAddress.username}, FID=${bannedByAddress.fid}, reason=${bannedByAddress.reason}`);
+        
+        // Update last attempt and increment counter
+        const currentAttempts = bannedByAddress.total_claims_attempted || 0;
+        await supabase
+          .from('banned_users')
+          .update({
+            last_attempt_at: new Date().toISOString(),
+            total_claims_attempted: currentAttempts + 1
+          })
+          .eq('fid', bannedByAddress.fid);
+        
+        // Also update IP addresses with raw SQL
+        await supabase.rpc('add_ip_to_banned_user', {
+          banned_fid: bannedByAddress.fid,
+          new_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'This account has been banned due to policy violations',
+          code: 'BANNED_USER'
+        }, { status: 403 });
+      }
+    }
+    
+    console.log(`✅ BAN CHECK PASSED: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - No bans found`);
     
     // Validate that this is the latest settled auction
     try {
@@ -893,6 +1110,242 @@ export async function POST(request: NextRequest) {
     
     console.log(`✅ CLEANUP COMPLETE: Ready to proceed with new claim`);
     
+    // Handle World users differently - use World Chain for WLD airdrop
+    if (claim_source === 'world') {
+      console.log(`Preparing World ID claim: 1 WLD to ${address}`);
+      
+      try {
+        // Set up World Chain provider and wallet
+        const worldProvider = new ethers.JsonRpcProvider(WORLD_CHAIN_RPC_URL);
+        const worldContractAddresses = getContractAddresses('world');
+        
+        if (!worldContractAddresses.ADMIN_PRIVATE_KEY) {
+          console.log('World admin private key not configured');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'World configuration error' 
+          }, { status: 500 });
+        }
+        
+        const worldAdminWallet = new ethers.Wallet(worldContractAddresses.ADMIN_PRIVATE_KEY, worldProvider);
+        console.log(`Using World admin wallet: ${worldAdminWallet.address}`);
+        
+        // Check wallet balance on World Chain
+        const worldBalance = await worldProvider.getBalance(worldAdminWallet.address);
+        console.log(`World wallet balance: ${ethers.formatEther(worldBalance)} ETH`);
+        
+        if (worldBalance < ethers.parseEther("0.001")) {
+          console.error('World admin wallet has insufficient ETH for gas');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'World wallet has insufficient gas' 
+          }, { status: 500 });
+        }
+        
+        // World users get fixed 1 WLD token (no dynamic amount calculation)
+        const worldAirdropAmount = ethers.parseUnits('1', 18); // 1 WLD (18 decimals)
+        
+        // Create WLD token contract instance on World Chain
+        const wldTokenContract = new ethers.Contract(
+          WLD_TOKEN_ADDRESS,
+          ERC20_ABI,
+          worldAdminWallet
+        );
+        
+        // Create airdrop contract instance on World Chain
+        const worldAirdropContract = new ethers.Contract(
+          worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
+          AirdropABI.abi,
+          worldAdminWallet
+        );
+        
+        // Check WLD balance
+        const wldBalance = await wldTokenContract.balanceOf(worldAdminWallet.address);
+        console.log(`Admin WLD balance: ${ethers.formatUnits(wldBalance, 18)}`);
+        
+        if (wldBalance < worldAirdropAmount) {
+          console.error('Admin wallet has insufficient WLD for airdrop');
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Insufficient WLD balance' 
+          }, { status: 500 });
+        }
+        
+        // Check and approve if needed
+        const allowance = await wldTokenContract.allowance(worldAdminWallet.address, worldContractAddresses.AIRDROP_CONTRACT_ADDRESS);
+        console.log(`Current WLD allowance: ${ethers.formatUnits(allowance, 18)}`);
+        
+        if (allowance < worldAirdropAmount) {
+          console.log('Approving WLD for transfer...');
+          const approveTx = await wldTokenContract.approve(
+            worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
+            worldAirdropAmount
+          );
+          console.log(`WLD approval tx: ${approveTx.hash}`);
+          await approveTx.wait();
+          console.log('WLD approval confirmed');
+        }
+        
+        // Execute the airdrop
+        console.log(`Executing WLD airdrop to ${address}...`);
+        const airdropTx = await executeWithRetry(
+          async (attempt) => {
+            console.log(`Airdrop attempt ${attempt + 1}...`);
+            return await worldAirdropContract.airdrop(
+              [address],
+              [worldAirdropAmount],
+              WLD_TOKEN_ADDRESS,
+              {
+                gasLimit: 200000n
+              }
+            );
+          },
+          3,
+          2000
+        );
+        
+        console.log(`WLD airdrop tx submitted: ${airdropTx.hash}`);
+        
+        // Wait for confirmation with timeout
+        const confirmationPromise = airdropTx.wait();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Transaction confirmation timeout')), 55000)
+        );
+        
+        try {
+          await Promise.race([confirmationPromise, timeoutPromise]);
+          console.log(`✅ WLD airdrop confirmed! TX: ${airdropTx.hash}`);
+        } catch (waitError) {
+          console.error('Error waiting for WLD airdrop confirmation:', waitError);
+          // Even if timeout, the transaction might succeed
+          console.log('Transaction confirmation timeout, but transaction may still succeed');
+        }
+        
+        // Record in link_visit_claims only
+        const { error: insertError } = await supabase
+          .from('link_visit_claims')
+          .insert({
+            fid: effectiveFid,
+            auction_id: auction_id,
+            eth_address: address,
+            link_visited_at: new Date().toISOString(),
+            claimed_at: new Date().toISOString(),
+            amount: 1, // 1 WLD
+            tx_hash: airdropTx.hash,
+            success: true,
+            username: effectiveUsername,
+            user_id: effectiveUserId,
+            winning_url: winningUrl,
+            claim_source: 'world',
+            client_ip: clientIP
+          });
+        
+        if (insertError && insertError.code !== '23505') {
+          console.warn('Error inserting World claim record:', insertError);
+        }
+        
+        return NextResponse.json({ 
+          success: true, 
+          tx_hash: airdropTx.hash,
+          message: 'Successfully airdropped 1 WLD!'
+        });
+        
+      } catch (error) {
+        console.error('Error processing World claim:', error);
+        
+        // Log failed transaction for retry
+        await logFailedTransaction({
+          fid: effectiveFid,
+          eth_address: address,
+          auction_id,
+          username: effectiveUsername,
+          user_id: effectiveUserId,
+          winning_url: winningUrl,
+          error_message: error instanceof Error ? error.message : 'World airdrop failed',
+          error_code: 'WORLD_AIRDROP_ERROR',
+          request_data: requestData as Record<string, unknown>,
+          client_ip: clientIP
+        });
+        
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Failed to process World claim' 
+        }, { status: 500 });
+      }
+    }
+    
+    // Define airdrop amount based on claim source and user score (for non-World users)
+    let claimAmount: string;
+    let neynarScore: number | undefined;
+    let spamLabel: boolean | null = null;
+    
+    if (claim_source === 'web' || claim_source === 'mobile') {
+      // Web/mobile users: wallet holdings only (no Neynar scores)
+      try {
+        const claimResult = await getClaimAmountForAddress(
+          address,
+          claim_source,
+          ALCHEMY_API_KEY,
+          undefined // No FID for web users - they don't get Neynar scores
+        );
+        claimAmount = claimResult.amount.toString();
+        neynarScore = undefined; // Web users don't get Neynar scores
+        console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
+      } catch (error) {
+        console.error('Error checking claim amount, using default:', error);
+        claimAmount = '500'; // Fallback to original amount
+      }
+    } else {
+      // Mini-app users: use unified function that checks Neynar score
+      try {
+        const claimResult = await getClaimAmountForAddress(
+          address || '',
+          claim_source || 'mini_app',
+          ALCHEMY_API_KEY,
+          effectiveFid
+        );
+        claimAmount = claimResult.amount.toString();
+        neynarScore = claimResult.neynarScore;
+        
+        // Handle spam label for mini-app users with FIDs
+        if (effectiveFid && effectiveFid > 0) {
+          if (claimResult.hasSpamLabelOverride) {
+            // hasSpamLabelOverride means they have label_value = 2 (not spam)
+            spamLabel = false;
+            console.log(`📊 FID ${effectiveFid} has spam override (label_value 2) → spam_label: false`);
+          } else {
+            // No override, check if they have any spam label
+            try {
+              const { data: spamLabelData, error: spamLabelError } = await supabase
+                .from('spam_labels')
+                .select('label_value')
+                .eq('fid', effectiveFid)
+                .maybeSingle();
+              
+              if (!spamLabelError && spamLabelData) {
+                // Convert label_value to boolean: 0 = true (spam), 2 = false (not spam)
+                spamLabel = spamLabelData.label_value === 0;
+                console.log(`📊 FID ${effectiveFid} has label_value ${spamLabelData.label_value} → spam_label: ${spamLabel}`);
+              } else {
+                console.log(`📊 FID ${effectiveFid} has no spam label data`);
+              }
+            } catch (error) {
+              console.error('Error checking spam labels:', error);
+            }
+          }
+        }
+        
+        console.log(`💰 Mini-app claim amount for FID ${effectiveFid}: ${claimAmount} QR, Neynar score: ${neynarScore}, spam_label: ${spamLabel}`);
+      } catch (error) {
+        console.error('Error determining mini-app claim amount:', error);
+        claimAmount = '100'; // Fallback to default
+      }
+    }
+    
+    const airdropAmount = ethers.parseUnits(claimAmount, 18);
+    console.log(`Preparing airdrop of ${claimAmount} QR tokens to ${address}`);
+    
+    // Continue with regular QR token airdrop for non-World users
     // Initialize ethers provider and get wallet from pool
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     walletPool = getWalletPool(provider);
@@ -980,178 +1433,7 @@ export async function POST(request: NextRequest) {
           error: errorMessage
         }, { status: 500 });
       }
-    
-    // Define airdrop amount based on claim source
-    // World users get 1 WLD, others get 1000 QR tokens
-    const isWorldUser = claim_source === 'world';
-    const airdropAmount = isWorldUser 
-      ? ethers.parseUnits('1', 18) // 1 WLD (18 decimals)
-      : ethers.parseUnits('1000', 18); // 1000 QR tokens
-    
-    // Handle World users differently - use World Chain for WLD airdrop
-    if (isWorldUser) {
-      console.log(`Preparing World ID claim: 1 WLD to ${address}`);
       
-      try {
-        // Set up World Chain provider and wallet
-        const worldProvider = new ethers.JsonRpcProvider(WORLD_CHAIN_RPC_URL);
-        const worldContractAddresses = getContractAddresses('world');
-        
-        if (!worldContractAddresses.ADMIN_PRIVATE_KEY) {
-          console.log('World admin private key not configured');
-          return NextResponse.json({ 
-            success: false, 
-            error: 'World configuration error' 
-          }, { status: 500 });
-        }
-        
-        const worldAdminWallet = new ethers.Wallet(worldContractAddresses.ADMIN_PRIVATE_KEY, worldProvider);
-        console.log(`Using World admin wallet: ${worldAdminWallet.address}`);
-        
-        // Check wallet balance on World Chain
-        const worldBalance = await worldProvider.getBalance(worldAdminWallet.address);
-        console.log(`World wallet balance: ${ethers.formatEther(worldBalance)} ETH`);
-        
-        if (worldBalance < ethers.parseEther("0.001")) {
-          console.error('World admin wallet has insufficient ETH for gas');
-          return NextResponse.json({ 
-            success: false, 
-            error: 'World wallet has insufficient gas' 
-          }, { status: 500 });
-        }
-        
-        // Create WLD token contract instance on World Chain
-        const wldTokenContract = new ethers.Contract(
-          WLD_TOKEN_ADDRESS,
-          ERC20_ABI,
-          worldAdminWallet
-        );
-        
-        // Create airdrop contract instance on World Chain
-        const worldAirdropContract = new ethers.Contract(
-          worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
-          AirdropABI.abi,
-          worldAdminWallet
-        );
-        
-        // Check WLD balance
-        const wldBalance = await wldTokenContract.balanceOf(worldAdminWallet.address);
-        console.log(`Admin WLD balance: ${ethers.formatUnits(wldBalance, 18)}`);
-        
-        if (wldBalance < airdropAmount) {
-          console.error('Admin wallet has insufficient WLD for airdrop');
-          return NextResponse.json({ 
-            success: false, 
-            error: 'Insufficient WLD balance' 
-          }, { status: 500 });
-        }
-        
-        // Check and approve if needed
-        const allowance = await wldTokenContract.allowance(worldAdminWallet.address, worldContractAddresses.AIRDROP_CONTRACT_ADDRESS);
-        console.log(`Current WLD allowance: ${ethers.formatUnits(allowance, 18)}`);
-        
-        if (allowance < airdropAmount) {
-          console.log('Approving WLD for transfer...');
-          const approveTx = await wldTokenContract.approve(
-            worldContractAddresses.AIRDROP_CONTRACT_ADDRESS,
-            airdropAmount
-          );
-          console.log(`WLD approval tx: ${approveTx.hash}`);
-          await approveTx.wait();
-          console.log('WLD approval confirmed');
-        }
-        
-        // Execute the airdrop
-        console.log(`Executing WLD airdrop to ${address}...`);
-        const airdropTx = await executeWithRetry(
-          async (attempt) => {
-            console.log(`Airdrop attempt ${attempt + 1}...`);
-            return await worldAirdropContract.airdrop(
-              [address],
-              [airdropAmount],
-              WLD_TOKEN_ADDRESS,
-              {
-                gasLimit: 200000n
-              }
-            );
-          },
-          3,
-          2000
-        );
-        
-        console.log(`WLD airdrop tx submitted: ${airdropTx.hash}`);
-        
-        // Wait for confirmation with timeout
-        const confirmationPromise = airdropTx.wait();
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Transaction confirmation timeout')), 55000)
-        );
-        
-        try {
-          await Promise.race([confirmationPromise, timeoutPromise]);
-          console.log(`✅ WLD airdrop confirmed! TX: ${airdropTx.hash}`);
-        } catch (waitError) {
-          console.error('Error waiting for WLD airdrop confirmation:', waitError);
-          // Even if timeout, the transaction might succeed
-          console.log('Transaction confirmation timeout, but transaction may still succeed');
-        }
-        
-        // Record in link_visit_claims only
-        const { error: insertError } = await supabase
-          .from('link_visit_claims')
-          .insert({
-            fid: effectiveFid,
-            auction_id: auction_id,
-            eth_address: address,
-            link_visited_at: new Date().toISOString(),
-            claimed_at: new Date().toISOString(),
-            amount: 1, // 1 WLD
-            tx_hash: airdropTx.hash,
-            success: true,
-            username: effectiveUsername,
-            user_id: effectiveUserId,
-            winning_url: winningUrl,
-            claim_source: 'world',
-            client_ip: clientIP
-          });
-        
-        if (insertError && insertError.code !== '23505') {
-          console.warn('Error inserting World claim record:', insertError);
-        }
-        
-        return NextResponse.json({ 
-          success: true, 
-          tx_hash: airdropTx.hash,
-          message: 'Successfully airdropped 1 WLD!'
-        });
-        
-      } catch (error) {
-        console.error('Error processing World claim:', error);
-        
-        // Log failed transaction for retry
-        await logFailedTransaction({
-          fid: effectiveFid,
-          eth_address: address,
-          auction_id,
-          username: effectiveUsername,
-          user_id: effectiveUserId,
-          winning_url: winningUrl,
-          error_message: error instanceof Error ? error.message : 'World airdrop failed',
-          error_code: 'WORLD_AIRDROP_ERROR',
-          request_data: requestData as Record<string, unknown>,
-          client_ip: clientIP
-        });
-        
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Failed to process World claim' 
-        }, { status: 500 });
-      }
-    }
-    
-    // Non-World users continue with regular contract-based airdrop
-    console.log(`Preparing airdrop of 1,000 QR tokens to ${address}`);
-    
       // Create contract instances using the dynamic contract from wallet pool
       const airdropContract = new ethers.Contract(
         DYNAMIC_AIRDROP_CONTRACT,
@@ -1213,7 +1495,7 @@ export async function POST(request: NextRequest) {
           // Add timeout wrapper around the wait to prevent Vercel timeouts
           const approvalPromise = approveTx.wait();
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Approval transaction timeout after 55 seconds')), 55000)
+            setTimeout(() => reject(new Error('Approval transaction timeout after 45 seconds')), 45000)
           );
           
           try {
@@ -1231,7 +1513,7 @@ export async function POST(request: NextRequest) {
             if (errorMessage.includes('timeout') && txHash) {
               console.log('Approval timed out, checking if it actually succeeded on-chain...');
               try {
-                const currentAllowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS);
+                const currentAllowance = await qrTokenContract.allowance(adminWallet.address, DYNAMIC_AIRDROP_CONTRACT);
                 if (currentAllowance >= airdropAmount) {
                   console.log('Approval actually succeeded on-chain despite timeout, continuing...');
                   // Continue with the airdrop - don't return error
@@ -1343,8 +1625,10 @@ export async function POST(request: NextRequest) {
     console.log('Executing airdrop...');
     
     // Execute the airdrop with retry logic
+    let submittedTxHash: string | undefined;
+    
     try {
-      // Wrap the transaction in the retry function
+      // Wrap the transaction in the retry function with tx hash tracking
       const receipt = await executeWithRetry(async (attempt) => {
         // Get fresh nonce each time
         const nonce = await provider.getTransactionCount(adminWallet.address, 'latest');
@@ -1370,12 +1654,16 @@ export async function POST(request: NextRequest) {
           );
           
           console.log(`Airdrop tx submitted: ${tx.hash}`);
+          submittedTxHash = tx.hash; // Store the hash
           
           // Add timeout wrapper around the wait to prevent Vercel timeouts
+          // Reduced timeout to 45 seconds to leave room for database operations
           const airdropPromise = tx.wait();
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Airdrop transaction timeout after 55 seconds')), 55000)
-          );
+          const timeoutPromise = new Promise((_, reject) => {
+            const timeoutError = new Error('Airdrop transaction timeout after 45 seconds');
+            (timeoutError as { hash?: string }).hash = tx.hash; // Attach hash to error
+            setTimeout(() => reject(timeoutError), 45000);
+          });
           
           const receipt = await Promise.race([airdropPromise, timeoutPromise]) as Awaited<ReturnType<typeof airdropContract.airdropERC20>>;
           console.log(`Airdrop confirmed in block ${receipt.blockNumber}`);
@@ -1390,7 +1678,7 @@ export async function POST(request: NextRequest) {
             : 'Unknown transaction error';
           
           const errorCode = (txError as { code?: string }).code;
-          const txHash = (txError as { hash?: string }).hash;
+          const txHash = submittedTxHash || (txError as { hash?: string }).hash;
           
           // Only log to database if this is the final attempt or a non-retryable error
           const isRetryable = txErrorMessage.includes('replacement fee too low') ||
@@ -1421,6 +1709,8 @@ export async function POST(request: NextRequest) {
           
           throw txError; // Re-throw for retry mechanism
         }
+      }, 2, 1000, (hash) => {
+        submittedTxHash = hash; // Update the hash if provided by callback
       });
       
       // Insert a new record, don't upsert over existing record
@@ -1432,14 +1722,16 @@ export async function POST(request: NextRequest) {
           eth_address: address, 
           link_visited_at: new Date().toISOString(), // Ensure we mark it as visited
           claimed_at: new Date().toISOString(),
-          amount: 1000, // 1,000 QR tokens
+          amount: parseInt(claimAmount), // Variable QR tokens based on source and score
           tx_hash: receipt.hash,
           success: true,
           username: effectiveUsername, // Display username (from request for mini-app, null for web)
           user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
           winning_url: winningUrl,
           claim_source: claim_source || 'mini_app',
-          client_ip: clientIP // Track IP for successful claims
+          client_ip: clientIP, // Track IP for successful claims
+          neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
+          spam_label: spamLabel // Store the spam label
         });
         
       if (insertError) {
@@ -1484,7 +1776,7 @@ export async function POST(request: NextRequest) {
                   auto_banned: true,
                   total_claims_attempted: duplicateTxs.length, // Only count the duplicate transactions for THIS auction
                   duplicate_transactions: duplicateTxs,
-                  total_tokens_received: duplicateTxs.length * 1000,
+                  total_tokens_received: duplicateTxs.length * parseInt(claimAmount),
                   ban_metadata: {
                     trigger: 'duplicate_blockchain_tx_detected',
                     auction_id: auction_id,
@@ -1526,14 +1818,16 @@ export async function POST(request: NextRequest) {
           .update({
             eth_address: address,
             claimed_at: new Date().toISOString(),
-            amount: 1000, // 1,000 QR tokens
+            amount: parseInt(claimAmount), // Variable QR tokens based on source and score
             tx_hash: receipt.hash,
             success: true,
             username: effectiveUsername, // Display username (from request for mini-app, null for web)
             user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
             winning_url: winningUrl,
             claim_source: claim_source || 'mini_app',
-            client_ip: clientIP // Track IP for successful claims
+            client_ip: clientIP, // Track IP for successful claims
+            neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
+            spam_label: spamLabel // Store the spam label
           })
           .match({
             fid: effectiveFid,
@@ -1567,8 +1861,90 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      // REMOVED: Overly aggressive auto-ban check that was banning legitimate users
-      // Auto-ban only happens when we detect actual exploitation (duplicate blockchain transactions)
+      // NEW AUTO-BAN CHECK: Web users claiming with same username but different addresses FOR THE SAME AUCTION
+      if (NON_FC_CLAIM_SOURCES.includes(claim_source || '') && effectiveUsername) {
+        console.log(`🔍 Checking for multiple claims by username: ${effectiveUsername} for auction ${auction_id}`);
+        
+        // Check how many successful claims this username has made for THIS SPECIFIC AUCTION
+        const { data: usernameClaimsData, error: usernameClaimsError } = await supabase
+          .from('link_visit_claims')
+          .select('id, eth_address, auction_id, claimed_at, tx_hash')
+          .eq('username', effectiveUsername)
+          .eq('auction_id', auction_id) // Only check current auction
+          .in('claim_source', NON_FC_CLAIM_SOURCES)
+          .not('tx_hash', 'is', null)
+          .not('claimed_at', 'is', null)
+          .order('claimed_at', { ascending: false });
+        
+        if (usernameClaimsError) {
+          console.error('Error checking username claims for auto-ban:', usernameClaimsError);
+        } else if (usernameClaimsData && usernameClaimsData.length >= 2) {
+          // Check if this is a 3rd+ claim with a DIFFERENT address for the same auction
+          const uniqueAddresses = new Set(usernameClaimsData.map(claim => claim.eth_address.toLowerCase()));
+          uniqueAddresses.add(address.toLowerCase()); // Add current address
+          
+          if (uniqueAddresses.size > 2) {
+            console.log(`🚨 AUTO-BAN TRIGGERED: Username "${effectiveUsername}" attempting ${uniqueAddresses.size}rd unique address claim for auction ${auction_id}`);
+            console.log(`🚨 Previous addresses used: ${Array.from(uniqueAddresses).slice(0, -1).join(', ')}`);
+            console.log(`🚨 Attempting new address: ${address}`);
+            
+            try {
+              // Ban this user immediately for exploiting multiple addresses on same auction
+              const { error: banError } = await supabase
+                .from('banned_users')
+                .insert({
+                  fid: effectiveFid,
+                  username: effectiveUsername,
+                  eth_address: address,
+                  reason: `Auto-banned: Web user claimed auction ${auction_id} with ${uniqueAddresses.size} different addresses (limit: 2)`,
+                  created_at: new Date().toISOString(),
+                  banned_by: 'multi_address_detector',
+                  auto_banned: true,
+                  total_claims_attempted: usernameClaimsData.length + 1,
+                  duplicate_transactions: usernameClaimsData.map(c => c.tx_hash),
+                  total_tokens_received: usernameClaimsData.length * parseInt(claimAmount), // Only count successful claims
+                  ban_metadata: {
+                    trigger: 'multiple_addresses_same_username_same_auction',
+                    auction_id: auction_id,
+                    unique_addresses: Array.from(uniqueAddresses),
+                    address_count: uniqueAddresses.size,
+                    successful_claims: usernameClaimsData.map(c => ({
+                      address: c.eth_address,
+                      claimed_at: c.claimed_at,
+                      tx_hash: c.tx_hash
+                    })),
+                    attempted_address: address,
+                    note: `Web user "${effectiveUsername}" exploited auction ${auction_id} by claiming with ${uniqueAddresses.size} different addresses`
+                  }
+                })
+                .select();
+              
+              if (banError && banError.code !== '23505') { // Ignore if already banned
+                console.error('Error auto-banning user for multiple addresses:', banError);
+              } else {
+                console.log(`✅ User "${effectiveUsername}" banned for using ${uniqueAddresses.size} different addresses on auction ${auction_id}`);
+                
+                // Return error to block this claim
+                return NextResponse.json({ 
+                  success: false, 
+                  error: 'This account has been banned for violating usage policies',
+                  code: 'AUTO_BANNED_MULTIPLE_ADDRESSES'
+                }, { status: 403 });
+              }
+            } catch (banError) {
+              console.error('Error in auto-ban process:', banError);
+              // Still block the claim even if ban insertion fails
+              return NextResponse.json({ 
+                success: false, 
+                error: 'Account suspended for policy violations',
+                code: 'MULTIPLE_ADDRESS_VIOLATION'
+              }, { status: 403 });
+            }
+          } else {
+            console.log(`✅ Username "${effectiveUsername}" has ${usernameClaimsData.length} claims for auction ${auction_id} with ${uniqueAddresses.size} unique addresses (within limit)`);
+          }
+        }
+      }
       
       // CRITICAL: Release locks ONLY after successful database insert
       // This prevents other requests from proceeding until the claim is recorded
@@ -1630,7 +2006,8 @@ export async function POST(request: NextRequest) {
         error_code: errorCode,
         request_data: requestData as Record<string, unknown>,
         network_status: 'failed',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source
       });
       
       return NextResponse.json({ 
@@ -1664,7 +2041,8 @@ export async function POST(request: NextRequest) {
         error_code: 'WALLET_OPERATION_ERROR',
         request_data: requestData as Record<string, unknown>,
         network_status: 'wallet_error',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source
       });
       
       return NextResponse.json({ 
@@ -1720,7 +2098,8 @@ export async function POST(request: NextRequest) {
         error_code: errorCode,
         request_data: requestData as Record<string, unknown>,
         network_status: 'unexpected_error',
-        client_ip: clientIP
+        client_ip: clientIP,
+        claim_source: requestData.claim_source || 'mini_app'
       });
     } catch (logError) {
       console.error('Failed to log unexpected error:', logError);

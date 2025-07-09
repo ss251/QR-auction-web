@@ -7,7 +7,6 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
-import { getClaimAmountForAddress } from '@/lib/wallet-balance-checker';
 
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
@@ -118,6 +117,7 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import queue functionality
 import { queueFailedClaim, redis } from '@/lib/queue/failedClaims';
+import { getClaimAmountForAddress } from '@/lib/wallet-balance-checker';
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {

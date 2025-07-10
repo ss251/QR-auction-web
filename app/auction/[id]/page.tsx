@@ -36,6 +36,7 @@ import { useAuctionImage } from "@/hooks/useAuctionImage";
 import { removeAuctionImageOverride } from "@/utils/auctionImageOverrides";
 import { CLICK_SOURCES } from "@/lib/click-tracking";
 import { clearAllAuctionCaches } from "@/hooks/useFetchAuctionDetailsSubgraph";
+import { useIsMiniApp } from "@/hooks/useIsMiniApp";
 
 // Key for storing auction cache data in localStorage
 const AUCTION_CACHE_KEY = 'qrcoin_auction_cache';
@@ -118,6 +119,7 @@ export default function AuctionPage() {
   const { isOpen, pendingUrl, openDialog, closeDialog, handleContinue } = useSafetyDialog();
   const { auctions, refetch: refetchAuctions, forceRefetch: forceRefetchAuctions } = useFetchAuctions(BigInt(currentAuctionId));
   const { refetchSettings } = useFetchAuctionSettings(BigInt(currentAuctionId));
+  const { miniAppType } = useIsMiniApp();
 
   // Check if this is auction #22 from v1 contract
   const isAuction22 = currentAuctionId === 22;
@@ -516,7 +518,12 @@ export default function AuctionPage() {
       <div className="max-w-3xl mx-auto mt-3 md:mt-0 lg:mt-0">
         <div className="md:hidden text-center w-full mb-1">
             <p className="font-bold text-md md:text-xl">SAME QR. NEW WEBSITE. EVERY DAY.</p>
-            <p className="text-sm md:text-base">Win the auction to choose where it points next!</p>
+            <p className="text-sm md:text-base">
+              {miniAppType === 'world' 
+                ? 'Earn $QR every day by checking out the link of the day and claiming your reward!'
+                : 'Win the auction to choose where it points next!'
+              }
+            </p>
         </div>
         <div className="flex flex-col justify-center items-center gap-9">
 
@@ -530,7 +537,12 @@ export default function AuctionPage() {
               {/* Desktop-only: Heading and Subheading for QR card, overlayed */}
               <div className="hidden md:block">
                 <div className={styles.desktopHeading}>SAME QR. NEW WEBSITE. EVERY DAY.</div>
-                <div className={styles.desktopSubheading}>Win the auction to choose where it points next!</div>
+                <div className={styles.desktopSubheading}>
+                  {miniAppType === 'world' 
+                    ? 'Earn $QR every day by checking out the link of the day and claiming your reward!'
+                    : 'Win the auction to choose where it points next!'
+                  }
+                </div>
               </div>
               <button
                 onClick={(e) => {

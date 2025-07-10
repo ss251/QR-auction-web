@@ -64,7 +64,7 @@ const RPC_URL = ALCHEMY_API_KEY ?
   'https://mainnet.base.org';
 
 // World Chain RPC URL
-const WORLD_CHAIN_RPC_URL = `https://worldchain-mainnet.g.alchemy.com/public/${ALCHEMY_API_KEY}`;
+const WORLD_CHAIN_RPC_URL = `https://worldchain-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
 
 // ERC20 ABI for approval
 const ERC20_ABI = [
@@ -621,9 +621,13 @@ export async function POST(request: NextRequest) {
       let privyUserId: string = ''; // Declare here for broader scope
     
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      // Verify auth token for web/world users
+      // Verify auth token for web users only (world users authenticate via World App)
       const authHeader = request.headers.get('authorization');
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      
+      if (claim_source === 'world') {
+        // World users authenticate via World App, no Bearer token needed
+        console.log(`🌍 WORLD AUTH: IP=${clientIP}, World user authentication - no Bearer token required`);
+      } else if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Missing or invalid authorization header`);
         return NextResponse.json({ 
           success: false, 
@@ -631,41 +635,31 @@ export async function POST(request: NextRequest) {
         }, { status: 401 });
       }
       
-      const authToken = authHeader.substring(7); // Remove 'Bearer ' prefix
-      
       // Check if we have an ID token in the request headers or cookies
       // ID token is required to avoid rate limits when fetching user data
       const idToken = request.headers.get('x-privy-id-token') || 
                      request.cookies.get('privy-id-token')?.value;
       
-      // Verify the Privy auth token and extract userId
-      let hasWorldId = false;
-      try {
-        // First verify the auth token
-        const verifiedClaims = await privyClient.verifyAuthToken(authToken);
+      // Handle authentication based on claim source
+      if (claim_source === 'world') {
+        // World users: simple authentication via wallet address
+        privyUserId = `world_${address?.toLowerCase()}`;
+        console.log(`✅ WORLD AUTH SUCCESS: IP=${clientIP}, World User: ${privyUserId}`);
+      } else {
+        // Web users: verify Privy auth token
+        const authToken = authHeader!.substring(7); // Remove 'Bearer ' prefix
         
-        // Check if the token is valid and user is authenticated
-        if (!verifiedClaims.userId) {
-          throw new Error('No user ID in token claims');
-        }
-        
-        // Check if user has World ID linked for World claims
-        if (claim_source === 'world') {
-          // For World users, we check if they have a World ID in their claims
-          const user = await privyClient.getUser({ idToken: idToken! });
-          hasWorldId = user.linkedAccounts?.some((account: { type: string }) => account.type === 'world_id');
+        try {
+          // First verify the auth token
+          const verifiedClaims = await privyClient.verifyAuthToken(authToken);
           
-          if (!hasWorldId) {
-            console.log(`🚫 WORLD AUTH ERROR: IP=${clientIP}, User ${verifiedClaims.userId} does not have World ID linked`);
-            return NextResponse.json({ 
-              success: false, 
-              error: 'World ID verification required. Please authenticate with World ID.' 
-            }, { status: 401 });
+          // Check if the token is valid and user is authenticated
+          if (!verifiedClaims.userId) {
+            throw new Error('No user ID in token claims');
           }
-        }
-        
-        // Use the verified Privy userId
-        privyUserId = verifiedClaims.userId;
+          
+          // Use the verified Privy userId
+          privyUserId = verifiedClaims.userId;
         
         // Try to get full user data using idToken (to avoid rate limits) - only for web users
         if (claim_source === 'web') {
@@ -701,15 +695,16 @@ export async function POST(request: NextRequest) {
             // NO FALLBACK - username must be verified through Privy to prevent duplicates
             verifiedTwitterUsername = null;
           }
+          }
+          
+          console.log(`✅ WEB AUTH SUCCESS: IP=${clientIP}, Verified User: ${privyUserId}`);
+        } catch (error) {
+          console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Invalid auth token:`, error);
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Invalid authentication. Please sign in again.' 
+          }, { status: 401 });
         }
-        
-        console.log(`✅ AUTH SUCCESS: IP=${clientIP}, claim_source=${claim_source}, Verified User: ${privyUserId}${hasWorldId ? ' (has World ID)' : ''}`);
-      } catch (error) {
-        console.log(`🚫 AUTH ERROR: IP=${clientIP}, claim_source=${claim_source}, Invalid auth token:`, error);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Invalid authentication. Please sign in again.' 
-        }, { status: 401 });
       }
       
       // Web/World users need address and auction_id
@@ -796,8 +791,8 @@ export async function POST(request: NextRequest) {
       const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16); // Take first 8 hex chars
       
       if (claim_source === 'world') {
-        // World users get a different FID range
-        effectiveFid = -(hashNumber % 1000000000) - 2000000000; // Add offset for World users
+        // World users get a different FID range (use smaller offset to stay within PostgreSQL integer range)
+        effectiveFid = -(hashNumber % 100000000) - 500000000; // World users: -500M to -600M range
         effectiveUsername = username || null; // World username from MiniKit
         effectiveUserId = privyUserId; // Use verified Privy userId
         console.log(`🌍 WORLD CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, World ID provided=${!!world_id}, Display username=${username || 'none'}`);
@@ -1112,7 +1107,7 @@ export async function POST(request: NextRequest) {
     
     // Handle World users differently - use World Chain for WLD airdrop
     if (claim_source === 'world') {
-      console.log(`Preparing World ID claim: 1 WLD to ${address}`);
+      console.log(`Preparing World ID claim: 0.1 WLD to ${address}`);
       
       try {
         // Set up World Chain provider and wallet
@@ -1134,7 +1129,7 @@ export async function POST(request: NextRequest) {
         const worldBalance = await worldProvider.getBalance(worldAdminWallet.address);
         console.log(`World wallet balance: ${ethers.formatEther(worldBalance)} ETH`);
         
-        if (worldBalance < ethers.parseEther("0.001")) {
+        if (worldBalance < ethers.parseEther("0.0001")) {
           console.error('World admin wallet has insufficient ETH for gas');
           return NextResponse.json({ 
             success: false, 
@@ -1142,8 +1137,8 @@ export async function POST(request: NextRequest) {
           }, { status: 500 });
         }
         
-        // World users get fixed 1 WLD token (no dynamic amount calculation)
-        const worldAirdropAmount = ethers.parseUnits('1', 18); // 1 WLD (18 decimals)
+        // World users get fixed 0.1 WLD token (no dynamic amount calculation)
+        const worldAirdropAmount = ethers.parseUnits('0.1', 18); // 0.1 WLD (18 decimals)
         
         // Create WLD token contract instance on World Chain
         const wldTokenContract = new ethers.Contract(
@@ -1191,10 +1186,9 @@ export async function POST(request: NextRequest) {
         const airdropTx = await executeWithRetry(
           async (attempt) => {
             console.log(`Airdrop attempt ${attempt + 1}...`);
-            return await worldAirdropContract.airdrop(
-              [address],
-              [worldAirdropAmount],
+            return await worldAirdropContract.airdropERC20(
               WLD_TOKEN_ADDRESS,
+              [{ recipient: address, amount: worldAirdropAmount }],
               {
                 gasLimit: 200000n
               }
@@ -1230,7 +1224,7 @@ export async function POST(request: NextRequest) {
             eth_address: address,
             link_visited_at: new Date().toISOString(),
             claimed_at: new Date().toISOString(),
-            amount: 1, // 1 WLD
+            amount: 0.1, // 0.1 WLD
             tx_hash: airdropTx.hash,
             success: true,
             username: effectiveUsername,
@@ -1247,7 +1241,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ 
           success: true, 
           tx_hash: airdropTx.hash,
-          message: 'Successfully airdropped 1 WLD!'
+          message: 'Successfully airdropped 0.1 WLD!'
         });
         
       } catch (error) {

@@ -5,12 +5,16 @@ import { usePrivy, useIdentityToken } from "@privy-io/react-auth";
 import { useAccount } from "wagmi";
 import { useSmartWallets } from "@privy-io/react-auth/smart-wallets";
 import { useIsMiniApp } from './useIsMiniApp';
+import { useWorldcoinAuth } from './useWorldcoinAuth';
 
 export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = false) {
   const [isClaimLoading, setIsClaimLoading] = useState(false);
   const { recordClaim, frameContext, walletAddress } = useLinkVisitEligibility(auctionId, isWebContext);
   const [lastVisitedUrl, setLastVisitedUrl] = useState<string | null>(null);
   const { miniAppType } = useIsMiniApp();
+  
+  // Type guard for World Mini App
+  const isWorldMiniApp = miniAppType === 'world';
   const [expectedClaimAmount, setExpectedClaimAmount] = useState<number>(0);
   const [isCheckingAmount, setIsCheckingAmount] = useState(false);
   const [hasCheckedAmount, setHasCheckedAmount] = useState(false);
@@ -21,12 +25,17 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   const { address } = useAccount();
   const { client: smartWalletClient } = useSmartWallets();
   
+  // World authentication hook
+  const { user: worldUser, isAuthenticated: isWorldAuthenticated } = useWorldcoinAuth();
+  
   // Get smart wallet address from user's linked accounts (more reliable)
   const smartWalletAddress = user?.linkedAccounts?.find((account: { type: string; address?: string }) => account.type === 'smart_wallet')?.address;
   
-  // Use appropriate wallet address based on context - prioritize smart wallet for web users
+  // Use appropriate wallet address based on context
   const effectiveWalletAddress = isWebContext 
     ? (smartWalletAddress || smartWalletClient?.account?.address || address)
+    : (isWorldMiniApp && isWorldAuthenticated && worldUser?.walletAddress)
+    ? worldUser.walletAddress
     : walletAddress;
 
   // Get Twitter username for web context
@@ -45,6 +54,13 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
   // Fetch expected claim amount based on wallet holdings (web) or score (mini-app)
   useEffect(() => {
     async function fetchExpectedAmount() {
+      // Skip for World users - they always get fixed 0.1 WLD
+      if (isWorldMiniApp) {
+        setExpectedClaimAmount(0.1);
+        setHasCheckedAmount(true);
+        return;
+      }
+      
       // Skip if no wallet address
       if (!effectiveWalletAddress) {
         setExpectedClaimAmount(0);
@@ -91,7 +107,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
             },
             body: JSON.stringify({
               address: effectiveWalletAddress || '',
-              claimSource: miniAppType === 'world' ? 'world' : 'mini_app',
+              claimSource: isWorldMiniApp ? 'world' : 'mini_app',
               fid: frameContext.user.fid
             })
           });
@@ -113,7 +129,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
     }
     
     fetchExpectedAmount();
-  }, [isWebContext, frameContext?.user?.fid, effectiveWalletAddress]);
+  }, [isWebContext, frameContext?.user?.fid, effectiveWalletAddress, isWorldMiniApp]);
 
   // Handle the link click
   const handleLinkClick = async (winningUrl: string): Promise<boolean> => {
@@ -207,7 +223,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
             winningUrl: winningUrl,
             address: effectiveWalletAddress,
             username: frameContext.user.username || null,
-            claimSource: miniAppType === 'world' ? 'world' : 'mini_app'
+            claimSource: isWorldMiniApp ? 'world' : 'mini_app'
           })
         });
 
@@ -250,7 +266,8 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
 
   // Claim the tokens
   const claimTokens = async (captchaToken?: string): Promise<{ txHash?: string }> => {
-    const isWorldApp = miniAppType === 'world';
+    const isWorldApp = isWorldMiniApp;
+    
     
     if (isWebContext) {
       // Web context: validate wallet connection
@@ -268,9 +285,9 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
         isUsingSmartWallet: Boolean(smartWalletAddress || smartWalletClient?.account?.address)
       });
     } else if (isWorldApp) {
-      // World Mini App context: validate wallet address
-      if (!effectiveWalletAddress) {
-        console.log('Cannot claim tokens: Missing World wallet address');
+      // World Mini App context: validate World authentication and wallet address
+      if (!isWorldAuthenticated || !worldUser?.walletAddress) {
+        console.log('Cannot claim tokens: World user not authenticated or missing wallet address');
         return {};
       }
     } else {
@@ -293,7 +310,7 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
       const username = isWebContext 
         ? getTwitterUsername() 
         : isWorldApp 
-        ? (typeof window !== 'undefined' && (window as any).MiniKit?.username) 
+        ? worldUser?.username
         : frameContext?.user?.username;
       
       // Calculate FID based on context
@@ -308,18 +325,22 @@ export function useLinkVisitClaim(auctionId: number, isWebContext: boolean = fal
       })() : frameContext?.user?.fid;
       
       // Get World ID if available
-      const worldId = isWorldApp && user?.linkedAccounts?.find(
-        (account: any) => account.type === 'world_id'
-      )?.subject;
+      const worldId = isWorldApp ? worldUser?.worldId : undefined;
       
-      // Get Privy auth token for web users to verify authentication
+      // Get Privy auth token for web users only
       let authToken: string | undefined;
       if (isWebContext && authenticated) {
+        // Web users - require standard Privy auth
         try {
           authToken = await getAccessToken();
         } catch (error) {
           console.error('Failed to get Privy auth token:', error);
-          // Continue without token - backend will reject if needed
+        }
+      } else if (isWorldApp) {
+        // World users - proceed with World authentication
+        if (!isWorldAuthenticated || !worldUser?.walletAddress) {
+          console.log('Cannot claim tokens: World user not authenticated or missing wallet');
+          return {};
         }
       }
       

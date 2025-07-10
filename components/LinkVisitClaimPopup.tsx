@@ -466,7 +466,7 @@ export function LinkVisitClaimPopup({
       const tokenType = isWorldApp ? 'WLD' : 'QR';
       
       trackEvent('Lead', {
-        value: isWorldApp ? 1 : expectedClaimAmount,
+        value: isWorldApp ? 0.1 : expectedClaimAmount,
         currency: isWorldApp ? 'WLD' : 'QR',
         content_name: `Token Claim - Auction ${auctionId}`,
         content_category: `${tokenType} Token Claim`,
@@ -474,7 +474,7 @@ export function LinkVisitClaimPopup({
         token_type: tokenType
       });
       
-      toast.success(`${isWorldApp ? '1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`} has been sent to your wallet.`, {
+      toast.success(`${isWorldApp ? '0.1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`} has been sent to your wallet.`, {
         style: {
           background: 'var(--primary)',
           color: 'var(--primary-foreground)',
@@ -715,7 +715,7 @@ export function LinkVisitClaimPopup({
     });
     
     const isWorldApp = miniAppType === 'world';
-    const tokenInfo = isWorldApp ? '1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`;
+    const tokenInfo = isWorldApp ? '0.1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`;
     
     if (isWebContext || isWorldApp) {
       // Web context or World App: Twitter/X share with quote tweet
@@ -907,7 +907,7 @@ export function LinkVisitClaimPopup({
                 className="text-xl font-bold text-foreground"
               >
                 {miniAppType === 'world' ? 
-                  'Click to claim 1 $WLD!' : 
+                  'Click to claim 0.1 $WLD!' : 
                   (isCheckingAmount || expectedClaimAmount === 0 ? 
                     'Click to claim $QR!' : 
                     `Click to claim ${expectedClaimAmount.toLocaleString()} $QR!`)
@@ -924,7 +924,7 @@ export function LinkVisitClaimPopup({
                   className="text-xl font-bold text-foreground"
                 >
                   {miniAppType === 'world' ? 
-                    'Claim 1 $WLD' : 
+                    'Claim 0.1 $WLD' : 
                     (isCheckingAmount || expectedClaimAmount === 0 ? 
                       'Claim $QR' : 
                       `Claim ${expectedClaimAmount.toLocaleString()} $QR`)
@@ -1017,7 +1017,7 @@ export function LinkVisitClaimPopup({
                   transition={{ delay: 0.3 }}
                   className="text-muted-foreground mb-5"
                 >
-                  {miniAppType === 'world' ? '1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`} sent to your wallet.
+                  {miniAppType === 'world' ? '0.1 $WLD' : `${expectedClaimAmount.toLocaleString()} $QR`} sent to your wallet.
                 </motion.p>
                 
                 <motion.div

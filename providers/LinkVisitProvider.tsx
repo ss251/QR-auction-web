@@ -163,7 +163,7 @@ export function LinkVisitProvider({
   const [miniAppType, setMiniAppType] = useState<'farcaster' | 'world' | null>(null);
   
   // Import World authentication hook
-  const { } = useWorldcoinAuth();
+  const { isAuthenticated: isWorldAuthenticated, user: worldUser } = useWorldcoinAuth();
   
   // Detect if we're in web context vs mini-app context
   useEffect(() => {
@@ -745,10 +745,10 @@ export function LinkVisitProvider({
         // Mini-app logic - simplified for World users
         const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
         
-        // For World users, show popup if they haven't claimed (regardless of auth state)
+        // For World users, show popup only if they haven't claimed AND are fully authenticated
         // For Farcaster users, show popup if they haven't claimed
         const shouldShowPopup = miniAppType === 'world' ? 
-          !combinedHasClaimed :
+          (!combinedHasClaimed && isWorldAuthenticated && worldUser) :
           (!combinedHasClaimed && !isLoading);
         
         if (shouldShowPopup && latestWonAuctionId && !isLoading) {
@@ -765,7 +765,7 @@ export function LinkVisitProvider({
     
     window.addEventListener('triggerLinkVisitPopup', handleTrigger);
     return () => window.removeEventListener('triggerLinkVisitPopup', handleTrigger);
-  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, hasUserDismissedPopup]);
+  }, [manualHasClaimedLatest, latestWonAuctionId, effectiveWalletAddress, isLoading, explicitlyCheckedClaim, requestPopup, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasClaimed, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, hasUserDismissedPopup, miniAppType, isWorldAuthenticated, worldUser]);
   
   // Show popup when user can interact with it (auto-show if eligible)
   useEffect(() => {
@@ -856,9 +856,9 @@ export function LinkVisitProvider({
       // Use combined claim status (same as context value)
       const combinedHasClaimed = manualHasClaimedLatest === true || hasClaimed;
       
-      // For World users, always show popup if they haven't claimed. For Farcaster, check authentication.
+      // For World users, show popup only if they haven't claimed AND are fully authenticated. For Farcaster, check authentication.
       const shouldShowMiniAppPopup = miniAppType === 'world' ? 
-        !combinedHasClaimed :
+        (!combinedHasClaimed && isWorldAuthenticated && worldUser) :
         (!combinedHasClaimed && latestWonAuctionId);
       
       if (shouldShowMiniAppPopup && latestWonAuctionId) {
@@ -877,7 +877,7 @@ export function LinkVisitProvider({
         setHasCheckedEligibility(true);
       }
     }
-  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, requestPopup, redirectClickData?.hasVisited, isRedirectClickLoading, hasUserDismissedPopup]);
+  }, [hasClicked, hasClaimed, manualHasClaimedLatest, explicitlyCheckedClaim, isLoading, hasCheckedEligibility, effectiveWalletAddress, auctionId, latestWonAuctionId, isCheckingLatestAuction, isWebContext, authenticated, walletStatusDetermined, isCheckingDatabase, hasTraditionalWalletOnly, isTwitterOrFarcasterUser, getFlowState, requestPopup, redirectClickData?.hasVisited, isRedirectClickLoading, hasUserDismissedPopup, miniAppType, isWorldAuthenticated, worldUser]);
   
   // NEW: Track when Privy modal is active to prevent popup interference
   const [isPrivyModalActive, setIsPrivyModalActive] = useState(false);

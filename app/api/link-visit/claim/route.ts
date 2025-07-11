@@ -7,12 +7,16 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
+import { createClient as createQuickAuthClient } from '@farcaster/quick-auth';
 
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
   process.env.NEXT_PUBLIC_PRIVY_APP_ID || '',
   process.env.PRIVY_APP_SECRET || ''
 );
+
+// Initialize Farcaster Quick Auth client for JWT verification
+const quickAuthClient = createQuickAuthClient();
 
 // Setup Supabase clients
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -109,6 +113,8 @@ interface LinkVisitRequestData {
   claim_source?: string;
   captcha_token?: string; // Add captcha token
   world_id?: string; // Add world_id for World users
+  client_fid?: number | null; // Client FID for Coinbase Wallet detection (legacy bypass)
+  farcaster_quick_auth_token?: string | null; // Farcaster Quick Auth JWT for additional security
   [key: string]: unknown; // Allow other properties
 }
 
@@ -401,6 +407,7 @@ export async function POST(request: NextRequest) {
   let requestData: Partial<LinkVisitRequestData> = {};
   let lockKey: string | undefined;
   let fidLockKey: string | undefined;
+  let usernameLockKey: string | undefined;
   let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
   let walletPool: ReturnType<typeof getWalletPool> | null = null;
   
@@ -421,7 +428,7 @@ export async function POST(request: NextRequest) {
     
     // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
-    const { fid, address, auction_id, username, winning_url, claim_source, world_id } = requestData;
+    const { fid, address, auction_id, username, winning_url, claim_source, world_id, client_fid, farcaster_quick_auth_token } = requestData;
     
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
     const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
@@ -619,6 +626,10 @@ export async function POST(request: NextRequest) {
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
       let verifiedTwitterUsername: string | null = null; // Declare here for broader scope
       let privyUserId: string = ''; // Declare here for broader scope
+      
+      // SECURITY: Farcaster Quick Auth variables for mini-app verification
+      let quickAuthVerifiedFid: number | null = null;
+      let quickAuthValid = false;
     
     if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       // Verify auth token for web users only (world users authenticate via World App)
@@ -847,6 +858,36 @@ export async function POST(request: NextRequest) {
       effectiveFid = fid; // Use actual fid for mini-app users (guaranteed positive)
       effectiveUsername = username; // Use actual username for mini-app users
       effectiveUserId = null; // Mini-app users don't have Privy userId
+      
+      // SECURITY: Verify Farcaster Quick Auth token if provided
+      if (farcaster_quick_auth_token) {
+        try {
+          const payload = await quickAuthClient.verifyJwt({
+            token: farcaster_quick_auth_token,
+            domain: process.env.NEXT_PUBLIC_HOST_URL?.replace('https://', '') || 'localhost'
+          });
+          
+          quickAuthVerifiedFid = parseInt(String(payload.sub));
+          quickAuthValid = true;
+          
+          console.log(`✅ Quick Auth verified: FID=${quickAuthVerifiedFid}`);
+          
+          // SECURITY CHECK: Ensure the Quick Auth FID matches the claimed FID
+          if (quickAuthVerifiedFid !== fid) {
+            console.log(`🚫 FID mismatch: Quick Auth FID=${quickAuthVerifiedFid} vs claimed FID=${fid}`);
+            return NextResponse.json({ 
+              success: false, 
+              error: 'FID verification failed - token does not match claimed identity',
+              code: 'FID_MISMATCH'
+            }, { status: 400 });
+          }
+          
+          console.log(`🔒 Quick Auth FID verification passed for FID=${fid}`);
+        } catch (quickAuthError) {
+          console.error('Quick Auth verification failed:', quickAuthError);
+          // Continue with legacy validation as fallback
+        }
+      }
     }
     
     // CHECK BANNED USERS TABLE - applies to both web and mini-app users
@@ -1040,14 +1081,21 @@ export async function POST(request: NextRequest) {
     
     // Validate Mini App user and verify wallet address in one call (skip for web users)
     if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      console.log(`🔍 MINI-APP VALIDATION: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - validating via miniapp-validation.ts`);
+      // COINBASE WALLET DETECTION: Use both legacy client_fid and Quick Auth verification
+      let isCoinbaseWallet = false;
       
-      const userValidation = await validateMiniAppUser(effectiveFid, effectiveUsername || undefined, address);
+      // Method 1: Legacy client_fid detection (existing bypass)
+      const legacyCoinbaseDetection = client_fid === 309857;
+      
+      // Method 2: Quick Auth verified Coinbase Wallet (more secure)
+      const quickAuthCoinbaseDetection = quickAuthValid && quickAuthVerifiedFid === effectiveFid && client_fid === 309857;
+      
+      if (quickAuthCoinbaseDetection || legacyCoinbaseDetection) {
+        isCoinbaseWallet = true;
+      }
+      
+      const userValidation = await validateMiniAppUser(effectiveFid, effectiveUsername || undefined, address, isCoinbaseWallet);
       if (!userValidation.isValid) {
-        console.log(`🚫 MINI-APP VALIDATION FAILED: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - Error: ${userValidation.error}`);
-        
-        // Don't queue failed transactions for validation errors - just return error
-        // These are user errors, not system failures that need retry
         return NextResponse.json({ 
           success: false, 
           error: userValidation.error || 'Invalid user or spoofed request' 
@@ -1340,6 +1388,73 @@ export async function POST(request: NextRequest) {
     console.log(`Preparing airdrop of ${claimAmount} QR tokens to ${address}`);
     
     // Continue with regular QR token airdrop for non-World users
+    
+    // For web users, acquire username lock to prevent race condition with same username
+    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '') && effectiveUsername) {
+      usernameLockKey = `claim-username-lock:${effectiveUsername.toLowerCase()}:${auction_id}`;
+      
+      const usernameLockAcquired = await redis.set(usernameLockKey, Date.now().toString(), {
+        nx: true, // Only set if not exists
+        ex: 300   // 5 minutes to cover blockchain + DB operations
+      });
+      
+      if (!usernameLockAcquired) {
+        console.log(`🔒 USERNAME DUPLICATE BLOCKED: Username "${effectiveUsername}" already processing claim for auction ${auction_id}`);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'This username is already processing a claim. Please wait a moment and try again.',
+          code: 'USERNAME_CLAIM_IN_PROGRESS'
+        }, { status: 429 });
+      }
+      
+      console.log(`🔓 ACQUIRED USERNAME LOCK: "${effectiveUsername}" for auction ${auction_id}`);
+    }
+    
+    // PRE-TRANSACTION CHECK: Web users claiming with same username but different addresses
+    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '') && effectiveUsername) {
+      console.log(`🔍 Checking for multiple claims by username: ${effectiveUsername} for auction ${auction_id}`);
+      
+      // Check how many successful claims this username has made for THIS SPECIFIC AUCTION
+      const { data: usernameClaimsData, error: usernameClaimsError } = await supabase
+        .from('link_visit_claims')
+        .select('id, eth_address, auction_id, claimed_at, tx_hash')
+        .eq('username', effectiveUsername)
+        .eq('auction_id', auction_id) // Only check current auction
+        .in('claim_source', NON_FC_CLAIM_SOURCES)
+        .not('tx_hash', 'is', null)
+        .not('claimed_at', 'is', null)
+        .order('claimed_at', { ascending: false });
+      
+      if (usernameClaimsError) {
+        console.error('Error checking username claims for pre-transaction validation:', usernameClaimsError);
+        return NextResponse.json({
+          success: false,
+          error: 'Database error when checking username claims'
+        }, { status: 500 });
+      } else if (usernameClaimsData && usernameClaimsData.length >= 1) {
+        // Check if this would be a 2nd+ claim with a DIFFERENT address for the same auction
+        const existingAddresses = usernameClaimsData.map(claim => claim.eth_address.toLowerCase());
+        const currentAddress = address.toLowerCase();
+        
+        // If this address is different from any existing claim address, block it
+        if (!existingAddresses.includes(currentAddress)) {
+          console.log(`🚫 PRE-TX BLOCK: Username "${effectiveUsername}" attempting 2nd claim with different address for auction ${auction_id}`);
+          console.log(`🚫 Previous address used: ${existingAddresses.join(', ')}`);
+          console.log(`🚫 Attempting new address: ${address}`);
+          
+          // Block this claim before any transaction occurs
+          return NextResponse.json({ 
+            success: false, 
+            error: 'This username has already claimed tokens for this auction with a different address',
+            code: 'USERNAME_ALREADY_CLAIMED'
+          }, { status: 400 });
+        } else {
+          console.log(`✅ Username "${effectiveUsername}" attempting to claim again with same address ${address} for auction ${auction_id} (duplicate address check will handle this)`);
+        }
+      } else {
+        console.log(`✅ Username "${effectiveUsername}" pre-transaction check passed - no previous claims found`);
+      }
+    }
     // Initialize ethers provider and get wallet from pool
     const provider = new ethers.JsonRpcProvider(RPC_URL);
     walletPool = getWalletPool(provider);
@@ -1960,6 +2075,15 @@ export async function POST(request: NextRequest) {
         }
       }
       
+      if (usernameLockKey) {
+        try {
+          await redis.del(usernameLockKey);
+          console.log(`🔓 RELEASED USERNAME LOCK (after DB): ${usernameLockKey}`);
+        } catch (lockError) {
+          console.error('Error releasing username lock:', lockError);
+        }
+      }
+      
       return NextResponse.json({ 
         success: true, 
         message: 'Tokens claimed successfully',
@@ -2128,6 +2252,18 @@ export async function POST(request: NextRequest) {
         }
       } catch (lockError) {
         console.error('Error releasing FID lock:', lockError);
+      }
+    }
+    
+    if (usernameLockKey) {
+      try {
+        const lockExists = await redis.exists(usernameLockKey);
+        if (lockExists) {
+          await redis.del(usernameLockKey);
+          console.log(`🔓 RELEASED USERNAME LOCK (error path): ${usernameLockKey}`);
+        }
+      } catch (lockError) {
+        console.error('Error releasing username lock:', lockError);
       }
     }
   }

@@ -183,7 +183,7 @@ export function LinkVisitProvider({
       try {
         // Check if we're in a Farcaster mini app
         const { frameSdk } = await import('@/lib/frame-sdk-singleton');
-        const isFarcasterMiniApp = await frameSdk.isInMiniApp();
+        const isFarcasterMiniApp = await frameSdk.isInMiniApp() || (await frameSdk.getContext()).client.clientFid == 309857;
         
         // Check if we're in a World mini app
         const { MiniKit } = await import('@worldcoin/minikit-js');

@@ -14,8 +14,8 @@ export function useIsMiniApp() {
   useEffect(() => {
     async function checkMiniApp() {
       try {
-        // Check for Farcaster Frame SDK first
-        const isFarcasterFrame = await frameSdk.isInMiniApp();
+        // Check for Farcaster Frame SDK first (including specific clientFid check)
+        const isFarcasterFrame = await frameSdk.isInMiniApp() || (await frameSdk.getContext()).client.clientFid == 309857;
         
         if (isFarcasterFrame) {
           setIsMiniApp(true);

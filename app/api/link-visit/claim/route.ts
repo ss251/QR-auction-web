@@ -7,6 +7,7 @@ import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
+import { verifyTurnstileToken } from '@/lib/turnstile';
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
   process.env.NEXT_PUBLIC_PRIVY_APP_ID || '',
@@ -411,7 +412,7 @@ export async function POST(request: NextRequest) {
     
     // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
-    const { fid, address, auction_id, username, winning_url, claim_source, client_fid } = requestData;
+    const { fid, address, auction_id, username, winning_url, claim_source, client_fid, captcha_token } = requestData;
     
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
     const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
@@ -682,6 +683,26 @@ export async function POST(request: NextRequest) {
           error: 'Invalid authentication. Please sign in again.' 
         }, { status: 401 });
       }
+      
+      // Validate Turnstile captcha for web users
+      if (!captcha_token) {
+        console.log(`🚫 WEB CAPTCHA ERROR: IP=${clientIP}, Missing captcha token`);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Please complete the verification challenge.' 
+        }, { status: 400 });
+      }
+      
+      const isCaptchaValid = await verifyTurnstileToken(captcha_token);
+      if (!isCaptchaValid) {
+        console.log(`🚫 WEB CAPTCHA ERROR: IP=${clientIP}, Invalid captcha token`);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Verification failed. Please try again.' 
+        }, { status: 400 });
+      }
+      
+      console.log(`✅ WEB CAPTCHA VERIFIED: IP=${clientIP}`);
       
       // Web users need address and auction_id
       if (!address || !auction_id) {

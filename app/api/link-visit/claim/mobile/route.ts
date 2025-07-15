@@ -1100,7 +1100,7 @@ export async function POST(request: NextRequest) {
           claim_source: claim_source,
           client_ip: clientIP, // Track IP for successful claims
           neynar_user_score: null, // Store the Neynar score
-          spam_label: spamLabel // Store the spam label
+          spam_label: null // Store the spam label
         });
         
       if (insertError) {
@@ -1196,7 +1196,7 @@ export async function POST(request: NextRequest) {
             claim_source: claim_source,
             client_ip: clientIP, // Track IP for successful claims
             neynar_user_score: null, // Store the Neynar score
-            spam_label: spamLabel // Store the spam label
+            spam_label: null // Store the spam label
           })
           .match({
             fid: effectiveFid,

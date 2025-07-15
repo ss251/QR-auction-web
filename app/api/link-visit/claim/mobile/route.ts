@@ -801,25 +801,27 @@ export async function POST(request: NextRequest) {
       }
     
     // Define airdrop amount based on claim source and user score
-    let claimAmount: string;
-    let neynarScore: number | undefined;
-    const spamLabel: boolean | null = null;
+    // let claimAmount: string;
+    // let neynarScore: number | undefined;
+    // const spamLabel: boolean | null = null;
     
-      // Web/mobile users: wallet holdings only (no Neynar scores)
-      try {
-        const claimResult = await getClaimAmountForAddress(
-          address,
-          claim_source,
-          ALCHEMY_API_KEY,
-          undefined // No FID for web users - they don't get Neynar scores
-        );
-        claimAmount = claimResult.amount.toString();
-        neynarScore = undefined; // Web users don't get Neynar scores
-        console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
-      } catch (error) {
-        console.error('Error checking claim amount, using default:', error);
-        claimAmount = '500'; // Fallback to original amount
-      }
+    //   // Web/mobile users: wallet holdings only (no Neynar scores)
+    //   try {
+    //     const claimResult = await getClaimAmountForAddress(
+    //       address,
+    //       claim_source,
+    //       ALCHEMY_API_KEY,
+    //       undefined // No FID for web users - they don't get Neynar scores
+    //     );
+    //     claimAmount = claimResult.amount.toString();
+    //     neynarScore = undefined; // Web users don't get Neynar scores
+    //     console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
+    //   } catch (error) {
+    //     console.error('Error checking claim amount, using default:', error);
+    //     claimAmount = '500'; // Fallback to original amount
+    //   }
+
+    const claimAmount = '1000';
     
     const airdropAmount = ethers.parseUnits(claimAmount, 18);
     console.log(`Preparing airdrop of ${claimAmount} QR tokens to ${address}`);

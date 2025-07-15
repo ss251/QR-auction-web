@@ -803,7 +803,7 @@ export async function POST(request: NextRequest) {
     // Define airdrop amount based on claim source and user score
     let claimAmount: string;
     let neynarScore: number | undefined;
-    let spamLabel: boolean | null = null;
+    const spamLabel: boolean | null = null;
     
       // Web/mobile users: wallet holdings only (no Neynar scores)
       try {

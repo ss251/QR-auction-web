@@ -1099,7 +1099,7 @@ export async function POST(request: NextRequest) {
           winning_url: winningUrl,
           claim_source: claim_source,
           client_ip: clientIP, // Track IP for successful claims
-          neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
+          neynar_user_score: null, // Store the Neynar score
           spam_label: spamLabel // Store the spam label
         });
         
@@ -1195,7 +1195,7 @@ export async function POST(request: NextRequest) {
             winning_url: winningUrl,
             claim_source: claim_source,
             client_ip: clientIP, // Track IP for successful claims
-            neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
+            neynar_user_score: null, // Store the Neynar score
             spam_label: spamLabel // Store the spam label
           })
           .match({

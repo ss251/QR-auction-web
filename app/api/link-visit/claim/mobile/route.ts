@@ -2,12 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import AirdropABI from '@/abi/Airdrop.json';
-import { validateMiniAppUser } from '@/utils/miniapp-validation';
 import { getClientIP } from '@/lib/ip-utils';
 import { isRateLimited } from '@/lib/simple-rate-limit';
 import { PrivyClient } from '@privy-io/server-auth';
 import { getWalletPool } from '@/lib/wallet-pool';
-import { verifyMiniAppToken } from '@/lib/miniapp-auth';
+
 // Initialize Privy client for server-side authentication
 const privyClient = new PrivyClient(
   process.env.NEXT_PUBLIC_PRIVY_APP_ID || '',
@@ -27,26 +26,15 @@ if (!supabaseServiceKey) {
   console.warn('SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database writes may fail due to RLS');
 }
 
-const NON_FC_CLAIM_SOURCES = ['web', 'mobile']
-
 // Contract details
 const QR_TOKEN_ADDRESS = process.env.NEXT_PUBLIC_QR_COIN || '';
 
-// Use different contracts based on claim source
-const getContractAddresses = (claimSource: string = 'mini_app') => {
-  if (NON_FC_CLAIM_SOURCES.includes(claimSource)) {
-    // Web context: use contract 4
+const getContractAddresses = () => {
     return {
       AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS4 || '',
       ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY4 || ''
     };
-  } else {
-    // Mini-app context: use contract 2 (existing)
-    return {
-      AIRDROP_CONTRACT_ADDRESS: process.env.AIRDROP_CONTRACT_ADDRESS2 || '',
-      ADMIN_PRIVATE_KEY: process.env.ADMIN_PRIVATE_KEY2 || ''
-    };
-  }
+ 
 };
 
 // Alchemy RPC URL for Base
@@ -99,7 +87,6 @@ interface LinkVisitRequestData {
   claim_source?: string;
   captcha_token?: string; // Add captcha token
   client_fid?: number | null; // Client FID for Coinbase Wallet detection
-  miniapp_token?: string; // Secure token for mini-app authentication
   [key: string]: unknown; // Allow other properties
 }
 
@@ -108,7 +95,6 @@ const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 // Import queue functionality
 import { queueFailedClaim, redis } from '@/lib/queue/failedClaims';
-import { getClaimAmountForAddress, checkHistoricalEthBalance, getWalletClaimAmounts } from '@/lib/wallet-balance-checker';
 
 // Function to log errors to the database
 async function logFailedTransaction(params: {
@@ -148,7 +134,9 @@ async function logFailedTransaction(params: {
       'WEB_AUTH_ERROR',            // Invalid Privy authentication tokens
       'WEB_USERNAME_REQUIRED',     // Missing username for web claims
       'BANNED_USERNAME_ATTEMPT',   // Banned username attempted claim
-      'BANNED_USER'                // User is banned
+      'BANNED_USER',               // User is banned
+      'CAPTCHA_REQUIRED',          // Missing captcha for web users
+      'CAPTCHA_FAILED'             // Failed captcha verification
     ];
     
     // Only log to database if this will be queued for retry
@@ -391,8 +379,6 @@ async function executeWithRetry<T>(
 export async function POST(request: NextRequest) {
   let requestData: Partial<LinkVisitRequestData> = {};
   let lockKey: string | undefined;
-  let fidLockKey: string | undefined;
-  let usernameLockKey: string | undefined;
   let walletConfig: { wallet: ethers.Wallet; airdropContract: string; lockKey: string } | null = null;
   let walletPool: ReturnType<typeof getWalletPool> | null = null;
   
@@ -413,43 +399,27 @@ export async function POST(request: NextRequest) {
     
     // Parse request body to determine claim source for differentiated rate limiting
     requestData = await request.json() as LinkVisitRequestData;
-    const { fid, address, auction_id, username, winning_url, claim_source, miniapp_token } = requestData;
+    const {  address, auction_id, winning_url, claim_source } = requestData;
     
-    // SECURITY: Validate claim_source is provided
-    if (!claim_source) {
-      console.log(`🚫 INVALID REQUEST: Missing claim_source parameter from IP=${clientIP}`);
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Missing required parameter: claim_source',
-        code: 'MISSING_CLAIM_SOURCE'
-      }, { status: 400 });
+    if (!address || !auction_id || !claim_source || !winning_url) { 
+      console.log(`🚫 MISSING REQUIRED PARAMETERS: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
+      return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
     }
     
-    // SECURITY: Validate claim_source is a valid value
-    const validClaimSources = ['web', 'mini_app', 'mobile'];
-    if (!validClaimSources.includes(claim_source)) {
-      console.log(`🚫 INVALID REQUEST: Invalid claim_source "${claim_source}" from IP=${clientIP}`);
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Invalid claim_source. Must be one of: web, mini_app, mobile',
-        code: 'INVALID_CLAIM_SOURCE'
-      }, { status: 400 });
+    if (claim_source !== 'mobile') {
+      console.log(`🚫 WRONG CLAIM SOURCE: IP=${clientIP}, claim_source=${claim_source}`);
+      return NextResponse.json({ success: false, error: 'Wrong claim source' }, { status: 400 });
     }
     
-    // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
-    const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
+    const rateLimit = 2
     const rateLimitWindow = 60000; // 1 minute
     
     if (isRateLimited(clientIP, rateLimit, rateLimitWindow)) {
-      console.log(`🚫 RATE LIMITED: IP=${clientIP} (${NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 'web/mobile' : 'mini-app'}: ${rateLimit} requests/min exceeded)`);
+      console.log(`🚫 RATE LIMITED: IP=${clientIP} (mobile: ${rateLimit} requests/min exceeded)`);
       return NextResponse.json({ success: false, error: 'Rate Limited' }, { status: 429 });
     }
     
-    // Log all requests with IP
-    console.log(`💰 LINK VISIT CLAIM: IP=${clientIP}, FID=${fid || 'none'}, auction=${auction_id}, address=${address || 'none'}, username=${username || 'none'}, source=${claim_source || 'mini_app'}`);
-    
-    // IP-based anti-bot validation (WEB USERS ONLY)
-    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
+    // IP-based anti-bot validation
       console.log(`🛡️ IP VALIDATION: Checking IP ${clientIP} for web claim protection`);
       
       // Check 1: Max 3 claims per IP per auction
@@ -467,7 +437,7 @@ export async function POST(request: NextRequest) {
           fid: -1,
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
-          username: username || null,
+          username: null,
           user_id: null, // IP limit failures don't have user context
           winning_url: winning_url || null,
           error_message: `IP ${clientIP} exceeded per-auction limit: ${ipClaimsThisAuction.length}/3 claims`,
@@ -505,7 +475,7 @@ export async function POST(request: NextRequest) {
           fid: -1,
           eth_address: address || 'unknown',
           auction_id: auction_id || 'unknown',
-          username: username || null,
+          username: null,
           user_id: null, // IP limit failures don't have user context
           winning_url: winning_url || null,
           error_message: `IP ${clientIP} exceeded daily limit (${ipClaimsDaily.length}/5 claims in 24h)`,
@@ -522,30 +492,7 @@ export async function POST(request: NextRequest) {
       }
       
       console.log(`✅ IP VALIDATION PASSED: IP=${clientIP} (auction: ${ipClaimsThisAuction?.length || 0}/3, daily: ${ipClaimsDaily?.length || 0}/5)`);
-    }
     
-    // Ban check moved to after authentication to access verified usernames
-    
-    // For mini-app claims, acquire FID lock first to prevent same FID claiming with multiple addresses
-    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
-      fidLockKey = `claim-fid-lock:${fid}:${auction_id}`;
-      
-      const fidLockAcquired = await redis.set(fidLockKey, Date.now().toString(), {
-        nx: true, // Only set if not exists
-        ex: 300   // Extended to 5 minutes to cover blockchain + DB operations
-      });
-      
-      if (!fidLockAcquired) {
-        console.log(`🔒 FID DUPLICATE BLOCKED: FID ${fid} already processing claim for auction ${auction_id}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'This Farcaster account is already processing a claim. Please wait a moment and try again.',
-          code: 'FID_CLAIM_IN_PROGRESS'
-        }, { status: 429 });
-      }
-      
-      console.log(`🔓 ACQUIRED FID LOCK: FID ${fid} for auction ${auction_id}`);
-    }
     
     // Create user-specific address lock to prevent concurrent duplicate claims
     lockKey = `claim-lock:${address?.toLowerCase()}:${auction_id}`;
@@ -570,13 +517,13 @@ export async function POST(request: NextRequest) {
       // PRIORITY: Check duplicates immediately after acquiring locks, before expensive operations
       console.log(`🔍 EARLY DUPLICATE CHECK: Checking claims for auction ${auction_id}`);
       
-      // Quick duplicate check by address first (applies to both web and mini-app)
-      // Check for ANY existing record - including link-click records
+      // Quick duplicate check by address first
       const { data: existingClaimByAddress, error: addressCheckError } = await supabase
         .from('link_visit_claims')
         .select('tx_hash, claimed_at, claim_source')
         .eq('eth_address', address)
-        .eq('auction_id', auction_id);
+        .eq('auction_id', auction_id)
+        .not('claimed_at', 'is', null);
       
       if (addressCheckError) {
         console.error('Error in early address duplicate check:', addressCheckError);
@@ -596,44 +543,14 @@ export async function POST(request: NextRequest) {
         }, { status: 400 });
       }
       
-      // For mini-app users, also check by FID
-      if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '') && fid) {
-        const { data: existingClaimByFid, error: fidCheckError } = await supabase
-          .from('link_visit_claims')
-          .select('tx_hash, claimed_at, claim_source')
-          .eq('fid', fid)
-          .eq('auction_id', auction_id);
-        
-        if (fidCheckError) {
-          console.error('Error in early FID duplicate check:', fidCheckError);
-          return NextResponse.json({
-            success: false,
-            error: 'Database error when checking FID claim status'
-          }, { status: 500 });
-        }
-        
-        if (existingClaimByFid && existingClaimByFid.length > 0) {
-          const existing = existingClaimByFid[0];
-          console.log(`🚫 EARLY DUPLICATE DETECTED BY FID: FID ${fid} already claimed for auction ${auction_id} at tx ${existing.tx_hash} (source: ${existing.claim_source})`);
-          return NextResponse.json({ 
-            success: false, 
-            error: 'This Farcaster account has already claimed tokens for this auction',
-            tx_hash: existing.tx_hash
-          }, { status: 400 });
-        }
-      }
-      
       console.log(`✅ EARLY DUPLICATE CHECK PASSED: No existing claims found for auction ${auction_id}`);
       
       // Validate required parameters based on context
       let effectiveFid: number;
-      let effectiveUsername: string | null = null;
       let effectiveUserId: string | null = null; // For verified Privy userId (web users only)
-      let verifiedTwitterUsername: string | null = null; // Declare here for broader scope
       let privyUserId: string = ''; // Declare here for broader scope
       
     
-    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
       // Verify auth token for web users (Twitter authentication)
       const authHeader = request.headers.get('authorization');
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -645,11 +562,6 @@ export async function POST(request: NextRequest) {
       }
       
       const authToken = authHeader.substring(7); // Remove 'Bearer ' prefix
-      
-      // Check if we have an ID token in the request headers or cookies
-      // ID token is required to avoid rate limits when fetching user data
-      const idToken = request.headers.get('x-privy-id-token') || 
-                     request.cookies.get('privy-id-token')?.value;
       
       // Verify the Privy auth token and extract userId
       try {
@@ -663,40 +575,7 @@ export async function POST(request: NextRequest) {
         
         // Use the verified Privy userId
         privyUserId = verifiedClaims.userId;
-        
-        // Try to get full user data using idToken (to avoid rate limits)
-        try {
-          if (!idToken) {
-            console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, No ID token provided - cannot verify Twitter username`);
-            // NO FALLBACK - we require verified Twitter username from Privy
-            verifiedTwitterUsername = null;
-          } else {
-            // This method verifies the token and returns the user object without rate limits
-            const user = await privyClient.getUser({ idToken });
-            
-            // Extract Twitter username from linked accounts
-            if (user && user.linkedAccounts) {
-              const twitterAccount = user.linkedAccounts.find((account) => 
-                account.type === 'twitter_oauth'
-              );
-              
-              if (twitterAccount && 'username' in twitterAccount) {
-                verifiedTwitterUsername = twitterAccount.username;
-                console.log(`✅ WEB AUTH: IP=${clientIP}, Verified Privy User: ${privyUserId}, Twitter: @${verifiedTwitterUsername}`);
-              } else {
-                console.log(`⚠️ WEB AUTH: IP=${clientIP}, User ${privyUserId} has no Twitter account linked`);
-                verifiedTwitterUsername = null;
-              }
-            } else {
-              console.log(`⚠️ WEB AUTH: IP=${clientIP}, Could not retrieve user data from ID token`);
-              verifiedTwitterUsername = null;
-            }
-          }
-        } catch (getUserError) {
-          console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Failed to verify user with ID token:`, getUserError);
-          // NO FALLBACK - username must be verified through Privy to prevent duplicates
-          verifiedTwitterUsername = null;
-        }
+
       } catch (error) {
         console.log(`🚫 WEB AUTH ERROR: IP=${clientIP}, Invalid auth token:`, error);
         return NextResponse.json({ 
@@ -705,84 +584,7 @@ export async function POST(request: NextRequest) {
         }, { status: 401 });
       }
       
-      // Web users need address and auction_id
-      if (!address || !auction_id) {
-        console.log(`🚫 WEB VALIDATION ERROR: IP=${clientIP}, Missing required parameters (address or auction_id). Received: address=${address}, auction_id=${auction_id}`);
-
-        const addressHash = address?.slice(2).toLowerCase(); // Remove 0x and lowercase
-        const hashNumber = parseInt(addressHash?.slice(0, 8) || '0', 16);
-        effectiveFid = -(hashNumber % 1000000000);
-        
-        await logFailedTransaction({
-          fid: effectiveFid,
-          eth_address: address || 'unknown',
-          auction_id: auction_id || 'unknown',
-          username: privyUserId, // Use verified Privy userId
-          user_id: privyUserId, // For web claims, store the verified userId
-          winning_url: null,
-          error_message: 'Missing required parameters for web user (address or auction_id)',
-          error_code: 'WEB_VALIDATION_ERROR',
-          request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP,
-          claim_source
-        });
-        
-        return NextResponse.json({ success: false, error: 'Missing required parameters (address or auction_id)' }, { status: 400 });
-      }
-      // NEW: Enforce username requirement for web claims
-      if (claim_source === 'web' && !verifiedTwitterUsername) {
-        console.log(`🚫 WEB USERNAME REQUIRED: IP=${clientIP}, User ${privyUserId} attempted claim without username`);
-        
-        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
-        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
-        effectiveFid = -(hashNumber % 1000000000);
-        
-        await logFailedTransaction({
-          fid: effectiveFid,
-          eth_address: address || 'unknown',
-          auction_id: auction_id,
-          username: null,
-          user_id: privyUserId,
-          winning_url: null,
-          error_message: 'Username required for web claims to prevent exploitation',
-          error_code: 'WEB_USERNAME_REQUIRED',
-          request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
-        });
-        
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Username is required to claim $QR. Please ensure your account username is included in the request.' 
-        }, { status: 400 });
-      }
-
-      // NEW: Specific ban on "anj_juan23582" username
-      if (verifiedTwitterUsername && verifiedTwitterUsername.toLowerCase() === 'anj_juan23582') {
-        console.log(`🚫 SPECIFIC USERNAME BAN: IP=${clientIP}, Banned username "${verifiedTwitterUsername}" attempted to claim`);
-        
-        const addressHash = address?.slice(2).toLowerCase() || ''; // Remove 0x and lowercase
-        const hashNumber = parseInt(addressHash.slice(0, 8) || '0', 16);
-        effectiveFid = -(hashNumber % 1000000000);
-        
-        await logFailedTransaction({
-          fid: effectiveFid,
-          eth_address: address || 'unknown',
-          auction_id: auction_id,
-          username: verifiedTwitterUsername,
-          user_id: privyUserId,
-          winning_url: null,
-          error_message: `Banned username attempted claim: ${verifiedTwitterUsername}`,
-          error_code: 'BANNED_USERNAME_ATTEMPT',
-          request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
-        });
-        
-        return NextResponse.json({ 
-          success: false, 
-          error: 'This account is not eligible to claim $QR.' 
-        }, { status: 403 });
-      }
-      
+   
       // Create a unique negative FID from wallet address hash for web users
       if (address) {
         const addressHash = address.slice(2).toLowerCase(); // Remove 0x and lowercase
@@ -791,150 +593,8 @@ export async function POST(request: NextRequest) {
       } else {
         effectiveFid = -1; // Fallback for missing address
       }
-      effectiveUsername = verifiedTwitterUsername; // Use verified Twitter username from Privy
       effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
-      
-      console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Username=@${verifiedTwitterUsername}`);
-    } else {
-      // Mini-app users need fid, address, auction_id, and username
-      if (!fid || !address || !auction_id || !username) {
-        console.log(`🚫 MINI-APP VALIDATION ERROR: IP=${clientIP}, Missing required parameters (fid, address, auction_id, or username). Received: fid=${fid}, address=${address}, auction_id=${auction_id}, username=${username}`);
-        
-        await logFailedTransaction({
-          fid: fid || 0,
-          eth_address: address || 'unknown',
-          auction_id: auction_id || 'unknown',
-          username: username || undefined,
-          user_id: null, // Mini-app users don't have Privy userId
-          winning_url: null,
-          error_message: 'Missing required parameters for mini-app user (fid, address, auction_id, or username)',
-          error_code: 'MINIAPP_VALIDATION_ERROR',
-          request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
-        });
-        
-        return NextResponse.json({ success: false, error: 'Missing required parameters (fid, address, auction_id, or username)' }, { status: 400 });
-      }
-      
-      // ENFORCE: Mini-app FIDs must be positive integers
-      if (fid <= 0) {
-        console.log(`🚫 MINI-APP FID ERROR: IP=${clientIP}, Invalid FID=${fid} - mini-app FIDs must be positive`);
-        
-        await logFailedTransaction({
-          fid: fid,
-          eth_address: address,
-          auction_id: auction_id,
-          username: username,
-          user_id: null, // Mini-app users don't have Privy userId
-          winning_url: null,
-          error_message: `Invalid FID for mini-app user: ${fid} (must be positive)`,
-          error_code: 'INVALID_MINIAPP_FID',
-          request_data: { ...requestData, clientIP } as Record<string, unknown>,
-          client_ip: clientIP
-        });
-        
-        return NextResponse.json({ success: false, error: 'Invalid FID - mini-app FIDs must be positive integers' }, { status: 400 });
-      }
-      
-      effectiveFid = fid; // Use actual fid for mini-app users (guaranteed positive)
-      effectiveUsername = username; // Use actual username for mini-app users
-      effectiveUserId = null; // Mini-app users don't have Privy userId
-      
-    }
     
-    // CHECK BANNED USERS TABLE - applies to both web and mini-app users
-    // Enhanced username checking with multiple approaches for better coverage
-    console.log(`🔍 BAN CHECK: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address}`);
-    
-    // Check 1: By FID (only for mini-app users with real Farcaster FIDs)
-    if (effectiveFid && effectiveFid > 0) {
-      const { data: bannedByFid, error: fidBanError } = await supabase
-        .from('banned_users')
-        .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
-        .eq('fid', effectiveFid)
-        .maybeSingle();
-      
-      if (fidBanError) {
-        console.error('Error checking banned users by FID:', fidBanError);
-      }
-      
-      if (bannedByFid) {
-        console.log(`🚫 BANNED USER BLOCKED BY FID: IP=${clientIP}, FID=${effectiveFid}, banned_username=${bannedByFid.username}, reason=${bannedByFid.reason}`);
-        
-        // Update last attempt and increment counter
-        const currentAttempts = bannedByFid.total_claims_attempted || 0;
-        await supabase
-          .from('banned_users')
-          .update({
-            last_attempt_at: new Date().toISOString(),
-            total_claims_attempted: currentAttempts + 1
-          })
-          .eq('fid', bannedByFid.fid);
-        
-        // Also update IP addresses with raw SQL
-        await supabase.rpc('add_ip_to_banned_user', {
-          banned_fid: bannedByFid.fid,
-          new_ip: clientIP
-        });
-        
-        return NextResponse.json({ 
-          success: false, 
-          error: 'This account has been banned due to policy violations',
-          code: 'BANNED_USER'
-        }, { status: 403 });
-      }
-    }
-    
-    // Check 2: By Username (case-insensitive, with and without @ prefix)
-    if (effectiveUsername) {
-      const usernameVariants = [
-        effectiveUsername.toLowerCase(),
-        effectiveUsername.toLowerCase().replace(/^@/, ''), // Remove @ if present
-        `@${effectiveUsername.toLowerCase().replace(/^@/, '')}`, // Add @ if not present
-        effectiveUsername // Original case
-      ];
-      
-      console.log(`🔍 Checking username variants: ${usernameVariants.join(', ')}`);
-      
-      for (const usernameVariant of usernameVariants) {
-        const { data: bannedByUsername, error: usernameBanError } = await supabase
-          .from('banned_users')
-          .select('fid, username, eth_address, reason, created_at, auto_banned, total_claims_attempted')
-          .ilike('username', usernameVariant)
-          .maybeSingle();
-        
-        if (usernameBanError) {
-          console.error(`Error checking banned users by username "${usernameVariant}":`, usernameBanError);
-          continue;
-        }
-        
-        if (bannedByUsername) {
-          console.log(`🚫 BANNED USER BLOCKED BY USERNAME: IP=${clientIP}, username=${effectiveUsername}, banned_as=${bannedByUsername.username}, FID=${bannedByUsername.fid}, reason=${bannedByUsername.reason}`);
-          
-          // Update last attempt and increment counter
-          const currentAttempts = bannedByUsername.total_claims_attempted || 0;
-          await supabase
-            .from('banned_users')
-            .update({
-              last_attempt_at: new Date().toISOString(),
-              total_claims_attempted: currentAttempts + 1
-            })
-            .eq('fid', bannedByUsername.fid);
-          
-          // Also update IP addresses with raw SQL
-          await supabase.rpc('add_ip_to_banned_user', {
-            banned_fid: bannedByUsername.fid,
-            new_ip: clientIP
-          });
-          
-          return NextResponse.json({ 
-            success: false, 
-            error: 'This account has been banned due to policy violations',
-            code: 'BANNED_USER'
-          }, { status: 403 });
-        }
-      }
-    }
     
     // Check 3: By ETH Address (case-insensitive)
     if (address) {
@@ -974,8 +634,6 @@ export async function POST(request: NextRequest) {
         }, { status: 403 });
       }
     }
-    
-    console.log(`✅ BAN CHECK PASSED: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - No bans found`);
     
     // Validate that this is the latest settled auction
     try {
@@ -1028,160 +686,37 @@ export async function POST(request: NextRequest) {
     // Default winning URL if not provided
     const winningUrl = winning_url || `https://qrcoin.fun/auction/${auction_id}`;
     
-    // Additional detailed logging
-    console.log(`📋 DETAILED CLAIM: IP=${clientIP}, FID=${fid}, address=${address}, auction=${auction_id}, username=${username || 'unknown'}`);
+    // Clean up any incomplete claims (no tx_hash) for this FID/address/user to allow retry
+    console.log(`🧹 CLEANUP: Removing any incomplete claims for auction ${auction_id}`);
     
-    // Validate Mini App user - REQUIRE TOKEN FOR ALL MINI-APP CLAIMS
-    if (!NON_FC_CLAIM_SOURCES.includes(claim_source || '')) {
-      // SECURITY: Require authentication token for all mini-app claims
-      if (!miniapp_token) {
-        console.log(`🚫 MISSING TOKEN: Mini-app claim without authentication token from FID ${fid}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Authentication token required for mini-app claims',
-          code: 'MISSING_AUTH_TOKEN'
-        }, { status: 401 });
-      }
-      
-      // Verify the mini-app token
-      console.log(`🔐 Verifying mini-app token...`);
-      const tokenVerification = await verifyMiniAppToken(miniapp_token);
-      
-      if (!tokenVerification.isValid) {
-        console.log(`❌ Invalid mini-app token: ${tokenVerification.error}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: tokenVerification.error || 'Invalid authentication token',
-          code: 'INVALID_AUTH_TOKEN'
-        }, { status: 401 });
-      }
-      
-      // Verify token matches claim parameters
-      if (tokenVerification.fid !== effectiveFid || 
-          tokenVerification.address?.toLowerCase() !== address.toLowerCase()) {
-        console.log(`❌ Token mismatch: token FID=${tokenVerification.fid} vs claim FID=${effectiveFid}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Token does not match claim parameters',
-          code: 'TOKEN_MISMATCH'
-        }, { status: 401 });
-      }
-      
-      // Detect Coinbase Wallet from token
-      let isCoinbaseWallet = false;
-      if (tokenVerification.clientFid === 309857) {
-        isCoinbaseWallet = true;
-        console.log(`🔍 Coinbase Wallet detected from secure token`);
-      }
-      
-      console.log(`✅ Mini-app token verified for FID ${effectiveFid}`);
-      
-      // Now validate with Neynar
-      const userValidation = await validateMiniAppUser(effectiveFid, effectiveUsername || undefined, address, isCoinbaseWallet);
-      if (!userValidation.isValid) {
-        return NextResponse.json({ 
-          success: false, 
-          error: userValidation.error || 'Invalid user or spoofed request' 
-        }, { status: 400 });
-      }
-      
-      console.log(`✅ MINI-APP VALIDATION PASSED: IP=${clientIP}, FID=${effectiveFid}, username=${effectiveUsername}, address=${address} - Fully authenticated`);
-    }
-    
-    // TARGETED CLEANUP: Only delete records that have a corresponding failure entry
-    console.log(`🧹 TARGETED CLEANUP: Only removing records with logged failures`);
-    
-    // Check if there's a failure record for this claim attempt
-    const { data: failureRecords } = await supabase
-      .from('link_visit_claim_failures')
-      .select('id')
+    // Clean up incomplete claims by address
+    const { error: cleanupAddressError } = await supabase
+      .from('link_visit_claims')
+      .delete()
       .eq('eth_address', address)
       .eq('auction_id', auction_id)
-      .limit(1);
+      .is('tx_hash', null);
     
-    if (failureRecords && failureRecords.length > 0) {
-      // Only clean up if there's a recorded failure
-      console.log(`🗑️ Found failure record, cleaning up failed claim for retry`);
+    if (cleanupAddressError) {
+      console.warn('Error cleaning up incomplete address claims:', cleanupAddressError);
+    }
+    
+    // Clean up incomplete claims by user (if applicable)
+    if (effectiveUserId ) {
       
-      const { error: cleanupError } = await supabase
+      const { error: cleanupUserError } = await supabase
         .from('link_visit_claims')
         .delete()
-        .eq('eth_address', address)
+        .eq('user_id', effectiveUserId)
         .eq('auction_id', auction_id)
-        .is('tx_hash', null)
-        .is('claimed_at', null);
+        .is('tx_hash', null);
       
-      if (cleanupError) {
-        console.warn('Error cleaning up failed claim:', cleanupError);
+      if (cleanupUserError) {
+        console.warn(`Error cleaning up incomplete user_id claims:`, cleanupUserError);
       }
     }
     
-    // For web users, acquire username lock to prevent race condition with same username
-    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '') && effectiveUsername) {
-      usernameLockKey = `claim-username-lock:${effectiveUsername.toLowerCase()}:${auction_id}`;
-      
-      const usernameLockAcquired = await redis.set(usernameLockKey, Date.now().toString(), {
-        nx: true, // Only set if not exists
-        ex: 300   // 5 minutes to cover blockchain + DB operations
-      });
-      
-      if (!usernameLockAcquired) {
-        console.log(`🔒 USERNAME DUPLICATE BLOCKED: Username "${effectiveUsername}" already processing claim for auction ${auction_id}`);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'This username is already processing a claim. Please wait a moment and try again.',
-          code: 'USERNAME_CLAIM_IN_PROGRESS'
-        }, { status: 429 });
-      }
-      
-      console.log(`🔓 ACQUIRED USERNAME LOCK: "${effectiveUsername}" for auction ${auction_id}`);
-    }
-    
-    // PRE-TRANSACTION CHECK: Web users claiming with same username but different addresses
-    if (NON_FC_CLAIM_SOURCES.includes(claim_source || '') && effectiveUsername) {
-      console.log(`🔍 Checking for multiple claims by username: ${effectiveUsername} for auction ${auction_id}`);
-      
-      // Check how many successful claims this username has made for THIS SPECIFIC AUCTION
-      const { data: usernameClaimsData, error: usernameClaimsError } = await supabase
-        .from('link_visit_claims')
-        .select('id, eth_address, auction_id, claimed_at, tx_hash')
-        .eq('username', effectiveUsername)
-        .eq('auction_id', auction_id) // Only check current auction
-        .in('claim_source', NON_FC_CLAIM_SOURCES)
-        .not('tx_hash', 'is', null)
-        .not('claimed_at', 'is', null)
-        .order('claimed_at', { ascending: false });
-      
-      if (usernameClaimsError) {
-        console.error('Error checking username claims for pre-transaction validation:', usernameClaimsError);
-        return NextResponse.json({
-          success: false,
-          error: 'Database error when checking username claims'
-        }, { status: 500 });
-      } else if (usernameClaimsData && usernameClaimsData.length >= 1) {
-        // Check if this would be a 2nd+ claim with a DIFFERENT address for the same auction
-        const existingAddresses = usernameClaimsData.map(claim => claim.eth_address.toLowerCase());
-        const currentAddress = address.toLowerCase();
-        
-        // If this address is different from any existing claim address, block it
-        if (!existingAddresses.includes(currentAddress)) {
-          console.log(`🚫 PRE-TX BLOCK: Username "${effectiveUsername}" attempting 2nd claim with different address for auction ${auction_id}`);
-          console.log(`🚫 Previous address used: ${existingAddresses.join(', ')}`);
-          console.log(`🚫 Attempting new address: ${address}`);
-          
-          // Block this claim before any transaction occurs
-          return NextResponse.json({ 
-            success: false, 
-            error: 'This username has already claimed tokens for this auction with a different address',
-            code: 'USERNAME_ALREADY_CLAIMED'
-          }, { status: 400 });
-        } else {
-          console.log(`✅ Username "${effectiveUsername}" attempting to claim again with same address ${address} for auction ${auction_id} (duplicate address check will handle this)`);
-        }
-      } else {
-        console.log(`✅ Username "${effectiveUsername}" pre-transaction check passed - no previous claims found`);
-      }
-    }
+    console.log(`✅ CLEANUP COMPLETE: Ready to proceed with new claim`);
     
     // Initialize ethers provider and get wallet from pool
     const provider = new ethers.JsonRpcProvider(RPC_URL);
@@ -1191,14 +726,7 @@ export async function POST(request: NextRequest) {
     let DYNAMIC_AIRDROP_CONTRACT: string;
     
     // Determine the purpose based on claim source
-    let walletPurpose: 'link-web' | 'mobile-link-visit' | 'link-miniapp';
-    if (claim_source === 'mobile') {
-      walletPurpose = 'mobile-link-visit';
-    } else if (claim_source === 'web') {
-      walletPurpose = 'link-web';
-    } else {
-      walletPurpose = 'link-miniapp';
-    }
+    const walletPurpose = 'mobile-link-visit'
     
     // Check if we should use direct wallet (pool disabled for this purpose)
     const directWallet = walletPool.getDirectWallet(walletPurpose);
@@ -1223,7 +751,7 @@ export async function POST(request: NextRequest) {
           fid: effectiveFid,
           eth_address: address,
           auction_id,
-          username: effectiveUsername,
+          username: null,
           user_id: effectiveUserId,
           winning_url: winningUrl,
           error_message: errorMessage,
@@ -1254,7 +782,7 @@ export async function POST(request: NextRequest) {
           fid: effectiveFid,
           eth_address: address,
           auction_id,
-          username: effectiveUsername,
+          username: null,
           user_id: effectiveUserId,
           winning_url: winningUrl,
           error_message: errorMessage,
@@ -1271,146 +799,7 @@ export async function POST(request: NextRequest) {
         }, { status: 500 });
       }
     
-    // Define airdrop amount based on claim source and user score
-    let claimAmount: string;
-    let neynarScore: number | undefined;
-    let spamLabel: boolean | null = null;
-    
-    if (claim_source === 'web' || claim_source === 'mobile') {
-      // Web/mobile users: wallet holdings only (no Neynar scores)
-      try {
-        const claimResult = await getClaimAmountForAddress(
-          address,
-          claim_source,
-          ALCHEMY_API_KEY,
-          undefined // No FID for web users - they don't get Neynar scores
-        );
-        claimAmount = claimResult.amount.toString();
-        neynarScore = undefined; // Web users don't get Neynar scores
-        console.log(`💰 Dynamic claim amount for ${claim_source} user ${address}: ${claimAmount} QR`);
-      } catch (error) {
-        console.error('Error checking claim amount, using default:', error);
-        claimAmount = '500'; // Fallback to original amount
-      }
-    } else {
-      // Mini-app users: use unified function that checks Neynar score
-      try {
-        const claimResult = await getClaimAmountForAddress(
-          address || '',
-          claim_source || 'mini_app',
-          ALCHEMY_API_KEY,
-          effectiveFid
-        );
-        claimAmount = claimResult.amount.toString();
-        neynarScore = claimResult.neynarScore;
-        
-        // Handle spam label for mini-app users with FIDs
-        if (effectiveFid && effectiveFid > 0) {
-          if (claimResult.hasSpamLabelOverride) {
-            // hasSpamLabelOverride means they have label_value = 2 (not spam)
-            spamLabel = false;
-            console.log(`📊 FID ${effectiveFid} has spam override (label_value 2) → spam_label: false`);
-          } else {
-            // No override, check if they have any spam label
-            try {
-              const { data: spamLabelData, error: spamLabelError } = await supabase
-                .from('spam_labels')
-                .select('label_value')
-                .eq('fid', effectiveFid)
-                .maybeSingle();
-              
-              if (!spamLabelError && spamLabelData) {
-                // Convert label_value to boolean: 0 = true (spam), 2 = false (not spam)
-                spamLabel = spamLabelData.label_value === 0;
-                console.log(`📊 FID ${effectiveFid} has label_value ${spamLabelData.label_value} → spam_label: ${spamLabel}`);
-              } else {
-                console.log(`📊 FID ${effectiveFid} has no spam label data`);
-              }
-            } catch (error) {
-              console.error('Error checking spam labels:', error);
-            }
-          }
-        }
-        
-        console.log(`💰 Mini-app claim amount for FID ${effectiveFid}: ${claimAmount} QR, Neynar score: ${neynarScore}, spam_label: ${spamLabel}`);
-      } catch (error) {
-        console.error('Error determining mini-app claim amount:', error);
-        claimAmount = '100'; // Fallback to default
-      }
-    }
-    
-    // Check historical ETH balance requirement for web users only
-    if (claim_source === 'web') {
-      console.log(`🕐 Checking historical ETH balance requirement for web user...`);
-      try {
-        // Get wallet claim amounts from database
-        const { emptyAmount, valueAmount } = await getWalletClaimAmounts();
-        
-        const historicalResult = await checkHistoricalEthBalance(
-          address,
-          5, // $5 minimum
-          90, // 90 days (3 months)
-          ALCHEMY_API_KEY
-        );
-        
-        if (!historicalResult.meetsRequirement) {
-          console.log(`❌ Wallet has not maintained $5 ETH for 90 days (lowest: $${historicalResult.lowestBalanceUsd.toFixed(2)})`);
-          // Reduce to wallet_empty amount for users who don't meet historical requirement
-          claimAmount = emptyAmount.toString();
-          console.log(`📉 Reducing claim amount to lower tier: ${claimAmount} QR`);
-          console.log(`⚠️ Web user ${address} gets reduced claim amount due to not meeting historical balance requirement`);
-        } else {
-          console.log(`✅ Historical balance requirement met (lowest: $${historicalResult.lowestBalanceUsd.toFixed(2)})`);
-          // Web users who meet historical requirement get wallet_has_balance amount
-          claimAmount = valueAmount.toString();
-          console.log(`🎉 Web user meets requirement - awarding ${claimAmount} QR`);
-        }
-      } catch (error) {
-        console.error('Error checking historical balance:', error);
-        // On error, try to get wallet_empty amount from database
-        try {
-          const { emptyAmount } = await getWalletClaimAmounts();
-          claimAmount = emptyAmount.toString();
-          console.log(`⚠️ Error checking historical balance, defaulting to lower tier: ${claimAmount} QR`);
-        } catch {
-          // If database also fails, use hardcoded fallback
-          claimAmount = '100';
-          console.log('⚠️ Error checking historical balance and fetching database amounts, using hardcoded fallback: 100 QR');
-        }
-      }
-    }
-    
-    const MAX_CLAIM_AMOUNT = 1000;
-    const parsedClaimAmount = parseInt(claimAmount);
-    if (parsedClaimAmount > MAX_CLAIM_AMOUNT) {
-      console.error(`🚨 Claim amount ${parsedClaimAmount} exceeds maximum allowed ${MAX_CLAIM_AMOUNT} QR`);
-      console.error(`🚨 Original amount: ${claimAmount}, User: FID=${effectiveFid}, Address=${address}, Source=${claim_source}`);
-      
-      await logFailedTransaction({
-        fid: effectiveFid,
-        eth_address: address,
-        auction_id,
-        username: effectiveUsername,
-        user_id: effectiveUserId,
-        winning_url: winningUrl,
-        error_message: `Excessive claim amount detected: ${parsedClaimAmount} QR (max: ${MAX_CLAIM_AMOUNT})`,
-        error_code: 'EXCESSIVE_CLAIM_AMOUNT',
-        request_data: { 
-          ...requestData, 
-          clientIP,
-          originalClaimAmount: claimAmount,
-          neynarScore,
-          spamLabel
-        } as Record<string, unknown>,
-        client_ip: clientIP,
-        claim_source
-      });
-      
-      // Cap the amount to maximum allowed
-      claimAmount = MAX_CLAIM_AMOUNT.toString();
-      console.log(`🛡️ SECURITY: Capping claim amount to ${MAX_CLAIM_AMOUNT} QR`);
-    }
-    
+    const claimAmount = '1000';
     const airdropAmount = ethers.parseUnits(claimAmount, 18);
     console.log(`Preparing airdrop of ${claimAmount} QR tokens to ${address}`);
     
@@ -1441,7 +830,7 @@ export async function POST(request: NextRequest) {
           fid: effectiveFid,
           eth_address: address,
           auction_id,
-          username: effectiveUsername,
+          username: null,
           user_id: effectiveUserId,
           winning_url: winningUrl,
           error_message: errorMessage,
@@ -1493,7 +882,7 @@ export async function POST(request: NextRequest) {
             if (errorMessage.includes('timeout') && txHash) {
               console.log('Approval timed out, checking if it actually succeeded on-chain...');
               try {
-                const currentAllowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses(claim_source).AIRDROP_CONTRACT_ADDRESS);
+                const currentAllowance = await qrTokenContract.allowance(adminWallet.address, getContractAddresses().AIRDROP_CONTRACT_ADDRESS);
                 if (currentAllowance >= airdropAmount) {
                   console.log('Approval actually succeeded on-chain despite timeout, continuing...');
                   // Continue with the airdrop - don't return error
@@ -1504,7 +893,7 @@ export async function POST(request: NextRequest) {
                     fid: effectiveFid,
                     eth_address: address,
                     auction_id,
-                    username: effectiveUsername,
+                    username: null,
                     user_id: effectiveUserId,
                     winning_url: winningUrl,
                     error_message: `Token approval timed out: ${errorMessage}`,
@@ -1546,7 +935,7 @@ export async function POST(request: NextRequest) {
               fid: effectiveFid,
               eth_address: address,
               auction_id,
-              username: effectiveUsername,
+              username: null,
               user_id: effectiveUserId,
               winning_url: winningUrl,
               error_message: `Token approval failed: ${errorMessage}`,
@@ -1580,7 +969,7 @@ export async function POST(request: NextRequest) {
         fid: effectiveFid,
         eth_address: address,
         auction_id,
-        username: effectiveUsername,
+        username: null,
         user_id: effectiveUserId,
         winning_url: winningUrl,
         error_message: `Failed to check token balance: ${errorMessage}`,
@@ -1672,7 +1061,7 @@ export async function POST(request: NextRequest) {
               fid: effectiveFid,
               eth_address: address,
               auction_id,
-              username: effectiveUsername,
+              username: null,
               user_id: effectiveUserId,
               winning_url: winningUrl,
               error_message: `Transaction failed: ${txErrorMessage}`,
@@ -1705,13 +1094,13 @@ export async function POST(request: NextRequest) {
           amount: parseInt(claimAmount), // Variable QR tokens based on source and score
           tx_hash: receipt.hash,
           success: true,
-          username: effectiveUsername, // Display username (from request for mini-app, null for web)
+          username: null, // Display username (from request for mini-app, null for web)
           user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
           winning_url: winningUrl,
-          claim_source: claim_source || 'mini_app',
+          claim_source: claim_source,
           client_ip: clientIP, // Track IP for successful claims
-          neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
-          spam_label: spamLabel // Store the spam label
+          neynar_user_score: null, // Store the Neynar score
+          spam_label: null // Store the spam label
         });
         
       if (insertError) {
@@ -1748,7 +1137,7 @@ export async function POST(request: NextRequest) {
                 .from('banned_users')
                 .insert({
                   fid: effectiveFid,
-                  username: effectiveUsername,
+                  username: null,
                   eth_address: address,
                   reason: `Auto-banned: Exploited race condition - got ${duplicateTxs.length} blockchain transactions for auction ${auction_id}`,
                   created_at: new Date().toISOString(),
@@ -1801,13 +1190,13 @@ export async function POST(request: NextRequest) {
             amount: parseInt(claimAmount), // Variable QR tokens based on source and score
             tx_hash: receipt.hash,
             success: true,
-            username: effectiveUsername, // Display username (from request for mini-app, null for web)
+            username: null, // Display username (from request for mini-app, null for web)
             user_id: effectiveUserId, // Verified Privy userId (for web users only, null for mini-app)
             winning_url: winningUrl,
-            claim_source: claim_source || 'mini_app',
+            claim_source: claim_source,
             client_ip: clientIP, // Track IP for successful claims
-            neynar_user_score: neynarScore !== undefined ? neynarScore : null, // Store the Neynar score
-            spam_label: spamLabel // Store the spam label
+            neynar_user_score: null, // Store the Neynar score
+            spam_label: null // Store the spam label
           })
           .match({
             fid: effectiveFid,
@@ -1822,7 +1211,7 @@ export async function POST(request: NextRequest) {
             fid: effectiveFid,
             eth_address: address,
             auction_id,
-            username: effectiveUsername,
+            username: null,
             user_id: effectiveUserId,
             winning_url: winningUrl,
             error_message: `Failed to record successful claim: ${updateError.message}`,
@@ -1854,23 +1243,6 @@ export async function POST(request: NextRequest) {
         }
       }
       
-      if (fidLockKey) {
-        try {
-          await redis.del(fidLockKey);
-          console.log(`🔓 RELEASED FID LOCK (after DB): ${fidLockKey}`);
-        } catch (lockError) {
-          console.error('Error releasing FID lock:', lockError);
-        }
-      }
-      
-      if (usernameLockKey) {
-        try {
-          await redis.del(usernameLockKey);
-          console.log(`🔓 RELEASED USERNAME LOCK (after DB): ${usernameLockKey}`);
-        } catch (lockError) {
-          console.error('Error releasing username lock:', lockError);
-        }
-      }
       
       return NextResponse.json({ 
         success: true, 
@@ -1905,7 +1277,7 @@ export async function POST(request: NextRequest) {
         fid: effectiveFid,
         eth_address: address,
         auction_id,
-        username: effectiveUsername,
+        username: null,
         user_id: effectiveUserId,
         winning_url: winningUrl,
         error_message: errorMessage,
@@ -1940,7 +1312,7 @@ export async function POST(request: NextRequest) {
         fid: effectiveFid,
         eth_address: address,
         auction_id,
-        username: effectiveUsername,
+        username: null,
         user_id: effectiveUserId,
         winning_url: winningUrl,
         error_message: `Wallet operation failed: ${errorMessage}`,
@@ -1985,10 +1357,10 @@ export async function POST(request: NextRequest) {
     }
     
     // Extract whatever information we can from the request
-    const fidForLog = typeof requestData.fid === 'number' ? requestData.fid : (NON_FC_CLAIM_SOURCES.includes(requestData.claim_source || '') ? -1 : 0);
+    const fidForLog = -1
     const addressForLog = typeof requestData.address === 'string' ? requestData.address : 'unknown';
     const auctionIdForLog = typeof requestData.auction_id === 'string' ? requestData.auction_id : 'unknown';
-    const usernameForLog = NON_FC_CLAIM_SOURCES.includes(requestData.claim_source || '') ? null : requestData.username;
+    const usernameForLog = null
     const winningUrlForLog = requestData.winning_url;
     
     // Attempt to log error even in case of unexpected errors
@@ -2005,7 +1377,7 @@ export async function POST(request: NextRequest) {
         request_data: requestData as Record<string, unknown>,
         network_status: 'unexpected_error',
         client_ip: clientIP,
-        claim_source: requestData.claim_source || 'mini_app'
+        claim_source: requestData.claim_source
       });
     } catch (logError) {
       console.error('Failed to log unexpected error:', logError);
@@ -2028,30 +1400,6 @@ export async function POST(request: NextRequest) {
         }
       } catch (lockError) {
         console.error('Error releasing address lock:', lockError);
-      }
-    }
-    
-    if (fidLockKey) {
-      try {
-        const lockExists = await redis.exists(fidLockKey);
-        if (lockExists) {
-          await redis.del(fidLockKey);
-          console.log(`🔓 RELEASED FID LOCK (error path): ${fidLockKey}`);
-        }
-      } catch (lockError) {
-        console.error('Error releasing FID lock:', lockError);
-      }
-    }
-    
-    if (usernameLockKey) {
-      try {
-        const lockExists = await redis.exists(usernameLockKey);
-        if (lockExists) {
-          await redis.del(usernameLockKey);
-          console.log(`🔓 RELEASED USERNAME LOCK (error path): ${usernameLockKey}`);
-        }
-      } catch (lockError) {
-        console.error('Error releasing username lock:', lockError);
       }
     }
   }

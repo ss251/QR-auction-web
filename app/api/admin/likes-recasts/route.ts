@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import { Redis } from '@upstash/redis';
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
 // Setup Supabase clients
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 // Use service role key for database operations in API routes (bypasses RLS)
 const supabase = createClient(
@@ -13,23 +12,18 @@ const supabase = createClient(
   supabaseServiceKey || supabaseAnonKey
 );
 
-const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL!,
-  token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-});
-
 // If we don't have service key, log a warning
 if (!supabaseServiceKey) {
   console.warn(
-    'SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database reads may fail due to RLS'
+    "SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database reads may fail due to RLS"
   );
 }
 
 // Neynar API configuration
-const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY || '';
-const NEYNAR_API_URL = 'https://api.neynar.com/v2';
+const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY || "";
+const NEYNAR_API_URL = "https://api.neynar.com/v2";
 
-import { isAdminAddress } from '@/lib/constants';
+import { isAdminAddress } from "@/lib/constants";
 
 // Type for signer data
 interface Signer {
@@ -64,7 +58,7 @@ interface NeynarUser {
   following_count?: number;
   power_badge?: boolean;
   verified_accounts?: Array<{
-    platform: 'x' | 'github';
+    platform: "x" | "github";
     username: string;
   }>;
   experimental?: {
@@ -74,7 +68,7 @@ interface NeynarUser {
 }
 
 interface NeynarReaction {
-  reaction_type: 'like' | 'recast';
+  reaction_type: "like" | "recast";
   user: NeynarUser;
 }
 
@@ -97,14 +91,14 @@ async function processLikeWithRetry(
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const likeResponse = await fetch(`${NEYNAR_API_URL}/farcaster/reaction`, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
           api_key: NEYNAR_API_KEY,
         },
         body: JSON.stringify({
           signer_uuid: signer.signer_uuid,
-          reaction_type: 'like',
+          reaction_type: "like",
           target: castHash,
         }),
       });
@@ -129,14 +123,14 @@ async function processLikeWithRetry(
         );
         results.errors.push(
           `Like failed for FID ${signer.fid}: ${
-            error.message || 'Unknown error'
+            error.message || "Unknown error"
           }`
         );
         results.details.push({
           fid: signer.fid,
-          action: 'like',
+          action: "like",
           success: false,
-          error: error.message || 'Unknown error',
+          error: error.message || "Unknown error",
         });
         results.failed++;
         return;
@@ -146,7 +140,7 @@ async function processLikeWithRetry(
         );
         results.details.push({
           fid: signer.fid,
-          action: 'like',
+          action: "like",
           success: true,
         });
         results.successful++;
@@ -161,7 +155,7 @@ async function processLikeWithRetry(
         results.errors.push(`Like error for FID ${signer.fid}: ${likeError}`);
         results.details.push({
           fid: signer.fid,
-          action: 'like',
+          action: "like",
           success: false,
           error: String(likeError),
         });
@@ -188,14 +182,14 @@ async function processRecastWithRetry(
       const recastResponse = await fetch(
         `${NEYNAR_API_URL}/farcaster/reaction`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
             api_key: NEYNAR_API_KEY,
           },
           body: JSON.stringify({
             signer_uuid: signer.signer_uuid,
-            reaction_type: 'recast',
+            reaction_type: "recast",
             target: castHash,
           }),
         }
@@ -221,14 +215,14 @@ async function processRecastWithRetry(
         );
         results.errors.push(
           `Recast failed for FID ${signer.fid}: ${
-            error.message || 'Unknown error'
+            error.message || "Unknown error"
           }`
         );
         results.details.push({
           fid: signer.fid,
-          action: 'recast',
+          action: "recast",
           success: false,
-          error: error.message || 'Unknown error',
+          error: error.message || "Unknown error",
         });
         results.failed++;
         return;
@@ -238,7 +232,7 @@ async function processRecastWithRetry(
         );
         results.details.push({
           fid: signer.fid,
-          action: 'recast',
+          action: "recast",
           success: true,
         });
         results.successful++;
@@ -255,7 +249,7 @@ async function processRecastWithRetry(
         );
         results.details.push({
           fid: signer.fid,
-          action: 'recast',
+          action: "recast",
           success: false,
           error: String(recastError),
         });
@@ -290,11 +284,11 @@ async function processBatch<T>(
 export async function POST(request: NextRequest) {
   try {
     // Check authorization
-    const authHeader = request.headers.get('authorization');
-    const address = authHeader?.replace('Bearer ', '');
+    const authHeader = request.headers.get("authorization");
+    const address = authHeader?.replace("Bearer ", "");
 
     if (!address || !isAdminAddress(address)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Rate limiting removed for admin operations
@@ -306,27 +300,27 @@ export async function POST(request: NextRequest) {
     if (numLikes !== undefined || numRecasts !== undefined) {
       if (!castHash) {
         return NextResponse.json(
-          { error: 'Cast hash is required for likes/recasts actions' },
+          { error: "Cast hash is required for likes/recasts actions" },
           { status: 400 }
         );
       }
 
       if (
         numLikes !== undefined &&
-        (typeof numLikes !== 'number' || numLikes < 0)
+        (typeof numLikes !== "number" || numLikes < 0)
       ) {
         return NextResponse.json(
-          { error: 'numLikes must be a non-negative number' },
+          { error: "numLikes must be a non-negative number" },
           { status: 400 }
         );
       }
 
       if (
         numRecasts !== undefined &&
-        (typeof numRecasts !== 'number' || numRecasts < 0)
+        (typeof numRecasts !== "number" || numRecasts < 0)
       ) {
         return NextResponse.json(
-          { error: 'numRecasts must be a non-negative number' },
+          { error: "numRecasts must be a non-negative number" },
           { status: 400 }
         );
       }
@@ -336,29 +330,29 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error:
-              'Missing required parameters: fids, actionType OR numLikes/numRecasts',
+              "Missing required parameters: fids, actionType OR numLikes/numRecasts",
           },
           { status: 400 }
         );
       }
 
-      if (!castHash && actionType !== 'follow') {
+      if (!castHash && actionType !== "follow") {
         return NextResponse.json(
-          { error: 'Cast hash is required for likes/recasts actions' },
+          { error: "Cast hash is required for likes/recasts actions" },
           { status: 400 }
         );
       }
 
-      if ((actionType === 'follow' || actionType === 'all') && !targetFid) {
+      if ((actionType === "follow" || actionType === "all") && !targetFid) {
         return NextResponse.json(
-          { error: 'Target FID is required for follow actions' },
+          { error: "Target FID is required for follow actions" },
           { status: 400 }
         );
       }
 
       if (!Array.isArray(fids) || fids.length === 0) {
         return NextResponse.json(
-          { error: 'fids must be a non-empty array' },
+          { error: "fids must be a non-empty array" },
           { status: 400 }
         );
       }
@@ -376,13 +370,13 @@ export async function POST(request: NextRequest) {
 
       // Get all approved signers for selective mode
       const { data: signers, error } = await supabase
-        .from('neynar_signers_updated')
-        .select('fid, signer_uuid, permissions, status, follower_count')
-        .eq('status', 'approved')
+        .from("neynar_signers_updated")
+        .select("fid, signer_uuid, permissions, status")
+        .eq("status", "approved")
         .limit(10000);
 
       if (error) {
-        console.error('Error fetching signers:', error);
+        console.error("Error fetching signers:", error);
         return NextResponse.json(
           { error: `Failed to fetch signers: ${error.message}` },
           { status: 500 }
@@ -407,10 +401,10 @@ export async function POST(request: NextRequest) {
         );
 
         const { data: batchSigners, error: batchError } = await supabase
-          .from('neynar_signers_updated')
-          .select('fid, signer_uuid, permissions, status, follower_count')
-          .eq('status', 'approved')
-          .in('fid', fidBatch);
+          .from("neynar_signers_updated")
+          .select("fid, signer_uuid, permissions, status")
+          .eq("status", "approved")
+          .in("fid", fidBatch);
 
         if (batchError) {
           console.error(
@@ -435,12 +429,10 @@ export async function POST(request: NextRequest) {
 
     if (allSigners.length === 0) {
       return NextResponse.json(
-        { error: 'No approved signers found for the specified FIDs' },
+        { error: "No approved signers found for the specified FIDs" },
         { status: 404 }
       );
     }
-
-    allSigners = allSigners.sort((a, b) => b.follower_count - a.follower_count);
 
     console.log(`Found ${allSigners.length} approved signers to process`);
 
@@ -451,10 +443,10 @@ export async function POST(request: NextRequest) {
     if (numLikes !== undefined || numRecasts !== undefined) {
       // Filter signers by permissions first
       const likersPool = allSigners.filter((s) =>
-        s.permissions.includes('like')
+        s.permissions.includes("like")
       );
       const recastersPool = allSigners.filter((s) =>
-        s.permissions.includes('recast')
+        s.permissions.includes("recast")
       );
 
       // Randomly select for likes
@@ -504,7 +496,7 @@ export async function POST(request: NextRequest) {
     // For selective mode, process likes and recasts separately
     if (numLikes !== undefined || numRecasts !== undefined) {
       // Get existing reactions to avoid duplicates
-      console.log('Fetching existing reactions to avoid duplicates...');
+      console.log("Fetching existing reactions to avoid duplicates...");
       const existingLikes = new Set<number>();
       const existingRecasts = new Set<number>();
 
@@ -514,7 +506,7 @@ export async function POST(request: NextRequest) {
         let totalLikesPages = 0;
         do {
           const likesUrl: string = `${NEYNAR_API_URL}/farcaster/reactions/cast?hash=${castHash}&types=likes&limit=100${
-            likesCursor ? `&cursor=${likesCursor}` : ''
+            likesCursor ? `&cursor=${likesCursor}` : ""
           }`;
           const likesResponse: Response = await fetch(likesUrl, {
             headers: { api_key: NEYNAR_API_KEY },
@@ -542,7 +534,7 @@ export async function POST(request: NextRequest) {
         let totalRecastsPages = 0;
         do {
           const recastsUrl: string = `${NEYNAR_API_URL}/farcaster/reactions/cast?hash=${castHash}&types=recasts&limit=100${
-            recastsCursor ? `&cursor=${recastsCursor}` : ''
+            recastsCursor ? `&cursor=${recastsCursor}` : ""
           }`;
           const recastsResponse: Response = await fetch(recastsUrl, {
             headers: { api_key: NEYNAR_API_KEY },
@@ -566,7 +558,7 @@ export async function POST(request: NextRequest) {
         );
       } catch (error) {
         console.warn(
-          'Failed to fetch existing reactions, proceeding without deduplication:',
+          "Failed to fetch existing reactions, proceeding without deduplication:",
           error
         );
       }
@@ -610,7 +602,7 @@ export async function POST(request: NextRequest) {
       if (skippedLikes > 0) {
         results.details.push({
           fid: 0,
-          action: 'like',
+          action: "like",
           success: true,
           error: `Skipped ${skippedLikes} FIDs that already liked this cast`,
         });
@@ -619,48 +611,270 @@ export async function POST(request: NextRequest) {
       if (skippedRecasts > 0) {
         results.details.push({
           fid: 0,
-          action: 'recast',
+          action: "recast",
           success: true,
           error: `Skipped ${skippedRecasts} FIDs that already recasted this cast`,
         });
       }
-
-      // Log the test activity
-      const { error: logError } = await supabase
-        .from('auto_engagement_logs')
-        .insert({
-          cast_hash: castHash,
-          cast_url: `https://warpcast.com/~/conversations/${castHash}`,
-          total_signers: results.total,
-          successful: results.successful,
-          failed: results.failed,
-          errors: results.errors.length > 0 ? results.errors : null,
-          processed_at: new Date().toISOString(),
-        });
-
-      if (logError) {
-        console.error('Error logging test activity:', logError);
-      }
     } else {
       // Legacy mode - process all signers with original logic
-      console.log(castHash, fids, actionType);
+      for (const signer of allSigners) {
+        try {
+          // Check what permissions this signer has
+          const hasLikePermission = signer.permissions.includes("like");
+          const hasRecastPermission = signer.permissions.includes("recast");
+          const hasFollowPermission = signer.permissions.includes("follow");
 
-      // Batch initiation logic
+          let actionSucceeded = false;
 
-      const batchKey = `likes-recasts-batch:${castHash}`;
-      const batchState = {
-        castHash,
-        actionType,
-        targetFid,
-        signers: allSigners,
-        currentIndex: 0,
-        results: { successful: 0, failed: 0, errors: [], details: [] },
-      };
-      await redis.set(batchKey, JSON.stringify(batchState));
-      return NextResponse.json({
-        message: `Batch initiated for cast ${castHash} with ${allSigners.length} signers. Cron will process 5 per minute.`,
-        batchKey,
+          // Like the cast if permission granted and action requires it
+          if (
+            hasLikePermission &&
+            (actionType === "likes" ||
+              actionType === "both" ||
+              actionType === "all")
+          ) {
+            try {
+              const likeResponse = await fetch(
+                `${NEYNAR_API_URL}/farcaster/reaction`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    api_key: NEYNAR_API_KEY,
+                  },
+                  body: JSON.stringify({
+                    signer_uuid: signer.signer_uuid,
+                    reaction_type: "like",
+                    target: castHash,
+                  }),
+                }
+              );
+
+              if (!likeResponse.ok) {
+                const error = await likeResponse.json();
+                console.error(`Failed to like for FID ${signer.fid}:`, error);
+                results.errors.push(
+                  `Like failed for FID ${signer.fid}: ${
+                    error.message || "Unknown error"
+                  }`
+                );
+                results.details.push({
+                  fid: signer.fid,
+                  action: "like",
+                  success: false,
+                  error: error.message || "Unknown error",
+                });
+              } else {
+                console.log(`Successfully liked cast for FID ${signer.fid}`);
+                results.details.push({
+                  fid: signer.fid,
+                  action: "like",
+                  success: true,
+                });
+                actionSucceeded = true;
+              }
+            } catch (likeError) {
+              console.error(`Error liking for FID ${signer.fid}:`, likeError);
+              results.errors.push(
+                `Like error for FID ${signer.fid}: ${likeError}`
+              );
+              results.details.push({
+                fid: signer.fid,
+                action: "like",
+                success: false,
+                error: String(likeError),
+              });
+            }
+          } else if (
+            actionType === "likes" ||
+            actionType === "both" ||
+            actionType === "all"
+          ) {
+            results.details.push({
+              fid: signer.fid,
+              action: "like",
+              success: false,
+              error: "No like permission",
+            });
+          }
+
+          // Recast if permission granted and action type includes recast
+          if (
+            hasRecastPermission &&
+            (actionType === "both" || actionType === "all")
+          ) {
+            try {
+              const recastResponse = await fetch(
+                `${NEYNAR_API_URL}/farcaster/reaction`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    api_key: NEYNAR_API_KEY,
+                  },
+                  body: JSON.stringify({
+                    signer_uuid: signer.signer_uuid,
+                    reaction_type: "recast",
+                    target: castHash,
+                  }),
+                }
+              );
+
+              if (!recastResponse.ok) {
+                const error = await recastResponse.json();
+                console.error(`Failed to recast for FID ${signer.fid}:`, error);
+                results.errors.push(
+                  `Recast failed for FID ${signer.fid}: ${
+                    error.message || "Unknown error"
+                  }`
+                );
+                results.details.push({
+                  fid: signer.fid,
+                  action: "recast",
+                  success: false,
+                  error: error.message || "Unknown error",
+                });
+              } else {
+                console.log(`Successfully recasted for FID ${signer.fid}`);
+                results.details.push({
+                  fid: signer.fid,
+                  action: "recast",
+                  success: true,
+                });
+                actionSucceeded = true;
+              }
+            } catch (recastError) {
+              console.error(
+                `Error recasting for FID ${signer.fid}:`,
+                recastError
+              );
+              results.errors.push(
+                `Recast error for FID ${signer.fid}: ${recastError}`
+              );
+              results.details.push({
+                fid: signer.fid,
+                action: "recast",
+                success: false,
+                error: String(recastError),
+              });
+            }
+          } else if (actionType === "both" || actionType === "all") {
+            results.details.push({
+              fid: signer.fid,
+              action: "recast",
+              success: false,
+              error: "No recast permission",
+            });
+          }
+
+          // Follow if permission granted and action type includes follow
+          if (
+            hasFollowPermission &&
+            (actionType === "follow" || actionType === "all")
+          ) {
+            try {
+              const followResponse = await fetch(
+                `${NEYNAR_API_URL}/farcaster/user/follow`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    api_key: NEYNAR_API_KEY,
+                  },
+                  body: JSON.stringify({
+                    signer_uuid: signer.signer_uuid,
+                    target_fids: [targetFid],
+                  }),
+                }
+              );
+
+              if (!followResponse.ok) {
+                const error = await followResponse.json();
+                console.error(`Failed to follow for FID ${signer.fid}:`, error);
+                results.errors.push(
+                  `Follow failed for FID ${signer.fid}: ${
+                    error.message || "Unknown error"
+                  }`
+                );
+                results.details.push({
+                  fid: signer.fid,
+                  action: "follow",
+                  success: false,
+                  error: error.message || "Unknown error",
+                });
+              } else {
+                console.log(`Successfully followed for FID ${signer.fid}`);
+                results.details.push({
+                  fid: signer.fid,
+                  action: "follow",
+                  success: true,
+                });
+                actionSucceeded = true;
+              }
+            } catch (followError) {
+              console.error(
+                `Error following for FID ${signer.fid}:`,
+                followError
+              );
+              results.errors.push(
+                `Follow error for FID ${signer.fid}: ${followError}`
+              );
+              results.details.push({
+                fid: signer.fid,
+                action: "follow",
+                success: false,
+                error: String(followError),
+              });
+            }
+          } else if (actionType === "follow" || actionType === "all") {
+            results.details.push({
+              fid: signer.fid,
+              action: "follow",
+              success: false,
+              error: "No follow permission",
+            });
+          }
+
+          if (actionSucceeded) {
+            results.successful++;
+          } else {
+            results.failed++;
+          }
+        } catch (signerError) {
+          console.error(
+            `Error processing signer FID ${signer.fid}:`,
+            signerError
+          );
+          results.failed++;
+          results.errors.push(
+            `Processing error for FID ${signer.fid}: ${signerError}`
+          );
+          results.details.push({
+            fid: signer.fid,
+            action: "processing",
+            success: false,
+            error: String(signerError),
+          });
+        }
+      }
+    }
+
+    // Log the test activity
+    const { error: logError } = await supabase
+      .from("auto_engagement_logs")
+      .insert({
+        cast_hash: castHash,
+        cast_url: `https://warpcast.com/~/conversations/${castHash}`,
+        total_signers: results.total,
+        successful: results.successful,
+        failed: results.failed,
+        errors: results.errors.length > 0 ? results.errors : null,
+        processed_at: new Date().toISOString(),
       });
+
+    if (logError) {
+      console.error("Error logging test activity:", logError);
     }
 
     return NextResponse.json({
@@ -673,9 +887,9 @@ export async function POST(request: NextRequest) {
       details: JSON.stringify(results.details, null, 2),
     });
   } catch (error) {
-    console.error('Error in test-likes-recasts API:', error);
+    console.error("Error in test-likes-recasts API:", error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }

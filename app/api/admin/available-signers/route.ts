@@ -7,26 +7,6 @@ const redis = new Redis({
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-// Setup Supabase clients
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-
-// Use service role key for database operations in API routes (bypasses RLS)
-const supabase = createClient(
-  supabaseUrl,
-  supabaseServiceKey || supabaseAnonKey
-);
-
-// If we don't have service key, log a warning
-if (!supabaseServiceKey) {
-  console.warn(
-    'SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database reads may fail due to RLS'
-  );
-}
-
-import { isAdminAddress } from '@/lib/constants';
-
 interface Signer {
   fid: number;
   signer_uuid: string;
@@ -54,21 +34,38 @@ interface BatchState {
   };
 }
 
+// Setup Supabase clients
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+
+// Use service role key for database operations in API routes (bypasses RLS)
+const supabase = createClient(supabaseUrl, supabaseServiceKey || supabaseAnonKey);
+
+// If we don't have service key, log a warning
+if (!supabaseServiceKey) {
+  console.warn('SUPABASE_SERVICE_ROLE_KEY not found, falling back to anon key - database reads may fail due to RLS');
+}
+
+import { isAdminAddress } from '@/lib/constants';
+
 export async function GET(request: NextRequest) {
   try {
     // Check authorization
     const authHeader = request.headers.get('authorization');
     const address = authHeader?.replace('Bearer ', '');
-
+    
     if (!address || !isAdminAddress(address)) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      );
     }
 
     // Fetch all approved signers with updated metrics
     const { data: signers, error } = await supabase
       .from('neynar_signers_updated')
-      .select(
-        `
+      .select(`
         fid, 
         permissions, 
         status, 
@@ -83,11 +80,10 @@ export async function GET(request: NextRequest) {
         bio,
         verified_accounts,
         last_updated_at
-      `
-      )
+      `)
       .eq('status', 'approved')
       .limit(10000)
-      .order('follower_count', { ascending: false });
+      .order('follower_count', { ascending: false, nullsFirst: false });
 
     if (error) {
       console.error('Error fetching signers:', error);
@@ -96,39 +92,25 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     }
-    const keys: string[] = await redis.keys('likes-recasts-batch:*');
 
-
-    let cronKeys: {
-      key: string;
-      total: number;
-      completed: number;
-      successful: number;
-      failed: number;
-      
-    }[] = [];
-
-    if (keys.length > 0) {
-      for (const batchKey of keys as string[]) {
-        const state: BatchState|null = await redis.get(batchKey);
-        if (state) {
-          cronKeys.push({
-            key: batchKey,
-            total: state.signers.length,
-            completed: state.currentIndex,
-            successful: state.results.successful,
-            failed: state.results.failed,
-          });
-        }
+    // Check for any active batch operations
+    const batchKeys = await redis.keys('batch:*');
+    const activeBatches: BatchState[] = [];
+    
+    for (const key of batchKeys) {
+      const batchData = await redis.get<BatchState>(key);
+      if (batchData) {
+        activeBatches.push(batchData);
       }
     }
 
     return NextResponse.json({
       success: true,
-      cronKeys,
       signers: signers || [],
       count: signers?.length || 0,
+      activeBatches: activeBatches.length > 0 ? activeBatches : undefined
     });
+
   } catch (error) {
     console.error('Error in available-signers API:', error);
     return NextResponse.json(
@@ -136,4 +118,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+} 

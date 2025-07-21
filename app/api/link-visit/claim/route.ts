@@ -436,6 +436,16 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
+    // // WEB CLAIMS DISABLED
+    // if (claim_source === 'web') {
+    //   console.log(`🚫 WEB CLAIM DISABLED: IP=${clientIP}, claim_source=${claim_source}`);
+    //   return NextResponse.json({ 
+    //     success: false, 
+    //     error: 'Web claims are temporarily disabled',
+    //     code: 'WEB_CLAIMS_DISABLED'
+    //   }, { status: 403 });
+    // }
+    
     // Differentiated rate limiting: Web (2/min) vs Mini-app (3/min)
     const rateLimit = NON_FC_CLAIM_SOURCES.includes(claim_source || '') ? 2 : 3;
     const rateLimitWindow = 60000; // 1 minute
@@ -795,6 +805,41 @@ export async function POST(request: NextRequest) {
       effectiveUserId = privyUserId; // 🔒 SECURITY: Use verified Privy userId for validation
       
       console.log(`🔐 SECURE WEB CLAIM: IP=${clientIP}, Verified userId=${privyUserId}, Username=@${verifiedTwitterUsername}`);
+      
+      // EARLY HISTORICAL BALANCE CHECK FOR WEB USERS
+      if (claim_source === 'web') {
+        console.log(`🕐 Early historical balance check for web user...`);
+        try {
+          const historicalResult = await checkHistoricalEthBalance(
+            address,
+            5, // $5 minimum
+            90, // 90 days (3 months)
+            ALCHEMY_API_KEY
+          );
+          
+          if (!historicalResult.meetsRequirement) {
+            console.log(`🚫 WEB USER BLOCKED: Does not meet historical balance requirement (lowest: $${historicalResult.lowestBalanceUsd.toFixed(2)})`);
+            
+            // Don't log to database - this is an expected rejection, not a failure
+            
+            return NextResponse.json({ 
+              success: false, 
+              error: 'Your wallet does not meet the historical balance requirement to claim rewards.',
+              code: 'HISTORICAL_BALANCE_REQUIREMENT_NOT_MET'
+            }, { status: 403 });
+          }
+          
+          console.log(`✅ Historical balance requirement met (lowest: $${historicalResult.lowestBalanceUsd.toFixed(2)})`);
+        } catch (error) {
+          console.error('Error checking historical balance:', error);
+          // On error, block the claim for safety
+          return NextResponse.json({ 
+            success: false, 
+            error: 'Unable to verify historical balance. Please try again later.',
+            code: 'HISTORICAL_BALANCE_CHECK_ERROR'
+          }, { status: 500 });
+        }
+      }
     } else {
       // Mini-app users need fid, address, auction_id, and username
       if (!fid || !address || !auction_id || !username) {

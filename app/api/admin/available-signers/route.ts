@@ -94,13 +94,27 @@ export async function GET(request: NextRequest) {
     }
 
     // Check for any active batch operations
-    const batchKeys = await redis.keys('batch:*');
+    const batchKeys = await redis.keys('likes-recasts-batch:*');
     const activeBatches: BatchState[] = [];
+    const cronKeys: {
+      key: string;
+      total: number;
+      completed: number;
+      successful: number;
+      failed: number;
+    }[] = [];
     
     for (const key of batchKeys) {
       const batchData = await redis.get<BatchState>(key);
       if (batchData) {
         activeBatches.push(batchData);
+        cronKeys.push({
+          key: key,
+          total: batchData.signers.length,
+          completed: batchData.currentIndex,
+          successful: batchData.results.successful,
+          failed: batchData.results.failed,
+        });
       }
     }
 
@@ -108,7 +122,8 @@ export async function GET(request: NextRequest) {
       success: true,
       signers: signers || [],
       count: signers?.length || 0,
-      activeBatches: activeBatches.length > 0 ? activeBatches : undefined
+      activeBatches: activeBatches.length > 0 ? activeBatches : undefined,
+      cronKeys
     });
 
   } catch (error) {

@@ -19,6 +19,29 @@ if (!supabaseServiceKey) {
 
 import { isAdminAddress } from "@/lib/constants";
 
+interface NeynarUser {
+  fid: number;
+  follower_count?: number;
+  following_count?: number;
+  experimental?: {
+    neynar_user_score?: number;
+  };
+  power_badge?: boolean;
+  username?: string;
+  display_name?: string;
+  pfp_url?: string;
+  bio?: string;
+  profile?: {
+    bio?: {
+      text?: string;
+    };
+  };
+  verified_accounts?: Array<{
+    platform: string;
+    username: string;
+  }>;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Check authorization
@@ -81,7 +104,7 @@ export async function POST(request: NextRequest) {
     }
 
     const fidChunks = chunkArray(fids, 100);
-    const allResults: any[] = [];
+    const allResults: NeynarUser[] = [];
     for (const chunk of fidChunks) {
       // Convert chunk to comma-separated string
       const fidsString = chunk.join(",");
@@ -103,11 +126,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Only keep fid, follower_count, following_count, neynar_score
-    const filteredResults = allResults.map((user: any) => ({
+    const filteredResults = allResults.map((user: NeynarUser) => ({
       fid: user.fid,
       follower_count: user.follower_count,
       following_count: user.following_count,
-      neynar_score: user.score,
+      neynar_score: user.experimental?.neynar_user_score,
     }));
 
     // Update Supabase for each user

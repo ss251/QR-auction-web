@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Redis } from "@upstash/redis";
 
@@ -54,8 +54,7 @@ function sleep(ms: number) {
 
 // Helper to process a single signer (like/recast/follow)
 async function processSigner(signer: Signer, state: BatchState) {
-  const { castHash, actionType, targetFid, results } = state;
-  let actionSucceeded = false;
+  const { castHash, actionType, results } = state;
   // Like
   if (
     signer.permissions.includes("like") &&
@@ -96,7 +95,6 @@ async function processSigner(signer: Signer, state: BatchState) {
           success: true,
         });
         results.successful++;
-        actionSucceeded = true;
       }
     } catch (likeError) {
       results.errors.push(`Like error for FID ${signer.fid}: ${likeError}`);
@@ -164,7 +162,6 @@ async function processSigner(signer: Signer, state: BatchState) {
           success: true,
         });
         results.successful++;
-        actionSucceeded = true;
       }
     } catch (recastError) {
       results.errors.push(`Recast error for FID ${signer.fid}: ${recastError}`);
@@ -188,13 +185,13 @@ async function processSigner(signer: Signer, state: BatchState) {
 }
 
 // The cron job handler
-export async function GET(request: NextRequest) {
+export async function GET() {
   // Process all batches (support multiple in parallel)
   const keys: string[] = await redis.keys("likes-recasts-batch:*");
   if (keys.length === 0) {
     return NextResponse.json({ message: "No batch in progress" });
   }
-  let responses: Array<{ batchKey: string; message: string; results?: any }> =
+  const responses: Array<{ batchKey: string; message: string; results?: BatchState['results'] }> =
     [];
   for (const batchKey of keys as string[]) {
     const state: BatchState | null = await redis.get(batchKey);

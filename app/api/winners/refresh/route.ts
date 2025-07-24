@@ -26,7 +26,7 @@ export async function GET() {
 
 		const farcasterUsername = data.username;
 		const displayName = data.displayName;
-		const twitterUsername = data.accounts.find((account: any) => account.platform === 'x')?.username;
+		const twitterUsername = data.accounts.find((account) => account.platform === 'x')?.username;
 		
 		const updatedData: Record<string, string> = {};
 		
@@ -49,7 +49,7 @@ export async function GET() {
 			.update(updatedData)
 			.eq('token_id', winner.token_id);
 	}
-  } catch (error) {
+  } catch {
     return Response.json({ error: 'Failed to refresh winners' }, { status: 500 });
   }
 }

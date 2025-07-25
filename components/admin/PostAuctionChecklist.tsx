@@ -265,6 +265,8 @@ export function PostAuctionChecklist() {
       const currentOverride = await getAuctionImage(auctionId);
       const isVideo = await isAuctionImageVideo(auctionId);
 
+      console.log("currentOverride", currentOverride);
+
       setCurrentImageOverride(currentOverride);
       setIsCurrentOverrideVideo(isVideo);
 
